@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import { Tour, Scene, Hotspot } from '@/types/tour';
 import { calculateVisibleTiles, getAppropriateLevel } from '@/lib/multires-utils';
@@ -34,7 +34,7 @@ const PICKING_SPHERE = new THREE.Sphere(new THREE.Vector3(), SPHERE_RADIUS);
 function useHotspotUpdater(
   hotspots: Hotspot[],
   currentSceneId: string,
-  hotspotsGroupRef: React.MutableRefObject<THREE.Group | null>,
+  hotspotsGroupRef: MutableRefObject<THREE.Group | null>,
 ) {
   return useCallback(() => {
     const group = hotspotsGroupRef.current;
@@ -58,11 +58,11 @@ function useHotspotUpdater(
 }
 
 function usePreviewLoader(
-  manifestRef: React.MutableRefObject<ExtendedManifest | null>,
-  currentSceneRef: React.MutableRefObject<Scene | null>,
-  textureLoaderRef: React.MutableRefObject<THREE.TextureLoader | null>,
-  previewMeshRef: React.MutableRefObject<THREE.Mesh | null>,
-  sceneRef: React.MutableRefObject<THREE.Scene | null>,
+  manifestRef: MutableRefObject<ExtendedManifest | null>,
+  currentSceneRef: MutableRefObject<Scene | null>,
+  textureLoaderRef: MutableRefObject<THREE.TextureLoader | null>,
+  previewMeshRef: MutableRefObject<THREE.Mesh | null>,
+  sceneRef: MutableRefObject<THREE.Scene | null>,
 ) {
   return useCallback(() => {
     const manifest = manifestRef.current;
@@ -189,6 +189,57 @@ export default function MultiresViewer({
     sceneRef,
   );
 
+const removeOverlappingTiles = useCallback((level: number, col: number, row: number) => {
+    const manifestSnapshot = manifestRef.current;
+    if (!manifestSnapshot) return;
+
+    const targetLevelInfo = manifestSnapshot.levels[level];
+    if (!targetLevelInfo) return;
+
+    const targetCols = targetLevelInfo.cols || targetLevelInfo.tilesX || 1;
+    const targetRows = targetLevelInfo.rows || targetLevelInfo.tilesY || 1;
+
+    tileCacheRef.current.forEach((entry, key) => {
+      if (entry.level === level && entry.col === col && entry.row === row && entry.sceneId === currentSceneIdRef.current) {
+        return;
+      }
+
+      const entryLevelInfo = manifestSnapshot.levels[entry.level];
+      if (!entryLevelInfo) return;
+
+      const entryCols = entryLevelInfo.cols || entryLevelInfo.tilesX || 1;
+      const entryRows = entryLevelInfo.rows || entryLevelInfo.tilesY || 1;
+
+      if (entry.level < level) {
+        const colScale = targetCols / entryCols;
+        const rowScale = targetRows / entryRows;
+        if (!Number.isFinite(colScale) || !Number.isFinite(rowScale) || colScale <= 0 || rowScale <= 0) {
+          return;
+        }
+        const parentCol = Math.floor(col / colScale);
+        const parentRow = Math.floor(row / rowScale);
+        if (entry.col === parentCol && entry.row === parentRow) {
+          disposeTileEntry(entry);
+          tileCacheRef.current.delete(key);
+        }
+        return;
+      }
+
+      if (entry.level > level) {
+        const colScale = (entryCols / targetCols) || 1;
+        const rowScale = (entryRows / targetRows) || 1;
+        const childColStart = Math.floor(col * colScale);
+        const childColEnd = Math.ceil((col + 1) * colScale);
+        const childRowStart = Math.floor(row * rowScale);
+        const childRowEnd = Math.ceil((row + 1) * rowScale);
+        if (entry.col >= childColStart && entry.col < childColEnd && entry.row >= childRowStart && entry.row < childRowEnd) {
+          disposeTileEntry(entry);
+          tileCacheRef.current.delete(key);
+        }
+      }
+    });
+  }, []);
+
   useEffect(() => {
     THREE.Cache.enabled = true;
     return () => {
@@ -244,9 +295,16 @@ export default function MultiresViewer({
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.wrapS = THREE.ClampToEdgeWrapping;
         texture.wrapT = THREE.ClampToEdgeWrapping;
-        texture.minFilter = THREE.LinearFilter;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
         texture.magFilter = THREE.LinearFilter;
-        texture.generateMipmaps = false;
+        texture.generateMipmaps = true;
+        const renderer = rendererRef.current;
+        if (renderer) {
+          const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+          texture.anisotropy = Math.min(8, maxAnisotropy);
+        } else {
+          texture.anisotropy = 4;
+        }
 
         const geometryKey = `${manifestSnapshot.overlap ?? 0}:${request.level}:${request.col}:${request.row}`;
         const cachedGeometry = geometryCacheRef.current.get(geometryKey);
@@ -286,7 +344,9 @@ export default function MultiresViewer({
           lastUsed: performance.now(),
         });
 
-        if (previewMeshRef.current && request.level === manifestSnapshot.levels.length - 1) {
+        removeOverlappingTiles(request.level, request.col, request.row);
+
+        if (previewMeshRef.current) {
           previewMeshRef.current.visible = false;
         }
 
@@ -382,9 +442,11 @@ export default function MultiresViewer({
       if (keep.has(key)) {
         entry.lastUsed = now;
         entry.pendingRemovalAt = undefined;
-        entry.mesh.visible = true;
+        entry.mesh.visible = entry.level <= levelIndex;
         return;
       }
+
+      entry.mesh.visible = entry.level <= levelIndex;
 
       if (!entry.pendingRemovalAt) {
         entry.pendingRemovalAt = now;
@@ -424,6 +486,8 @@ export default function MultiresViewer({
       0.5,
       2000,
     );
+    camera.lookAt(yawPitchToVector(controlsRef.current.yaw, controlsRef.current.pitch, 1));
+    camera.updateProjectionMatrix();
     scene.add(camera);
     cameraRef.current = camera;
 
