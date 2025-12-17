@@ -42,9 +42,17 @@ export default function VirtualTourViewer({
 
   // Check if scene has multiresolution tiles
   const hasMultires = Boolean(currentScene.tiles_manifest);
+  
+  console.log('[VirtualTourViewer] Scene check:', {
+    sceneId: currentScene.id,
+    hasMultires,
+    tiles_manifest: currentScene.tiles_manifest,
+    src_original_url: currentScene.src_original_url
+  });
 
   // If multiresolution tiles are available, use the MultiresViewer
   if (hasMultires) {
+    console.log('[VirtualTourViewer] Using TourEditor/MultiresViewer for tiles');
     return <TourEditor 
       tour={tour} 
       scenes={scenes}
@@ -238,8 +246,8 @@ export default function VirtualTourViewer({
     function onMouseMove(event: MouseEvent) {
       if (!mouseDown.current) return;
       
-      lon.current += (event.clientX - mouseX.current) * 0.3;
-      lat.current -= (event.clientY - mouseY.current) * 0.3;
+      lon.current += (event.clientX - mouseX.current) * 0.15;  // Reduced from 0.3 to 0.15
+      lat.current -= (event.clientY - mouseY.current) * 0.15;  // Reduced from 0.3 to 0.15
       
       mouseX.current = event.clientX;
       mouseY.current = event.clientY;
@@ -271,8 +279,8 @@ export default function VirtualTourViewer({
       event.preventDefault();
       
       const touch = event.touches[0];
-      lon.current += (touch.clientX - mouseX.current) * 0.3;
-      lat.current -= (touch.clientY - mouseY.current) * 0.3;
+      lon.current += (touch.clientX - mouseX.current) * 0.15;  // Reduced from 0.3 to 0.15
+      lat.current -= (touch.clientY - mouseY.current) * 0.15;  // Reduced from 0.3 to 0.15
       
       mouseX.current = touch.clientX;
       mouseY.current = touch.clientY;
@@ -411,7 +419,7 @@ export default function VirtualTourViewer({
   };
 
   return (
-    <div className="relative w-full h-full bg-black">
+    <div className="absolute inset-0 bg-black">
       <div
         ref={containerRef}
         className="relative w-full h-full"

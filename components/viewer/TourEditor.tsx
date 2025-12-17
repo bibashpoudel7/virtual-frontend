@@ -19,6 +19,8 @@ export default function TourEditor({ tour, scenes }: TourEditorProps) {
   const [selectedTargetScene, setSelectedTargetScene] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editPanel, setEditPanel] = useState<'hotspots' | 'overlays' | null>('hotspots');
+  const [hotspotType, setHotspotType] = useState<'navigation' | 'info' | 'link'>('navigation');
 
   const currentScene = scenes.find(s => s.id === currentSceneId) || scenes[0];
 
@@ -166,7 +168,7 @@ export default function TourEditor({ tour, scenes }: TourEditorProps) {
   }, [hotspots, tour.id, currentSceneId]);
 
   return (
-    <div className="relative w-full h-full">
+    <div className="absolute inset-0">
       <MultiresViewer
         tour={tour}
         currentScene={currentScene}
@@ -179,33 +181,128 @@ export default function TourEditor({ tour, scenes }: TourEditorProps) {
         hotspots={hotspots}
       />
 
-      {/* Edit mode toggle */}
+      {/* Edit Controls Panel */}
       <div className="absolute bottom-4 left-4 z-30">
-        <button
-          onClick={() => setIsEditMode(!isEditMode)}
-          className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-            isEditMode 
-              ? 'bg-green-600 text-white hover:bg-green-700' 
-              : 'bg-gray-800 text-white hover:bg-gray-700'
-          }`}
-        >
-          {isEditMode ? '✓ Edit Mode' : '✎ Edit Mode'}
-        </button>
+        <div className="bg-white rounded-lg shadow-xl p-4" style={{ width: '320px' }}>
+          {/* Edit Mode Toggle */}
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Editor Controls</h3>
+            <button
+              onClick={() => setIsEditMode(!isEditMode)}
+              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                isEditMode 
+                  ? 'bg-green-600 text-white' 
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              {isEditMode ? 'ON' : 'OFF'}
+            </button>
+          </div>
+
+          {isEditMode && (
+            <>
+              {/* Edit Type Selector */}
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => setEditPanel('hotspots')}
+                  className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                    editPanel === 'hotspots'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Hotspots
+                </button>
+                <button
+                  onClick={() => setEditPanel('overlays')}
+                  className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                    editPanel === 'overlays'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Overlays
+                </button>
+              </div>
+
+              {/* Instructions */}
+              <div className="bg-blue-50 border border-blue-200 rounded p-3 mb-4">
+                <p className="text-sm text-blue-800">
+                  <strong>How to add {editPanel}:</strong><br />
+                  Hold <kbd className="px-1 py-0.5 bg-white rounded border">Shift</kbd> + Click on the panorama
+                </p>
+              </div>
+
+              {/* Hotspots List */}
+              {editPanel === 'hotspots' && (
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">Current Hotspots ({hotspots.filter(h => h.scene_id === currentSceneId).length})</h4>
+                  <div className="max-h-32 overflow-y-auto space-y-1">
+                    {hotspots
+                      .filter(h => h.scene_id === currentSceneId)
+                      .map(hotspot => {
+                        const targetScene = scenes.find(s => {
+                          try {
+                            const payload = JSON.parse(hotspot.payload || '{}');
+                            return s.id === payload.targetSceneId;
+                          } catch {
+                            return false;
+                          }
+                        });
+                        return (
+                          <div key={hotspot.id} className="flex items-center justify-between p-2 bg-gray-50 rounded text-sm">
+                            <span className="truncate">
+                              {hotspot.kind === 'navigation' && '🔄'}
+                              {hotspot.kind === 'info' && 'ℹ️'}
+                              {hotspot.kind === 'link' && '🔗'}
+                              {' '}{targetScene?.name || hotspot.kind}
+                            </span>
+                            {hotspot?.id && (
+                              <button
+                                onClick={() => deleteHotspot(hotspot.id ?? '')}
+                                className="text-red-500 hover:text-red-700"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    {hotspots.filter(h => h.scene_id === currentSceneId).length === 0 && (
+                      <p className="text-gray-500 text-sm italic">No hotspots yet</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Overlays List */}
+              {editPanel === 'overlays' && (
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">Current Overlays</h4>
+                  <p className="text-gray-500 text-sm italic">Overlay feature coming soon...</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Scene selector */}
-      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-30">
-        <select
-          value={currentSceneId}
-          onChange={(e) => handleSceneChange(e.target.value)}
-          className="px-4 py-2 bg-black bg-opacity-75 text-white rounded-lg border border-gray-600"
-        >
-          {scenes.map(scene => (
-            <option key={scene.id} value={scene.id}>
-              {scene.name}
-            </option>
-          ))}
-        </select>
+      <div className="absolute top-4 right-4 z-30">
+        <div className="bg-white rounded-lg shadow-lg p-3">
+          <label className="text-xs font-medium text-gray-600 block mb-1">Current Scene</label>
+          <select
+            value={currentSceneId}
+            onChange={(e) => handleSceneChange(e.target.value)}
+            className="px-3 py-2 bg-gray-50 text-gray-900 rounded border border-gray-200 font-medium"
+          >
+            {scenes.map(scene => (
+              <option key={scene.id} value={scene.id}>
+                {scene.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Remove loading overlay for seamless transitions */}
@@ -230,38 +327,105 @@ export default function TourEditor({ tour, scenes }: TourEditorProps) {
       {showHotspotDialog && (
         <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-bold mb-4">Create Navigation Hotspot</h3>
+            <h3 className="text-lg font-bold mb-4">Create Hotspot</h3>
             
+            {/* Hotspot Type Selector */}
             <div className="mb-4">
               <label className="block text-sm font-medium mb-2">
-                Target Scene
+                Hotspot Type
               </label>
-              <select
-                value={selectedTargetScene}
-                onChange={(e) => setSelectedTargetScene(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-              >
-                <option value="">Select a scene...</option>
-                {scenes
-                  .filter(s => s.id !== currentSceneId)
-                  .map(scene => (
-                    <option key={scene.id} value={scene.id}>
-                      {scene.name}
-                    </option>
-                  ))}
-              </select>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => setHotspotType('navigation')}
+                  className={`px-3 py-2 rounded border text-sm font-medium transition-colors ${
+                    hotspotType === 'navigation'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  🔄 Navigation
+                </button>
+                <button
+                  onClick={() => setHotspotType('info')}
+                  className={`px-3 py-2 rounded border text-sm font-medium transition-colors ${
+                    hotspotType === 'info'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  ℹ️ Info
+                </button>
+                <button
+                  onClick={() => setHotspotType('link')}
+                  className={`px-3 py-2 rounded border text-sm font-medium transition-colors ${
+                    hotspotType === 'link'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  🔗 Link
+                </button>
+              </div>
             </div>
+
+            {/* Dynamic content based on type */}
+            {hotspotType === 'navigation' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">
+                  Target Scene
+                </label>
+                <select
+                  value={selectedTargetScene}
+                  onChange={(e) => setSelectedTargetScene(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">Select a scene...</option>
+                  {scenes
+                    .filter(s => s.id !== currentSceneId)
+                    .map(scene => (
+                      <option key={scene.id} value={scene.id}>
+                        {scene.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+
+            {hotspotType === 'info' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">
+                  Information Text
+                </label>
+                <textarea
+                  placeholder="Enter information to display..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg h-24 resize-none"
+                />
+              </div>
+            )}
+
+            {hotspotType === 'link' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">
+                  External URL
+                </label>
+                <input
+                  type="url"
+                  placeholder="https://example.com"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+            )}
 
             <div className="mb-4 p-3 bg-gray-100 rounded">
               <p className="text-sm">
-                Position: Yaw {pendingHotspot?.yaw.toFixed(1)}°, Pitch {pendingHotspot?.pitch.toFixed(1)}°
+                <strong>Position:</strong> Yaw {pendingHotspot?.yaw.toFixed(1)}°, Pitch {pendingHotspot?.pitch.toFixed(1)}°
               </p>
             </div>
 
             <div className="flex gap-2">
               <button
                 onClick={createHotspot}
-                disabled={!selectedTargetScene}
+                disabled={hotspotType === 'navigation' && !selectedTargetScene}
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Create Hotspot
@@ -271,6 +435,7 @@ export default function TourEditor({ tour, scenes }: TourEditorProps) {
                   setShowHotspotDialog(false);
                   setPendingHotspot(null);
                   setSelectedTargetScene('');
+                  setHotspotType('navigation');
                 }}
                 className="flex-1 px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400"
               >
@@ -281,40 +446,6 @@ export default function TourEditor({ tour, scenes }: TourEditorProps) {
         </div>
       )}
 
-      {/* Hotspot list */}
-      {isEditMode && hotspots.length > 0 && (
-        <div className="absolute bottom-20 left-4 bg-black bg-opacity-75 text-white p-4 rounded-lg z-30 max-h-48 overflow-y-auto">
-          <h4 className="font-bold mb-2">Hotspots in this scene</h4>
-          <div className="space-y-2">
-            {hotspots
-              .filter(h => h.scene_id === currentSceneId)
-              .map(hotspot => {
-                const targetScene = scenes.find(s => {
-                  try {
-                    const payload = JSON.parse(hotspot.payload || '{}');
-                    return s.id === payload.targetSceneId;
-                  } catch {
-                    return false;
-                  }
-                });
-                
-                return (
-                  <div key={hotspot.id} className="flex items-center justify-between text-sm">
-                    <span>→ {targetScene?.name || 'Unknown'}</span>
-                   {
-                     hotspot?.id !== undefined && <button
-                     onClick={() => deleteHotspot(hotspot.id?? '')}
-                     className="ml-2 text-red-400 hover:text-red-300"
-                   >
-                     ✕
-                   </button>
-                   }
-                  </div>
-                );
-              })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

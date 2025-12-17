@@ -34,15 +34,26 @@ function normalizeLevelsFromTiles(tiles: any[], tileSize: number): TileLevel[] {
 
 export function parseSceneManifest(scene: Scene): ExtendedManifest | null {
   const raw = scene.tiles_manifest;
+  console.log('[parseSceneManifest] Raw tiles_manifest:', raw);
+  
   if (!raw) {
+    console.log('[parseSceneManifest] No tiles_manifest found');
     return null;
   }
 
   let manifestLike: any;
   try {
-    manifestLike = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    // If it's already a string but might be double-encoded
+    if (typeof raw === 'string' && raw.startsWith('"')) {
+      // Double-encoded JSON string - parse twice
+      const firstParse = JSON.parse(raw);
+      manifestLike = typeof firstParse === 'string' ? JSON.parse(firstParse) : firstParse;
+    } else {
+      manifestLike = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    }
+    console.log('[parseSceneManifest] Parsed manifest:', manifestLike);
   } catch (error) {
-    console.warn('Failed to parse tiles_manifest', error);
+    console.error('[parseSceneManifest] Failed to parse tiles_manifest:', error, 'Raw value:', raw);
     return null;
   }
 
@@ -106,9 +117,12 @@ export function buildTileUrl(
 
   if (tileEntry?.url) {
     if (/^https?:\/\//i.test(tileEntry.url)) {
+      console.log('[buildTileUrl] Using absolute URL from tile entry:', tileEntry.url);
       return tileEntry.url;
     }
-    return new URL(tileEntry.url, window.location.origin).toString();
+    const url = new URL(tileEntry.url, window.location.origin).toString();
+    console.log('[buildTileUrl] Using relative URL from tile entry:', url);
+    return url;
   }
 
   let baseFromPreview: string | undefined;
@@ -121,5 +135,16 @@ export function buildTileUrl(
 
   const normalizedBase = (manifest.basePath ?? baseFromPreview ?? `${window.location.origin}/scenes/${sceneId}/tiles`).replace(/\/$/, '');
   const extension = manifest.format ?? 'jpg';
-  return `${normalizedBase}/l${level}_${row}_${col}.${extension}`;
+  const url = `${normalizedBase}/l${level}_${row}_${col}.${extension}`;
+  
+  console.log('[buildTileUrl] Constructed URL:', {
+    basePath: normalizedBase,
+    level,
+    row,
+    col,
+    extension,
+    finalUrl: url
+  });
+  
+  return url;
 }

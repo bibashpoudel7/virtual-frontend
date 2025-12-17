@@ -7,6 +7,9 @@ export function getTileKey(sceneId: string, level: number, col: number, row: num
 }
 
 export function yawPitchToVector(yaw: number, pitch: number, radius: number = SPHERE_RADIUS): THREE.Vector3 {
+  // Convert yaw and pitch to spherical coordinates
+  // Yaw: horizontal rotation (0 = front, positive = right)
+  // Pitch: vertical rotation (0 = horizon, positive = up)
   const phi = THREE.MathUtils.degToRad(90 - pitch);
   const theta = THREE.MathUtils.degToRad(yaw + 180);
   const x = radius * Math.sin(phi) * Math.cos(theta);
@@ -17,7 +20,7 @@ export function yawPitchToVector(yaw: number, pitch: number, radius: number = SP
 
 export function vectorToYawPitch(vector: THREE.Vector3): { yaw: number; pitch: number } {
   const normalized = vector.clone().normalize();
-  const yaw = THREE.MathUtils.radToDeg(Math.atan2(normalized.z, normalized.x));
+  const yaw = THREE.MathUtils.radToDeg(Math.atan2(normalized.z, normalized.x)) - 180;
   const pitch = THREE.MathUtils.radToDeg(Math.asin(normalized.y));
   return { yaw, pitch };
 }
@@ -28,15 +31,21 @@ export function createTileGeometry(
   row: number,
   overlapPx = 0,
 ): THREE.BufferGeometry {
-  const tilePhi = (Math.PI * 2) / Math.max(1, levelInfo.cols || levelInfo.tilesX || 1);
-  const tileTheta = Math.PI / Math.max(1, levelInfo.rows || levelInfo.tilesY || 1);
+  const cols = levelInfo.cols || levelInfo.tilesX || 1;
+  const rows = levelInfo.rows || levelInfo.tilesY || 1;
+  
+  const tilePhi = (Math.PI * 2) / cols;
+  const tileTheta = Math.PI / rows;
 
-  const tileSize = levelInfo.tileSize || levelInfo.width / Math.max(1, levelInfo.cols);
+  const tileSize = levelInfo.tileSize || levelInfo.width / cols;
   const overlapRatio = overlapPx > 0 && tileSize > 0 ? overlapPx / tileSize : 0.002;
 
   const phiOverlap = tilePhi * overlapRatio;
   const thetaOverlap = tileTheta * overlapRatio;
 
+  // Correct phi calculation - tiles go from left to right in texture
+  // But sphere phi goes counterclockwise from +X axis
+  // We need to map texture columns correctly
   let phiStart = col * tilePhi - phiOverlap;
   let phiLength = tilePhi + phiOverlap * 2;
   const fullPhi = Math.PI * 2;
@@ -74,5 +83,17 @@ export function createTileGeometry(
     thetaLength,
   );
   geometry.scale(-1, 1, 1);
+  
+  console.log('[createTileGeometry] Created tile geometry:', {
+    col,
+    row,
+    phiStart,
+    phiLength,
+    thetaStart,
+    thetaLength,
+    radius: SPHERE_RADIUS,
+    segments: { width: widthSegments, height: heightSegments }
+  });
+  
   return geometry;
 }

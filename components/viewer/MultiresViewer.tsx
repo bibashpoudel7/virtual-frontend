@@ -103,7 +103,12 @@ function usePreviewLoader(
         if (!previewMeshRef.current) {
           const geometry = new THREE.SphereGeometry(SPHERE_RADIUS, 64, 32);
           geometry.scale(-1, 1, 1);
-          const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide });
+          const material = new THREE.MeshBasicMaterial({ 
+            map: texture, 
+            side: THREE.BackSide,
+            transparent: true,
+            opacity: 1.0
+          });
           const mesh = new THREE.Mesh(geometry, material);
           mesh.renderOrder = -1000;
           mesh.frustumCulled = false;
@@ -113,6 +118,8 @@ function usePreviewLoader(
           const material = previewMeshRef.current.material as THREE.MeshBasicMaterial;
           material.map?.dispose();
           material.map = texture;
+          material.transparent = true;
+          material.opacity = 1.0;
           material.needsUpdate = true;
           previewMeshRef.current.visible = true;
         }
@@ -150,6 +157,18 @@ export default function MultiresViewer({
   const tileCacheRef = useRef<Map<string, TileEntry>>(new Map());
   const geometryCacheRef = useRef<Map<string, THREE.BufferGeometry>>(new Map());
   const tileQueueRef = useRef<TileRequest[]>([]);
+  const transitionRef = useRef({
+    targetSceneId: null as string | null,
+    startTime: 0,
+    duration: 600,
+    startYaw: 0,
+    startPitch: 0,
+    endYaw: 0,
+    endPitch: 0,
+    startFov: 75,
+    endFov: 75,
+  });
+
   const pendingSetRef = useRef<Set<string>>(new Set());
   const activeLoadsRef = useRef(0);
 
@@ -179,7 +198,11 @@ export default function MultiresViewer({
     pointerActive: false,
   });
 
-  const manifest = useMemo(() => parseSceneManifest(currentScene), [currentScene]);
+  const manifest = useMemo(() => {
+    const parsed = parseSceneManifest(currentScene);
+    console.log('[MultiresViewer] Parsed manifest for scene:', currentScene.id, parsed);
+    return parsed;
+  }, [currentScene]);
   const updateHotspots = useHotspotUpdater(hotspots, currentScene.id, hotspotsGroupRef);
   const loadPreviewTexture = usePreviewLoader(
     manifestRef,
@@ -189,7 +212,65 @@ export default function MultiresViewer({
     sceneRef,
   );
 
-const removeOverlappingTiles = useCallback((level: number, col: number, row: number) => {
+  const startSceneTransition = useCallback((hotspot: Hotspot) => {
+    const controls = controlsRef.current;
+    let targetSceneId = hotspot.target_scene_id || null;
+    if (!targetSceneId && hotspot.payload) {
+      try {
+        const parsed = typeof hotspot.payload === 'string' ? JSON.parse(hotspot.payload) : hotspot.payload;
+        if (parsed && typeof parsed === 'object' && parsed.targetSceneId) {
+          targetSceneId = parsed.targetSceneId;
+        }
+      } catch (err) {
+        /* ignore parse errors */
+      }
+    }
+
+    if (!targetSceneId) {
+      onHotspotClick?.(hotspot);
+      return;
+    }
+
+    const targetScene = scenes?.find((scene) => scene.id === targetSceneId);
+    if (!targetScene) {
+      onHotspotClick?.(hotspot);
+      return;
+    }
+
+    const targetManifest = parseSceneManifest(targetScene);
+    if (targetManifest?.preview) {
+      const loader = textureLoaderRef.current ?? new THREE.TextureLoader();
+      textureLoaderRef.current = loader;
+      const previewUrl = /^https?:\/\//i.test(targetManifest.preview)
+        ? targetManifest.preview
+        : new URL(targetManifest.preview, window.location.origin).toString();
+      loader.load(previewUrl, () => {
+        /* prefetch success */
+      }, undefined, () => {
+        /* ignore preview prefetch fail */
+      });
+    }
+
+    controls.pointerActive = false;
+    controls.velocityYaw = 0;
+    controls.velocityPitch = 0;
+
+    transitionRef.current = {
+      targetSceneId,
+      startTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+      duration: 700,
+      startYaw: controls.yaw,
+      startPitch: controls.pitch,
+      endYaw: targetScene.yaw ?? controls.yaw,
+      endPitch: targetScene.pitch ?? controls.pitch,
+      startFov: controls.fov,
+      endFov: targetScene.fov ?? controls.fov,
+    } as typeof transitionRef.current;
+
+    onHotspotClick?.(hotspot);
+  }, [onHotspotClick, scenes]);
+
+  const removeOverlappingTiles = useCallback((level: number, col: number, row: number) => {
     const manifestSnapshot = manifestRef.current;
     if (!manifestSnapshot) return;
 
@@ -211,17 +292,6 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
       const entryRows = entryLevelInfo.rows || entryLevelInfo.tilesY || 1;
 
       if (entry.level < level) {
-        const colScale = targetCols / entryCols;
-        const rowScale = targetRows / entryRows;
-        if (!Number.isFinite(colScale) || !Number.isFinite(rowScale) || colScale <= 0 || rowScale <= 0) {
-          return;
-        }
-        const parentCol = Math.floor(col / colScale);
-        const parentRow = Math.floor(row / rowScale);
-        if (entry.col === parentCol && entry.row === parentRow) {
-          disposeTileEntry(entry);
-          tileCacheRef.current.delete(key);
-        }
         return;
       }
 
@@ -280,6 +350,14 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
 
     const tileUrl = buildTileUrl(manifestSnapshot, request.sceneId, request.level, request.col, request.row);
 
+    console.log('[MultiresViewer] Loading tile:', {
+      sceneId: request.sceneId,
+      level: request.level,
+      col: request.col,
+      row: request.row,
+      url: tileUrl
+    });
+
     loader.load(
       tileUrl,
       (texture) => {
@@ -321,17 +399,29 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
             return geom;
           })();
 
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.needsUpdate = true;
+        
         const material = new THREE.MeshBasicMaterial({
           map: texture,
-          side: THREE.BackSide,
+          side: THREE.DoubleSide,  // Use DoubleSide to ensure visibility
           depthWrite: false,
+          depthTest: true,
+          transparent: true,  // Enable transparency for smooth transitions
+          opacity: 1.0,
           toneMapped: false,
         });
 
         const mesh = new THREE.Mesh(geometry, material);
         mesh.renderOrder = 10 + request.level;
         mesh.frustumCulled = false;
+        mesh.visible = true; // Ensure tile is visible
         scene.add(mesh);
+        console.log('[MultiresViewer] Tile loaded successfully:', request.key, 'Visible:', mesh.visible);
 
         tileCacheRef.current.set(request.key, {
           key: request.key,
@@ -346,8 +436,17 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
 
         removeOverlappingTiles(request.level, request.col, request.row);
 
-        if (previewMeshRef.current) {
-          previewMeshRef.current.visible = false;
+        // Keep preview visible until we have enough tiles loaded
+        const tileCount = tileCacheRef.current.size;
+        if (previewMeshRef.current && tileCount > 4) {
+          // Fade out preview gradually
+          const material = previewMeshRef.current.material as THREE.MeshBasicMaterial;
+          if (material.opacity > 0.1) {
+            material.transparent = true;
+            material.opacity = Math.max(0, material.opacity - 0.1);
+          } else {
+            previewMeshRef.current.visible = false;
+          }
         }
 
         if (tileCacheRef.current.size > TILE_CACHE_LIMIT) {
@@ -366,7 +465,8 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
         processQueue();
       },
       undefined,
-      () => {
+      (error) => {
+        console.error('[MultiresViewer] Failed to load tile:', request.key, error);
         activeLoadsRef.current = Math.max(0, activeLoadsRef.current - 1);
         pendingSetRef.current.delete(request.key);
         processQueue();
@@ -398,6 +498,11 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
     const container = containerRef.current;
 
     if (!manifestSnapshot || !sceneId || !container) {
+      console.log('[updateVisibleTiles] Missing requirements:', {
+        hasManifest: !!manifestSnapshot,
+        hasSceneId: !!sceneId,
+        hasContainer: !!container
+      });
       return;
     }
 
@@ -442,11 +547,17 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
       if (keep.has(key)) {
         entry.lastUsed = now;
         entry.pendingRemovalAt = undefined;
-        entry.mesh.visible = entry.level <= levelIndex;
+        entry.mesh.visible = true; // Always show tiles that should be visible
         return;
       }
 
-      entry.mesh.visible = entry.level <= levelIndex;
+      // Keep tiles from other levels visible to prevent flashing
+      // Only hide if it's the same level but out of view
+      if (entry.level === levelIndex) {
+        entry.mesh.visible = false; // Hide same-level tiles that are out of view
+      } else {
+        entry.mesh.visible = true; // Keep other level tiles visible for smooth transition
+      }
 
       if (!entry.pendingRemovalAt) {
         entry.pendingRemovalAt = now;
@@ -464,17 +575,30 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || rendererRef.current) return;
+    if (!container) return;
+    
+    // Only initialize renderer once, don't recreate on every mount
+    if (rendererRef.current) {
+      return;
+    }
 
     destroyedRef.current = false;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', alpha: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(container.clientWidth, container.clientHeight, false);
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    renderer.setSize(width, height, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+    
+    console.log('[MultiresViewer] Renderer initialized:', {
+      containerSize: { width, height },
+      pixelRatio: renderer.getPixelRatio(),
+      domElement: renderer.domElement
+    });
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
@@ -483,13 +607,15 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
     const camera = new THREE.PerspectiveCamera(
       controlsRef.current.fov,
       container.clientWidth / container.clientHeight || 1,
-      0.5,
+      0.1,
       2000,
     );
+    camera.position.set(0, 0, 0);  // Camera should be at the center of the sphere
     camera.lookAt(yawPitchToVector(controlsRef.current.yaw, controlsRef.current.pitch, 1));
     camera.updateProjectionMatrix();
     scene.add(camera);
     cameraRef.current = camera;
+    console.log('[MultiresViewer] Camera initialized at origin');
 
     const hotspotGroup = new THREE.Group();
     hotspotGroup.name = 'hotspots';
@@ -511,10 +637,40 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
       }
 
       const controls = controlsRef.current;
+      const transition = transitionRef.current;
+      const now = performance.now();
 
-      if (!controls.pointerActive) {
-        controls.velocityYaw *= 0.92;
-        controls.velocityPitch *= 0.92;
+      const isTransitioning = transition.targetSceneId !== null;
+
+      if (isTransitioning) {
+        const duration = transition.duration > 0 ? transition.duration : 600;
+        const elapsed = now - transition.startTime;
+        const progress = Math.min(1, elapsed / duration);
+        const eased = progress * progress * (3 - 2 * progress);
+
+        controls.velocityYaw = 0;
+        controls.velocityPitch = 0;
+        controls.yaw = THREE.MathUtils.lerp(transition.startYaw, transition.endYaw, eased);
+        controls.pitch = THREE.MathUtils.lerp(transition.startPitch, transition.endPitch, eased);
+        controls.fov = THREE.MathUtils.lerp(transition.startFov, transition.endFov, eased);
+
+        if (progress >= 1) {
+          controls.yaw = transition.endYaw;
+          controls.pitch = transition.endPitch;
+          controls.fov = transition.endFov;
+
+          if (currentSceneIdRef.current === transition.targetSceneId) {
+            transition.targetSceneId = null;
+          } else {
+            transition.startTime = now;
+            transition.startYaw = controls.yaw;
+            transition.startPitch = controls.pitch;
+            transition.startFov = controls.fov;
+          }
+        }
+      } else if (!controls.pointerActive) {
+        controls.velocityYaw *= 0.85;  // Increased dampening from 0.92 to 0.85 for quicker stop
+        controls.velocityPitch *= 0.85;  // Increased dampening from 0.92 to 0.85
         controls.yaw += controls.velocityYaw;
         controls.pitch += controls.velocityPitch;
       }
@@ -528,7 +684,6 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
         cameraRef.current.updateProjectionMatrix();
       }
 
-      const now = performance.now();
       if (now - lastTileUpdateRef.current > TILE_UPDATE_INTERVAL_MS) {
         lastTileUpdateRef.current = now;
         updateVisibleTilesRef.current();
@@ -544,6 +699,22 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
       }
 
       rendererRef.current.render(sceneRef.current, cameraRef.current);
+      
+      // Debug: Log scene state periodically
+      if (Math.random() < 0.01) { // Log 1% of frames
+        const visibleMeshes = sceneRef.current.children.filter((child: THREE.Object3D) => 
+          child instanceof THREE.Mesh && child.visible
+        );
+        if (visibleMeshes.length > 0 || Math.random() < 0.1) { // Always log if meshes visible
+          console.log('[MultiresViewer] Render state:', {
+            sceneChildren: sceneRef.current.children.length,
+            visibleMeshes: visibleMeshes.length,
+            cameraPosition: cameraRef.current.position,
+            cameraRotation: cameraRef.current.rotation,
+            controls: { yaw: controls.yaw, pitch: controls.pitch, fov: controls.fov }
+          });
+        }
+      }
     };
 
     renderer.setAnimationLoop(animate);
@@ -626,9 +797,9 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
         return;
       }
 
-      controlsRef.current.yaw -= dx * 0.12;
+      controlsRef.current.yaw -= dx * 0.04;  // Further reduced to 0.04 for much smoother control
       controlsRef.current.pitch = THREE.MathUtils.clamp(
-        controlsRef.current.pitch + dy * 0.12,
+        controlsRef.current.pitch + dy * 0.04,  // Further reduced to 0.04
         -85,
         85,
       );
@@ -650,7 +821,11 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
       } else if (!moved) {
         const hotspot = pickHotspot(event);
         if (hotspot) {
-          onHotspotClick?.(hotspot);
+          if (hotspot.kind === 'navigation') {
+            startSceneTransition(hotspot);
+          } else {
+            onHotspotClick?.(hotspot);
+          }
         } else if (isEditMode && (pointerStateRef.current.shiftKey || event.shiftKey)) {
           const coords = pickSphere(event);
           if (coords) {
@@ -659,8 +834,8 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
         }
       }
 
-      controlsRef.current.velocityYaw = (pointerStateRef.current.startX - event.clientX) * 0.05;
-      controlsRef.current.velocityPitch = (event.clientY - pointerStateRef.current.startY) * 0.05;
+      controlsRef.current.velocityYaw = (pointerStateRef.current.startX - event.clientX) * 0.01;  // Further reduced to 0.01 for minimal inertia
+      controlsRef.current.velocityPitch = (event.clientY - pointerStateRef.current.startY) * 0.01;  // Further reduced to 0.01
     };
 
     const handleWheel = (event: WheelEvent) => {
@@ -686,6 +861,7 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
 
       tileCacheRef.current.forEach((entry) => disposeTileEntry(entry));
       tileCacheRef.current.clear();
+      transitionRef.current.targetSceneId = null;
 
       if (previewMeshRef.current) {
         if (previewMeshRef.current.material instanceof THREE.Material) {
@@ -695,12 +871,22 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
         previewMeshRef.current = null;
       }
 
+      // Remove canvas from DOM
+      if (container && container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+      
       renderer.dispose();
       rendererRef.current = null;
     };
   }, [isEditMode, onHotspotClick, onHotspotCreate, onHotspotUpdate]);
 
   useEffect(() => {
+    console.log('[MultiresViewer] Scene changed:', currentScene.id, {
+      hasManifest: !!manifest,
+      tilesManifest: currentScene.tiles_manifest,
+      manifest: manifest
+    });
     manifestRef.current = manifest;
     currentSceneRef.current = currentScene;
     currentSceneIdRef.current = currentScene.id;
@@ -708,12 +894,19 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
     tileQueueRef.current = [];
     pendingSetRef.current.clear();
     activeLoadsRef.current = 0;
+    if (transitionRef.current.targetSceneId !== currentScene.id) {
+      transitionRef.current.targetSceneId = null;
+    }
 
     tileCacheRef.current.forEach((entry) => disposeTileEntry(entry));
     tileCacheRef.current.clear();
 
     if (previewMeshRef.current) {
       previewMeshRef.current.visible = true;
+      // Reset preview opacity for new scene
+      const material = previewMeshRef.current.material as THREE.MeshBasicMaterial;
+      material.opacity = 1.0;
+      material.transparent = true;
     }
 
     loadPreviewTexture();
@@ -722,11 +915,22 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
   }, [manifest, currentScene, loadPreviewTexture, updateHotspots]);
 
   useEffect(() => {
-    controlsRef.current.yaw = currentScene.yaw ?? 0;
-    controlsRef.current.pitch = currentScene.pitch ?? 0;
-    controlsRef.current.fov = currentScene.fov ?? tour?.default_fov ?? 75;
-    controlsRef.current.velocityYaw = 0;
-    controlsRef.current.velocityPitch = 0;
+    const controls = controlsRef.current;
+    const transition = transitionRef.current;
+    const isTransitionTarget = transition.targetSceneId === currentScene.id;
+
+    if (!isTransitionTarget) {
+      controls.yaw = currentScene.yaw ?? 0;
+      controls.pitch = currentScene.pitch ?? 0;
+      controls.fov = currentScene.fov ?? tour?.default_fov ?? 75;
+    } else {
+      transition.endYaw = currentScene.yaw ?? transition.endYaw;
+      transition.endPitch = currentScene.pitch ?? transition.endPitch;
+      transition.endFov = currentScene.fov ?? transition.endFov;
+    }
+
+    controls.velocityYaw = 0;
+    controls.velocityPitch = 0;
   }, [currentScene, tour?.default_fov]);
 
   useEffect(() => {
@@ -753,8 +957,11 @@ const removeOverlappingTiles = useCallback((level: number, col: number, row: num
   const missingMedia = !manifest && !currentScene.src_original_url;
 
   return (
-    <div className="relative h-full w-full bg-black">
-      <div ref={containerRef} className="h-full w-full" />
+    <div className="absolute inset-0 bg-black">
+      <div 
+        ref={containerRef} 
+        className="absolute inset-0"
+      />
       {missingMedia && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-gray-400">
           No imagery available for this scene.

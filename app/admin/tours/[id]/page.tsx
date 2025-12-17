@@ -4,8 +4,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import SceneManager from '@/components/scenes/SceneManager';
-import EnhancedHotspotEditor from '@/components/hotspots/EnhancedHotspotEditor';
-import OverlayEditor from '@/components/overlays/OverlayEditor';
 import VirtualTourViewer from '@/components/viewer/VirtualTourViewer';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { tourService } from '@/services/tourService';
@@ -18,7 +16,7 @@ export default function TourDetailsPage() {
   const [tour, setTour] = useState<Tour | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [selectedScene, setSelectedScene] = useState<Scene>();
-  const [activeTab, setActiveTab] = useState<'scenes' | 'hotspots' | 'overlays' | 'preview'>('scenes');
+  const [activeTab, setActiveTab] = useState<'scenes' | 'viewer'>('viewer');  // Simplified to just scenes and viewer
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,9 +62,9 @@ export default function TourDetailsPage() {
 
   const handleSceneSelected = (scene: Scene) => {
     setSelectedScene(scene);
-    // Switch to hotspots tab when a scene is selected
+    // Switch to viewer tab when a scene is selected
     if (activeTab === 'scenes') {
-      setActiveTab('hotspots');
+      setActiveTab('viewer');
     }
   };
 
@@ -152,10 +150,10 @@ export default function TourDetailsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className={activeTab === 'viewer' ? "min-h-screen bg-gray-100" : "h-screen w-screen bg-gray-100 flex flex-col overflow-hidden"}>
       {/* Header */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+      <header className={`bg-white shadow ${activeTab !== 'viewer' ? 'flex-shrink-0' : ''}`}>
+        <div className="px-4 py-3">
           <div className="flex justify-between items-center">
             <div>
               <button
@@ -173,10 +171,10 @@ export default function TourDetailsPage() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => setActiveTab('preview')}
+                onClick={() => setActiveTab('viewer')}
                 className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
               >
-                Preview Tour
+                Open Viewer
               </button>
               <button
                 className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -189,8 +187,8 @@ export default function TourDetailsPage() {
       </header>
 
       {/* Navigation Tabs */}
-      <div className="bg-white border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className={`bg-white border-b ${activeTab !== 'viewer' ? 'flex-shrink-0' : ''}`}>
+        <div className="px-4">
           <nav className="flex space-x-8">
             <button
               onClick={() => setActiveTab('scenes')}
@@ -200,80 +198,29 @@ export default function TourDetailsPage() {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Scenes ({scenes.length})
+              Scene Management ({scenes.length})
             </button>
             <button
-              onClick={() => setActiveTab('hotspots')}
+              onClick={() => setActiveTab('viewer')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'hotspots'
+                activeTab === 'viewer'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              } ${!selectedScene ? 'opacity-50 cursor-not-allowed' : ''}`}
-              disabled={!selectedScene}
+              } ${scenes.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={scenes.length === 0}
             >
-              Hotspots {selectedScene && `(${selectedScene.hotspots?.length || 0})`}
-            </button>
-            <button
-              onClick={() => setActiveTab('overlays')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'overlays'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              } ${!selectedScene ? 'opacity-50 cursor-not-allowed' : ''}`}
-              disabled={!selectedScene}
-            >
-              Overlays {selectedScene && `(${selectedScene.overlays?.length || 0})`}
-            </button>
-            <button
-              onClick={() => setActiveTab('preview')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'preview'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Preview
+              Viewer & Editor
             </button>
           </nav>
         </div>
       </div>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Scene Selector (visible when not in scenes tab) */}
-        {activeTab !== 'scenes' && activeTab !== 'preview' && selectedScene && (
-          <div className="mb-6 bg-white rounded-lg shadow p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-gray-700">Current Scene:</label>
-                <select
-                  value={selectedScene.id}
-                  onChange={(e) => {
-                    const scene = scenes.find(s => s.id === e.target.value);
-                    if (scene) setSelectedScene(scene);
-                  }}
-                  className="ml-3 px-3 py-1 border rounded-md"
-                >
-                  {scenes.map(scene => (
-                    <option key={scene.id} value={scene.id}>
-                      {scene.name} (Order: {scene.order})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="text-sm text-gray-500">
-                Position: ({selectedScene.yaw.toFixed(1)}°, {selectedScene.pitch.toFixed(1)}°) | 
-                FOV: {selectedScene.fov}° | 
-                Type: {selectedScene.type}
-              </div>
-            </div>
-          </div>
-        )}
-
+      <main className={activeTab === 'viewer' ? "w-full" : "flex-1 overflow-auto flex flex-col w-full"}>
         {/* Tab Content */}
-        <div className="bg-white rounded-lg shadow">
+        <div className={activeTab === 'viewer' ? "" : "flex-1 flex flex-col"}>
           {activeTab === 'scenes' && (
-            <div className="p-6">
+            <div className="max-w-7xl mx-auto w-full p-6 bg-white rounded-lg shadow m-4">
               <div className="mb-4">
                 <h2 className="text-lg font-semibold mb-2">Scene Management</h2>
                 <p className="text-sm text-gray-600">
@@ -288,77 +235,70 @@ export default function TourDetailsPage() {
             </div>
           )}
 
-          {activeTab === 'hotspots' && selectedScene && (
-            <div className="p-6">
-              <div className="mb-4">
-                <h2 className="text-lg font-semibold mb-2">Hotspot Management</h2>
-                <p className="text-sm text-gray-600">
-                  Add interactive hotspots to navigate between scenes or display information. 
-                  Choose from predefined icons or upload custom ones.
-                </p>
-              </div>
-              <EnhancedHotspotEditor
-                sceneId={selectedScene.id}
-                tourId={tourId}
-                scenes={scenes}
-                hotspots={selectedScene.hotspots || []}
-                onHotspotAdded={handleHotspotAdded}
-                onHotspotDeleted={handleHotspotDeleted}
-              />
-            </div>
-          )}
-
-          {activeTab === 'overlays' && selectedScene && (
-            <div className="p-6">
-              <div className="mb-4">
-                <h2 className="text-lg font-semibold mb-2">Overlay Management</h2>
-                <p className="text-sm text-gray-600">
-                  Add overlays to display additional content like text, images, or videos on top of your scenes.
-                </p>
-              </div>
-              <OverlayEditor
-                sceneId={selectedScene.id}
-                overlays={selectedScene.overlays || []}
-                onOverlayAdded={handleOverlayAdded}
-                onOverlayDeleted={handleOverlayDeleted}
-              />
-            </div>
-          )}
-
-          {activeTab === 'preview' && tour && scenes.length > 0 && (
-            <div style={{ height: '600px' }}>
-              <VirtualTourViewer
-                tour={tour}
-                scenes={scenes}
-                currentScene={selectedScene || scenes[0]}
-                onSceneChange={(sceneId) => {
-                  const scene = scenes.find(s => s.id === sceneId);
-                  if (scene) setSelectedScene(scene);
-                }}
-                onHotspotClick={(hotspot) => {
-                  console.log('Hotspot clicked:', hotspot);
-                  // Handle hotspot navigation
-                  const payload = JSON.parse(hotspot.payload || '{}');
-                  if (hotspot.kind === 'navigation' && payload.targetSceneId) {
-                    const targetScene = scenes.find(s => s.id === payload.targetSceneId);
-                    if (targetScene) {
-                      setSelectedScene(targetScene);
+          {activeTab === 'viewer' && tour && scenes.length > 0 && (
+            <div className="w-full overflow-auto p-4">
+              <div className="max-w-7xl mx-auto w-full bg-white rounded-lg shadow overflow-hidden">
+                <div className="p-4 bg-gray-50 border-b">
+                  <h2 className="text-lg font-semibold mb-2">360° Viewer & Editor</h2>
+                  <p className="text-sm text-gray-600 mb-2">
+                    View your tour and edit hotspots/overlays directly in the viewer. Use Edit Mode to add or modify interactive elements.
+                  </p>
+                  <div className="text-xs text-gray-500">
+                    <strong>Controls:</strong> Drag to rotate • Scroll to zoom • Shift+Click to add hotspot (in edit mode)
+                  </div>
+                </div>
+                <div className="relative overflow-hidden" style={{ 
+                  height: 'min(900px, calc(100vh - 250px))',
+                  minHeight: '700px'
+                }}>
+                <VirtualTourViewer
+                  tour={tour}
+                  scenes={scenes}
+                  currentScene={selectedScene || scenes[0]}
+                  onSceneChange={(sceneId) => {
+                    const scene = scenes.find(s => s.id === sceneId);
+                    if (scene) setSelectedScene(scene);
+                  }}
+                  onHotspotClick={(hotspot) => {
+                    console.log('Hotspot clicked:', hotspot);
+                    // Handle hotspot navigation
+                    if (hotspot.kind === 'navigation') {
+                      let targetSceneId = hotspot.target_scene_id;
+                      if (!targetSceneId && hotspot.payload) {
+                        try {
+                          const payload = typeof hotspot.payload === 'string' 
+                            ? JSON.parse(hotspot.payload) 
+                            : hotspot.payload;
+                          targetSceneId = payload.targetSceneId || payload.targetSceneID;
+                        } catch (err) {
+                          console.error('Failed to parse hotspot payload:', err);
+                        }
+                      }
+                      if (targetSceneId) {
+                        const targetScene = scenes.find(s => s.id === targetSceneId);
+                        if (targetScene) {
+                          setSelectedScene(targetScene);
+                        }
+                      }
                     }
-                  }
-                }}
-              />
+                  }}
+                />
+                </div>
+              </div>
             </div>
           )}
 
-          {activeTab === 'preview' && (!tour || scenes.length === 0) && (
-            <div className="p-12 text-center">
-              <p className="text-gray-500">No scenes available for preview.</p>
-              <button
-                onClick={() => setActiveTab('scenes')}
-                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-              >
-                Add Scenes
-              </button>
+          {activeTab === 'viewer' && (!tour || scenes.length === 0) && (
+            <div className="max-w-7xl mx-auto w-full p-6">
+              <div className="bg-white rounded-lg shadow p-12 text-center">
+                <p className="text-gray-500">No scenes available for preview.</p>
+                <button
+                  onClick={() => setActiveTab('scenes')}
+                  className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Add Scenes
+                </button>
+              </div>
             </div>
           )}
         </div>
