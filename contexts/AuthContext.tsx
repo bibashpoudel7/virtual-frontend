@@ -101,23 +101,59 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
 
   const validateAndSetToken = async (authToken: string) => {
     try {
-      // Validate token with microservice backend
-      const response = await axios.post(`${microserviceUrl}/api/auth/validate`, {
-        token: authToken
-      }, {
-        headers: { Authorization: `Bearer ${authToken}` }
+      const storedUserData = localStorage.getItem('user_data');
+      if (storedUserData) {
+        try {
+          const userData = JSON.parse(storedUserData);
+          setToken(authToken);
+          setUser(userData);
+          axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
+          setIsLoading(false);
+          return;
+        } catch (error) {
+          console.error('Error parsing stored user data:', error);
+        }
+      }
+
+      // Validate token with Go microservice backend
+      const response = await axios.post(`${microserviceUrl}/api/auth/validate`, {}, {
+        headers: { 
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        }
       });
 
-      if (response.data.valid) {
+      if (response.data.valid && response.data.user) {
         setToken(authToken);
         setUser(response.data.user);
         localStorage.setItem('auth_token', authToken);
+        localStorage.setItem('user_data', JSON.stringify(response.data.user));
         
         // Set default axios header
         axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
+      } else {
+        // Token is invalid
+        logout();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Token validation failed:', error);
+      
+      if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
+        const storedUserData = localStorage.getItem('user_data');
+        if (storedUserData && authToken) {
+          try {
+            const userData = JSON.parse(storedUserData);
+            setToken(authToken);
+            setUser(userData);
+            axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
+            setIsLoading(false);
+            return;
+          } catch (parseError) {
+            console.error('Error parsing stored user data:', parseError);
+          }
+        }
+      }
+      
       logout();
     } finally {
       setIsLoading(false);
@@ -130,6 +166,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     // Store as both for compatibility
     localStorage.setItem('accessToken', authToken);
     localStorage.setItem('auth_token', authToken);
+    localStorage.setItem('user_data', JSON.stringify(userData));
     axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
     
     // Notify parent if in iframe
@@ -146,6 +183,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     setToken(null);
     setUser(null);
     localStorage.removeItem('auth_token');
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('user_data');
     delete axios.defaults.headers.common['Authorization'];
     
     // Notify parent if in iframe

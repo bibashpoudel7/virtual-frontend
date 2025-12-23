@@ -135,12 +135,28 @@ export const apiClient = {
 };
 
 export const nestedApiClient = {
+  get: async <T>(url: string, config?: AxiosRequestConfig): Promise<T> => {
+    const response = await nestedApi.get<BaseResponse<T>>(url, config);
+    return handleResponse(response);
+  },
   post: async <T>(
     url: string,
     data?: any,
     config?: AxiosRequestConfig
   ): Promise<T> => {
     const response = await nestedApi.post<BaseResponse<T>>(url, data, config);
+    return handleResponse(response);
+  },
+  put: async <T>(
+    url: string,
+    data?: any,
+    config?: AxiosRequestConfig
+  ): Promise<T> => {
+    const response = await nestedApi.put<BaseResponse<T>>(url, data, config);
+    return handleResponse(response);
+  },
+  delete: async <T>(url: string, config?: AxiosRequestConfig): Promise<T> => {
+    const response = await nestedApi.delete<BaseResponse<T>>(url, config);
     return handleResponse(response);
   },
 };

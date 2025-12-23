@@ -1,16 +1,120 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Icon } from '@iconify/react';
 import { nestedApiClient } from '../../utils/api';
 import { LoginResponse, ApiError } from '@/types/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const router = useRouter()
+  const { setAuth, isAuthenticated, isLoading } = useAuth()
+
+  // Redirect if already authenticated
+  React.useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      router.push('/admin/tours');
+    }
+  }, [isAuthenticated, isLoading, router]);
+
+  // Show loading while checking authentication
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Function to detect user type and login with correct endpoint
+  const loginUser = async (email: string, password: string): Promise<LoginResponse> => {
+    // Check if we have a cached user type for this email
+    const cachedUserType = typeof window !== 'undefined' ? 
+      localStorage.getItem(`userType_${email}`) : null;
+    
+    if (cachedUserType === 'vendor') {
+      // Try vendor login first if we know this is a vendor
+      try {
+        const response = await nestedApiClient.post<LoginResponse>('/vendor/login', { 
+          email, 
+          password 
+        });
+        return response;
+      } catch (vendorError) {
+        // If vendor login fails, clear cache and try customer login
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(`userType_${email}`);
+        }
+        return await nestedApiClient.post<LoginResponse>('/login', { 
+          email, 
+          password 
+        });
+      }
+    } else if (cachedUserType === 'customer') {
+      // Try customer login first if we know this is a customer
+      try {
+        const response = await nestedApiClient.post<LoginResponse>('/login', { 
+          email, 
+          password 
+        });
+        return response;
+      } catch (customerError) {
+        const error = customerError as ApiError;
+        
+        // If customer login fails with "not allowed", clear cache and try vendor
+        if (error.response?.data?.message?.includes('not allowed') || 
+            error.response?.status === 403) {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(`userType_${email}`);
+          }
+          return await nestedApiClient.post<LoginResponse>('/vendor/login', { 
+            email, 
+            password 
+          });
+        } else {
+          throw customerError;
+        }
+      }
+    } else {
+      const customerLoginPromise = nestedApiClient.post<LoginResponse>('/login', { 
+        email, 
+        password 
+      }).then(response => ({ response, type: 'customer' as const }));
+      
+      const vendorLoginPromise = nestedApiClient.post<LoginResponse>('/vendor/login', { 
+        email, 
+        password 
+      }).then(response => ({ response, type: 'vendor' as const }));
+      
+      try {
+        const result = await Promise.any([customerLoginPromise, vendorLoginPromise]);
+        
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(`userType_${email}`, result.type);
+        }
+        
+        return result.response;
+      } catch (error) {
+        // If both fail, throw a generic error
+        throw {
+          response: {
+            data: {
+              message: 'Invalid email or password',
+            },
+          },
+        } as ApiError;
+      }
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,24 +122,24 @@ export default function Login() {
     setError('');
 
     try {
-      const response = await nestedApiClient.post<LoginResponse>('/login', { 
-        email, 
-        password 
-      });
+      const response = await loginUser(email, password);
       
       console.log({response})
       if (response.accessToken) {
         console.log(response)
-        // Store token with proper naming for compatibility
-        localStorage.setItem('accessToken', response.accessToken);
-        localStorage.setItem('token', response.accessToken);
         
-        // Configure axios for future requests
-        import('axios').then(({ default: axios }) => {
-          axios.defaults.headers.common['Authorization'] = `Bearer ${response.accessToken}`;
-        });
+        // Create user object from response
+        const user = {
+          id: response.id || '',
+          email: response.email || email,
+          name: `${response.firstName || ''} ${response.lastName || ''}`.trim() || response.email,
+          role: response.roles?.toString() || 'user',
+        };
         
-        router.push('/tours');
+        // Use AuthContext to set authentication state
+        setAuth(response.accessToken, user);
+        
+        router.push('/admin/tours');
       }
     } catch (err) {
       const error = err as ApiError;
@@ -87,17 +191,29 @@ export default function Login() {
               <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
                 Password
               </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="appearance-none relative block w-full px-3 py-2 pr-12 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  <Icon 
+                    icon={showPassword ? "mdi:eye-off" : "mdi:eye"} 
+                    className="h-5 w-5 text-gray-400 hover:text-gray-600 cursor-pointer"
+                  />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -106,10 +222,10 @@ export default function Login() {
               type="submit"
               disabled={loading}
               className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
-                loading ? 'opacity-70 cursor-not-allowed' : ''
+                loading ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
               }`}
             >
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </div>
         </form>
