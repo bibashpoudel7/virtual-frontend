@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   // In production, fetch from backend
   return NextResponse.json({
-    id: params.id,
+    id: id,
     name: 'Sample Tour',
     scenes: [],
     is_published: false,
@@ -17,14 +18,15 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const body = await request.json();
+    const { id } = await params;
     
     // In production, update in backend
     return NextResponse.json({
-      id: params.id,
+      id: id,
       ...body,
       updated_at: new Date().toISOString(),
     });
@@ -39,8 +41,9 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  await params;
   // In production, delete from backend
   return NextResponse.json({ success: true }, { status: 204 });
 }

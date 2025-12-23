@@ -7,7 +7,7 @@ export interface CreateHotspotData {
   yaw: number;
   pitch: number;
   scene_id: string;
-  target_scene_id: string;
+  target_scene_id?: string;
   payload?: any; // Optional payload object
 }
 

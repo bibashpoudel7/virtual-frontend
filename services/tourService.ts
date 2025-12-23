@@ -183,6 +183,19 @@ class TourService {
       method: 'POST',
     });
   }
+
+  async updateTourAudio(tourId: string, audioUrl: string, currentTour: Tour): Promise<Tour> {
+    // Send the complete tour object with updated audio URL
+    const updateData = {
+      ...currentTour,
+      background_audio_url: audioUrl || null
+    };
+
+    return this.fetchWithAuth(`tours/${tourId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updateData),
+    });
+  }
 }
 
 export const tourService = new TourService();
