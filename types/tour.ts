@@ -8,14 +8,22 @@ export interface BaseModel {
 export interface Tour extends BaseModel {
   id: string;
   name: string;
+  user_id?: string;
   property_id?: number;
   autoplay_json?: string;
   background_audio_url?: string;
   is_published: boolean;
   autoplay_enabled?: boolean;
+  is_paid?: boolean;
+  source?: string;
   default_fov: number;
   default_yaw_speed: number;
   default_pitch_speed: number;
+  auto_change_enabled?: boolean;
+  auto_change_interval?: number;
+  auto_change_mode?: string;
+  auto_pause_on_interaction?: boolean;
+  auto_restart_delay?: number;
   tour_scenes: TourScene[];
 }
 
