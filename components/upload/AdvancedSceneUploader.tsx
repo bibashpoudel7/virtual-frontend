@@ -9,18 +9,25 @@ import {
 } from 'lucide-react';
 
 interface AdvancedSceneUploaderProps {
-  sceneId: string;
+  sceneId?: string;
+  tourId?: string;
+  sceneType?: 'image' | 'video' | '360';
   onComplete?: (data: any) => void;
+  onCancel?: () => void;
+  onPreviewReady?: (previewUrl: string) => void;
 }
 
 interface ProcessingStage {
-  id: 'select' | 'process' | 'tiles' | 'upload' | 'save';
+  id: 'scene' | 'select' | 'process' | 'tiles' | 'upload' | 'save';
   name: string;
   status: 'pending' | 'processing' | 'complete' | 'error' | 'skipped';
   data?: any;
 }
 
-export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedSceneUploaderProps) {
+export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId, sceneType = '360', onComplete, onCancel, onPreviewReady }: AdvancedSceneUploaderProps) {
+  const [sceneId, setSceneId] = useState<string>(initialSceneId || '');
+  const [sceneName, setSceneName] = useState<string>('');
+  const [needsSceneCreation, setNeedsSceneCreation] = useState(!initialSceneId);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [processedImage, setProcessedImage] = useState<Buffer | null>(null);
@@ -30,15 +37,26 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
   // Persist state key for this scene
   const stateKey = `upload_state_${sceneId}`;
   
-  const [stages, setStages] = useState<ProcessingStage[]>([
-    { id: 'select', name: 'Select Image', status: 'pending' },
-    { id: 'process', name: 'Process Image', status: 'pending' },
-    { id: 'tiles', name: 'Generate Tiles', status: 'pending' },
-    { id: 'upload', name: 'Upload to Storage', status: 'pending' },
-    { id: 'save', name: 'Save to Database', status: 'pending' },
-  ]);
+  const [stages, setStages] = useState<ProcessingStage[]>(() => {
+    const baseStages: ProcessingStage[] = [
+      { id: 'select', name: 'Select Image', status: 'pending' },
+      { id: 'process', name: 'Process Image', status: 'pending' },
+      { id: 'tiles', name: 'Generate Tiles', status: 'pending' },
+      { id: 'upload', name: 'Upload to Storage', status: 'pending' },
+      { id: 'save', name: 'Save to Database', status: 'pending' },
+    ];
+    
+    if (needsSceneCreation) {
+      return [
+        { id: 'scene', name: 'Create Scene', status: 'pending' },
+        ...baseStages
+      ];
+    }
+    
+    return baseStages;
+  });
 
-  const [currentStage, setCurrentStage] = useState<string>('select');
+  const [currentStage, setCurrentStage] = useState<string>(needsSceneCreation ? 'scene' : 'select');
   const [uploadProgress, setUploadProgress] = useState<Map<string, number>>(new Map());
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -91,6 +109,47 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
     ));
   };
 
+  // Stage 0: Create Scene (if needed)
+  const createScene = useCallback(async () => {
+    if (!tourId || !sceneName.trim()) return;
+
+    updateStage('scene', 'processing');
+
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5555';
+      const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
+      
+      const response = await fetch(`${backendUrl}/api/tours/${tourId}/scenes`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          name: sceneName,
+          type: sceneType,
+          yaw: 0,
+          pitch: 0,
+          fov: 75,
+          order: 1,
+          priority: 1
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to create scene');
+      
+      const newScene = await response.json();
+      setSceneId(newScene.id);
+      updateStage('scene', 'complete', { sceneId: newScene.id });
+      setCurrentStage('select');
+      saveState();
+    } catch (error) {
+      updateStage('scene', 'error');
+      saveState();
+      console.error('Scene creation error:', error);
+    }
+  }, [tourId, sceneName, sceneType]);
+
   // Stage 1: Select File
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -103,7 +162,9 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
     // Create preview
     const reader = new FileReader();
     reader.onload = (e) => {
-      setPreviewUrl(e.target?.result as string);
+      const url = e.target?.result as string;
+      setPreviewUrl(url);
+      onPreviewReady?.(url);
     };
     reader.readAsDataURL(file);
     
@@ -159,7 +220,7 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
 
     try {
       // Create a file from the processed buffer
-      const processedBlob = new Blob([processedImage], { type: 'image/jpeg' });
+      const processedBlob = new Blob([new Uint8Array(processedImage)], { type: 'image/jpeg' });
       const processedFile = new File([processedBlob], 'processed.jpg', { type: 'image/jpeg' });
       
       // Send to server for tile generation
@@ -359,6 +420,8 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
       updateStage('save', 'complete');
       clearSavedState(); // Clear state on successful completion
       onComplete?.({
+        sceneId,
+        sceneName,
         mainImageUrl: uploadedUrls.get('main'),
         tilesManifest
       });
@@ -391,11 +454,21 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
 
     if (currentStage === stage.id) {
       switch (stage.id) {
+        case 'scene':
+          return (
+            <button
+              onClick={createScene}
+              disabled={!sceneName.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Create Scene
+            </button>
+          );
         case 'select':
           return (
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
             >
               Select File
             </button>
@@ -404,7 +477,7 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
           return (
             <button
               onClick={processImage}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
             >
               Process Image
             </button>
@@ -414,13 +487,13 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
             <div className="flex gap-2">
               <button
                 onClick={generateTiles}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
               >
                 Generate Tiles
               </button>
               <button
                 onClick={skipToUpload}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 cursor-pointer"
               >
                 Skip Tiles
               </button>
@@ -430,7 +503,7 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
           return (
             <button
               onClick={uploadToStorage}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
             >
               Upload All
             </button>
@@ -439,7 +512,7 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
           return (
             <button
               onClick={saveToDatabase}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer"
             >
               Save to Database
             </button>
@@ -452,8 +525,35 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
 
   return (
     <div className="max-w-4xl mx-auto p-6">
-      <div className="bg-white rounded-lg shadow-lg p-6">
-        <h2 className="text-2xl font-bold mb-6">Advanced 360° Image Upload</h2>
+      <div className="bg-white rounded-lg shadow-lg p-6 relative">
+        {onCancel && (
+          <button
+            onClick={onCancel}
+            className="absolute top-4 right-4 text-gray-600 hover:text-gray-800 z-10"
+          >
+            <X className="w-6 h-6 cursor-pointer" />
+          </button>
+        )}
+        
+        <div className="mb-6 pr-10">
+          <h2 className="text-2xl font-bold text-gray-900">Advanced 360° Image Upload</h2>
+          <p className="text-gray-600 mt-2">Upload and process your 360° panoramic image</p>
+        </div>
+
+        {needsSceneCreation && (
+          <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <label className="block text-sm font-medium mb-2 text-gray-900">
+              Scene Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={sceneName}
+              onChange={(e) => setSceneName(e.target.value)}
+              placeholder="e.g., Living Room, Entrance Hall"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-500"
+            />
+          </div>
+        )}
 
         <input
           ref={fileInputRef}
@@ -472,7 +572,7 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
               className="w-full h-48 object-cover rounded-lg"
             />
             {selectedFile && (
-              <p className="mt-2 text-sm text-gray-600">
+              <p className="mt-2 text-sm text-gray-800 font-medium">
                 {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
               </p>
             )}
@@ -494,16 +594,17 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  {stage.id === 'select' && <ImageIcon className="h-5 w-5" />}
-                  {stage.id === 'process' && <ImageIcon className="h-5 w-5" />}
-                  {stage.id === 'tiles' && <Grid3x3 className="h-5 w-5" />}
-                  {stage.id === 'upload' && <CloudUpload className="h-5 w-5" />}
-                  {stage.id === 'save' && <Save className="h-5 w-5" />}
+                  {stage.id === 'scene' && <Save className="h-5 w-5 text-gray-700" />}
+                  {stage.id === 'select' && <ImageIcon className="h-5 w-5 text-gray-700" />}
+                  {stage.id === 'process' && <ImageIcon className="h-5 w-5 text-gray-700" />}
+                  {stage.id === 'tiles' && <Grid3x3 className="h-5 w-5 text-gray-700" />}
+                  {stage.id === 'upload' && <CloudUpload className="h-5 w-5 text-gray-700" />}
+                  {stage.id === 'save' && <Save className="h-5 w-5 text-gray-700" />}
                   
                   <div>
-                    <h3 className="font-medium">{stage.name}</h3>
+                    <h3 className="font-medium text-gray-900">{stage.name}</h3>
                     {stage.data && (
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-gray-700">
                         {JSON.stringify(stage.data)}
                       </p>
                     )}
@@ -518,9 +619,9 @@ export default function AdvancedSceneUploader({ sceneId, onComplete }: AdvancedS
                 <div className="mt-4 space-y-2">
                   {Array.from(uploadProgress.entries()).map(([key, progress]) => (
                     <div key={key}>
-                      <div className="flex justify-between text-sm text-gray-600">
-                        <span>{key}</span>
-                        <span>{progress}%</span>
+                      <div className="flex justify-between text-sm text-gray-800">
+                        <span className="font-medium">{key}</span>
+                        <span className="font-medium">{progress}%</span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2">
                         <div 
