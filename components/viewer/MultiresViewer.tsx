@@ -27,6 +27,7 @@ interface MultiresViewerProps {
   onHotspotCreate?: (yaw: number, pitch: number) => void;
   onHotspotUpdate?: (hotspot: Hotspot) => void;
   hotspots?: Hotspot[];
+  isAutoplay?: boolean;
 }
 
 const PICKING_SPHERE = new THREE.Sphere(new THREE.Vector3(), SPHERE_RADIUS);
@@ -35,11 +36,13 @@ function useHotspotUpdater(
   hotspots: Hotspot[],
   currentSceneId: string,
   hotspotsGroupRef: MutableRefObject<THREE.Group | null>,
+  scenes?: Scene[],
 ) {
   return useCallback(() => {
     const group = hotspotsGroupRef.current;
     if (!group) return;
 
+    // Clear existing hotspots
     while (group.children.length) {
       const child = group.children.pop();
       if (!child) continue;
@@ -48,13 +51,24 @@ function useHotspotUpdater(
         if (node instanceof THREE.Sprite && node.material instanceof THREE.Material) {
           node.material.dispose();
         }
+        if (node instanceof THREE.Group) {
+          // Handle nested groups (our new hotspot groups)
+          node.traverse((nestedNode) => {
+            if (nestedNode instanceof THREE.Sprite && nestedNode.material instanceof THREE.Material) {
+              nestedNode.material.dispose();
+            }
+          });
+        }
       });
     }
 
-    hotspots
-      .filter((hotspot) => hotspot.scene_id === currentSceneId)
-      .forEach((hotspot) => group.add(createHotspotSprite(hotspot)));
-  }, [hotspots, currentSceneId, hotspotsGroupRef]);
+    // Add hotspots for current scene
+    const sceneHotspots = hotspots.filter((hotspot) => hotspot.scene_id === currentSceneId);
+    sceneHotspots.forEach((hotspot) => {
+      const sprite = createHotspotSprite(hotspot, scenes);
+      group.add(sprite);
+    });
+  }, [hotspots, currentSceneId, hotspotsGroupRef, scenes]);
 }
 
 function usePreviewLoader(
@@ -92,47 +106,56 @@ function usePreviewLoader(
       ? previewUrl
       : new URL(previewUrl, window.location.origin).toString();
 
-    loader.load(
-      absoluteUrl,
-      (texture) => {
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.generateMipmaps = true;
+    // Preload the texture to avoid flicker
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      loader.load(
+        absoluteUrl,
+        (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.minFilter = THREE.LinearFilter;
+          texture.magFilter = THREE.LinearFilter;
+          texture.generateMipmaps = true;
 
-        if (!previewMeshRef.current) {
-          const geometry = new THREE.SphereGeometry(SPHERE_RADIUS, 64, 32);
-          geometry.scale(-1, 1, 1);
-          const material = new THREE.MeshBasicMaterial({ 
-            map: texture, 
-            side: THREE.BackSide,
-            transparent: true,
-            opacity: 1.0
-          });
-          const mesh = new THREE.Mesh(geometry, material);
-          mesh.renderOrder = -1000;
-          mesh.frustumCulled = false;
-          previewMeshRef.current = mesh;
-          scene.add(mesh);
-        } else {
-          const material = previewMeshRef.current.material as THREE.MeshBasicMaterial;
-          material.map?.dispose();
-          material.map = texture;
-          material.transparent = true;
-          material.opacity = 1.0;
-          material.needsUpdate = true;
-          previewMeshRef.current.visible = true;
-        }
-      },
-      undefined,
-      () => {
-        /* ignore preview errors */
-      },
-    );
+          if (!previewMeshRef.current) {
+            const geometry = new THREE.SphereGeometry(SPHERE_RADIUS, 64, 32);
+            geometry.scale(-1, 1, 1);
+            const material = new THREE.MeshBasicMaterial({ 
+              map: texture, 
+              side: THREE.BackSide,
+              transparent: true,
+              opacity: 1.0
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.renderOrder = -1000;
+            mesh.frustumCulled = false;
+            previewMeshRef.current = mesh;
+            scene.add(mesh);
+          } else {
+            const material = previewMeshRef.current.material as THREE.MeshBasicMaterial;
+            material.map?.dispose();
+            material.map = texture;
+            material.transparent = true;
+            material.opacity = 1.0;
+            material.needsUpdate = true;
+            previewMeshRef.current.visible = true;
+          }
+        },
+        undefined,
+        () => {
+          /* ignore preview errors */
+        },
+      );
+    };
+    img.onerror = () => {
+      /* ignore preview errors */
+    };
+    img.src = absoluteUrl;
   }, [manifestRef, currentSceneRef, textureLoaderRef, previewMeshRef, sceneRef]);
 }
 
-export default function MultiresViewer({
+const MultiresViewer: React.FC<MultiresViewerProps> = ({
   tour,
   currentScene,
   scenes = [],
@@ -142,7 +165,8 @@ export default function MultiresViewer({
   onHotspotCreate,
   onHotspotUpdate,
   hotspots = [],
-}: MultiresViewerProps) {
+  isAutoplay = false,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -153,6 +177,7 @@ export default function MultiresViewer({
   const pointerRef = useRef(new THREE.Vector2());
   const draggingSpriteRef = useRef<THREE.Sprite | null>(null);
   const originalHotspotRef = useRef<Hotspot | null>(null);
+  const isAutoplayRef = useRef(isAutoplay);
 
   const tileCacheRef = useRef<Map<string, TileEntry>>(new Map());
   const geometryCacheRef = useRef<Map<string, THREE.BufferGeometry>>(new Map());
@@ -160,7 +185,7 @@ export default function MultiresViewer({
   const transitionRef = useRef({
     targetSceneId: null as string | null,
     startTime: 0,
-    duration: 600,
+    duration: 400, // Faster default duration
     startYaw: 0,
     startPitch: 0,
     endYaw: 0,
@@ -203,7 +228,7 @@ export default function MultiresViewer({
     console.log('[MultiresViewer] Parsed manifest for scene:', currentScene.id, parsed);
     return parsed;
   }, [currentScene]);
-  const updateHotspots = useHotspotUpdater(hotspots, currentScene.id, hotspotsGroupRef);
+  const updateHotspots = useHotspotUpdater(hotspots, currentScene.id, hotspotsGroupRef, scenes);
   const loadPreviewTexture = usePreviewLoader(
     manifestRef,
     currentSceneRef,
@@ -258,7 +283,7 @@ export default function MultiresViewer({
     transitionRef.current = {
       targetSceneId,
       startTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
-      duration: 700,
+      duration: 400,
       startYaw: controls.yaw,
       startPitch: controls.pitch,
       endYaw: targetScene.yaw ?? controls.yaw,
@@ -601,7 +626,8 @@ export default function MultiresViewer({
     });
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000000);
+    // Use a neutral gray background instead of black to prevent flickering
+    scene.background = new THREE.Color(0x2a2a2a);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(
@@ -643,7 +669,7 @@ export default function MultiresViewer({
       const isTransitioning = transition.targetSceneId !== null;
 
       if (isTransitioning) {
-        const duration = transition.duration > 0 ? transition.duration : 600;
+        const duration = transition.duration > 0 ? transition.duration : 400; // Faster fallback duration
         const elapsed = now - transition.startTime;
         const progress = Math.min(1, elapsed / duration);
         const eased = progress * progress * (3 - 2 * progress);
@@ -673,6 +699,11 @@ export default function MultiresViewer({
         controls.velocityPitch *= 0.85;  // Increased dampening from 0.92 to 0.85
         controls.yaw += controls.velocityYaw;
         controls.pitch += controls.velocityPitch;
+        
+        // Add autoplay rotation when enabled
+        if (isAutoplayRef.current) {
+          controls.yaw += tour.default_yaw_speed || 0.5;
+        }
       }
 
       controls.pitch = Math.max(-85, Math.min(85, controls.pitch));
@@ -692,10 +723,28 @@ export default function MultiresViewer({
       if (hotspotsGroupRef.current) {
         const spriteScale = THREE.MathUtils.clamp(32 - (controls.fov - 40) * 0.2, 18, 30);
         hotspotsGroupRef.current.children.forEach((child) => {
-          if (child instanceof THREE.Sprite) {
+          if (child instanceof THREE.Group) {
+            // Handle new hotspot groups (icon + text)
+            child.children.forEach((groupChild) => {
+              if (groupChild instanceof THREE.Sprite) {
+                // Scale the icon sprite
+                if (groupChild.position.y === 0) { // This is the icon (at y=0)
+                  groupChild.scale.setScalar(spriteScale);
+                }
+                // Keep text sprite at fixed scale for readability
+                groupChild.visible = true;
+              }
+            });
+            child.visible = true;
+          } else if (child instanceof THREE.Sprite) {
+            // Handle legacy single sprites (backward compatibility)
             child.scale.setScalar(spriteScale);
+            child.visible = true;
           }
         });
+        
+        // Ensure the hotspots group itself is visible
+        hotspotsGroupRef.current.visible = true;
       }
 
       rendererRef.current.render(sceneRef.current, cameraRef.current);
@@ -759,17 +808,18 @@ export default function MultiresViewer({
       pointerStateRef.current.lastX = event.clientX;
       pointerStateRef.current.lastY = event.clientY;
       pointerStateRef.current.shiftKey = event.shiftKey;
+      
       rendererRef.current.domElement.setPointerCapture(event.pointerId);
 
       if (isEditMode) {
         const hotspot = pickHotspot(event);
         if (hotspot) {
           const group = hotspotsGroupRef.current;
-          const sprite = group?.children.find(
-            (child) => child instanceof THREE.Sprite && child.userData.hotspot?.id === hotspot.id,
-          ) as THREE.Sprite | undefined;
-          if (sprite) {
-            draggingSpriteRef.current = sprite;
+          const hotspotGroup = group?.children.find(
+            (child) => child.userData.hotspot?.id === hotspot.id,
+          ) as THREE.Group | undefined;
+          if (hotspotGroup) {
+            draggingSpriteRef.current = hotspotGroup as any; // Store the group instead of sprite
             originalHotspotRef.current = hotspot;
             return;
           }
@@ -879,7 +929,7 @@ export default function MultiresViewer({
       renderer.dispose();
       rendererRef.current = null;
     };
-  }, [isEditMode, onHotspotClick, onHotspotCreate, onHotspotUpdate]);
+  }, [onHotspotClick, onHotspotCreate, onHotspotUpdate, isEditMode]);
 
   useEffect(() => {
     console.log('[MultiresViewer] Scene changed:', currentScene.id, {
@@ -898,9 +948,14 @@ export default function MultiresViewer({
       transitionRef.current.targetSceneId = null;
     }
 
-    tileCacheRef.current.forEach((entry) => disposeTileEntry(entry));
-    tileCacheRef.current.clear();
+    // Hide old tiles immediately to prevent dimming, but don't dispose yet
+    tileCacheRef.current.forEach((entry) => {
+      if (entry.sceneId !== currentScene.id && entry.mesh) {
+        entry.mesh.visible = false; // Hide instead of fading to prevent dimming
+      }
+    });
 
+    // Ensure preview mesh is visible immediately to prevent flicker
     if (previewMeshRef.current) {
       previewMeshRef.current.visible = true;
       // Reset preview opacity for new scene
@@ -909,10 +964,47 @@ export default function MultiresViewer({
       material.transparent = true;
     }
 
+    // Load new scene preview immediately
     loadPreviewTexture();
+    
+    // Clear old tiles after a short delay to allow new preview to load
+    setTimeout(() => {
+      tileCacheRef.current.forEach((entry) => {
+        if (entry.sceneId !== currentScene.id) {
+          disposeTileEntry(entry);
+        }
+      });
+      // Remove entries for old scenes
+      const keysToDelete: string[] = [];
+      tileCacheRef.current.forEach((entry, key) => {
+        if (entry.sceneId !== currentScene.id) {
+          keysToDelete.push(key);
+        }
+      });
+      keysToDelete.forEach(key => tileCacheRef.current.delete(key));
+    }, 100); // Reduced to 100ms for faster cleanup
+
     updateHotspots();
     requestAnimationFrame(() => updateVisibleTilesRef.current());
   }, [manifest, currentScene, loadPreviewTexture, updateHotspots]);
+
+  // Add a separate effect to update hotspots when the hotspots array changes
+  useEffect(() => {
+    updateHotspots();
+  }, [hotspots, updateHotspots]);
+
+  // Handle edit mode changes without reinitializing the entire viewer
+  useEffect(() => {
+    // Ensure hotspots remain visible when edit mode changes
+    if (hotspotsGroupRef.current) {
+      hotspotsGroupRef.current.visible = true;
+      hotspotsGroupRef.current.children.forEach((child) => {
+        if (child instanceof THREE.Sprite) {
+          child.visible = true;
+        }
+      });
+    }
+  }, [isEditMode]);
 
   useEffect(() => {
     const controls = controlsRef.current;
@@ -954,6 +1046,12 @@ export default function MultiresViewer({
     loader.load(absoluteUrl, () => {}, undefined, () => {});
   }, [currentScene.id, scenes]);
 
+  // Handle autoplay state changes
+  useEffect(() => {
+    console.log('[MultiresViewer] Autoplay state changed:', isAutoplay, '-> ref updated');
+    isAutoplayRef.current = isAutoplay;
+  }, [isAutoplay]);
+
   const missingMedia = !manifest && !currentScene.src_original_url;
 
   return (
@@ -969,4 +1067,8 @@ export default function MultiresViewer({
       )}
     </div>
   );
-}
+};
+
+MultiresViewer.displayName = 'MultiresViewer';
+
+export default MultiresViewer;
