@@ -21,7 +21,7 @@ class StorageUploader {
   ): Promise<string> {
     try {
       // Convert Buffer to Blob if needed
-      const blob = file instanceof File ? file : new Blob([file], { type: contentType });
+      const blob = file instanceof File ? file : new Blob([new Uint8Array(file)], { type: contentType });
       
       // Upload directly via API proxy route
       const xhr = new XMLHttpRequest();
