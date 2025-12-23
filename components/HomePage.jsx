@@ -4,6 +4,7 @@ import React from 'react';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import Pricing from '../components/Pricing';
+import HomeTourViewer from '../components/HomeTourViewer';
 import { 
   Play, 
   Globe, 
@@ -156,19 +157,8 @@ const HomePage = () => {
               </div>
             </div>
             <div className="relative">
-              <div className="aspect-video bg-gray-900 rounded-2xl shadow-2xl overflow-hidden">
-                <img 
-                  src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800"
-                  alt="Virtual Tour Preview"
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <button className="bg-white/90 backdrop-blur-sm rounded-full p-6 hover:bg-white transition-all duration-200 transform hover:scale-110">
-                    <Play className="w-8 h-8 text-indigo-600 ml-1" />
-                  </button>
-                </div>
-              </div>
-              <div className="absolute -bottom-6 -right-6 bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg font-bold shadow-lg">
+              <HomeTourViewer className="aspect-video shadow-2xl" />
+              <div className="absolute bottom-[-3rem] right-[-1.5rem] bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg font-bold shadow-lg">
                 <span className="text-2xl">360°</span> Experience
               </div>
             </div>
