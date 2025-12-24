@@ -10,7 +10,7 @@ interface MicrofrontendConfig {
   stripePublicKey: string;
   mode: 'standalone' | 'embedded';
   theme?: 'light' | 'dark';
-  propertyId?: number;
+  propertyId?: string;
 }
 
 interface MicrofrontendWrapperProps {
@@ -81,7 +81,7 @@ export default function MicrofrontendWrapper({
         
         // Add property ID if available
         if (configuration.propertyId) {
-          config.headers['X-Property-ID'] = configuration.propertyId.toString();
+          config.headers['X-Property-ID'] = configuration.propertyId;
         }
         
         // Add source header
