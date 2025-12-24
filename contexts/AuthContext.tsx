@@ -8,7 +8,7 @@ interface User {
   email: string;
   name: string;
   role: string;
-  propertyId?: number;
+  propertyId?: string;
   stripeCustomerId?: string;
 }
 
@@ -49,6 +49,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Clean up any existing userType cache entries on app start
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('userType_')) {
+        localStorage.removeItem(key);
+      }
+    });
+
     // Check for token in localStorage or from parent app
     // NestJS typically stores as 'accessToken'
     const storedToken = localStorage.getItem('accessToken') || localStorage.getItem('auth_token');
@@ -185,6 +192,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     localStorage.removeItem('auth_token');
     localStorage.removeItem('accessToken');
     localStorage.removeItem('user_data');
+    
+    // Clean up any userType cache entries
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('userType_')) {
+        localStorage.removeItem(key);
+      }
+    });
+    
+    // Clear tours cache and other user-specific data
+    localStorage.removeItem('tours_cache');
+    localStorage.removeItem('tours_cache_time');
+    
+    // Clear any other user-specific cache entries
+    Object.keys(localStorage).forEach(key => {
+      if (key.includes('_cache') || key.includes('user_') || key.includes('tour_')) {
+        localStorage.removeItem(key);
+      }
+    });
+    
     delete axios.defaults.headers.common['Authorization'];
     
     // Notify parent if in iframe
