@@ -9,7 +9,8 @@ export interface Tour extends BaseModel {
   id: string;
   name: string;
   user_id?: string;
-  property_id?: number;
+  property_id?: string;
+  property_name?: string; // Added property name
   autoplay_json?: string;
   background_audio_url?: string;
   is_published: boolean;
@@ -25,6 +26,20 @@ export interface Tour extends BaseModel {
   auto_pause_on_interaction?: boolean;
   auto_restart_delay?: number;
   tour_scenes: TourScene[];
+}
+
+export interface Property {
+  id: string;
+  propertyName: string;
+  slug: string;
+  propertyType: string;
+  companyName: string;
+  hasTour: boolean;
+}
+
+export interface PropertiesResponse {
+  properties: Property[];
+  total: number;
 }
 
 export interface TourScene extends BaseModel {
