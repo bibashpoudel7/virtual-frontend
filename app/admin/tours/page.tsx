@@ -7,15 +7,27 @@ import { useRouter } from 'next/navigation';
 import CreateTour from '@/components/tours/CreateTour';
 import { Home, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { Property } from '@/types/tour';
+import { tourService } from '@/services/tourService';
+
+interface CompanyInfo {
+  id: string;
+  companyName: string;
+  companyPurpose: string;
+  isVenueCompany: boolean;
+}
 
 export default function ToursPage() {
   const [view, setView] = useState<'list' | 'create' >('list');
   const [refreshKey, setRefreshKey] = useState(0);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [isVenueCompany, setIsVenueCompany] = useState<boolean>(false);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [dataLoaded, setDataLoaded] = useState<boolean>(false);
   const router = useRouter();
   const { logout } = useAuth();
 
   const handleTourCreated = (tour: any) => {
-    console.log('handleTourCreated called with:', tour);
     // Switch back to list view and refresh the list
     setView('list');
     setRefreshKey(prev => prev + 1);
@@ -43,6 +55,60 @@ export default function ToursPage() {
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     }
   }, [router]);
+
+  // Preload user data and company info when page loads
+  useEffect(() => {
+    const preloadData = async () => {
+      try {
+        // Get user role from localStorage
+        const userData = localStorage.getItem('user_data');
+        let role = null;
+        if (userData) {
+          try {
+            const user = JSON.parse(userData);
+            role = user.roles?.toString() || user.role?.toString() || null;
+            setUserRole(role);
+          } catch (error) {
+            console.error('Error parsing user data:', error);
+          }
+        }
+
+        // If user is a vendor, check company info and load properties
+        if (role === '3') {
+          try {
+            // Check if user is a venue company
+            const companyInfo: CompanyInfo = await tourService.getCompanyInfo();
+            setIsVenueCompany(companyInfo.isVenueCompany || false);
+
+            // If venue company, preload properties
+            if (companyInfo.isVenueCompany) {
+              const response = await tourService.getApprovedProperties();
+              setProperties(response.properties);
+            }
+          } catch (error) {
+            console.error('Error loading company info or properties:', error);
+            setIsVenueCompany(false);
+            setProperties([]);
+          }
+        } else if (role === '1') {
+          // Superadmin - load all properties
+          try {
+            const response = await tourService.getApprovedProperties();
+            setProperties(response.properties);
+          } catch (error) {
+            console.error('Error loading properties for superadmin:', error);
+            setProperties([]);
+          }
+        }
+      } catch (error) {
+        console.error('Error preloading data:', error);
+      } finally {
+        setDataLoaded(true);
+      }
+    };
+
+    preloadData();
+  }, []);
 
 
   return (
@@ -107,6 +173,12 @@ export default function ToursPage() {
         {view === 'create' && (
           <CreateTour
             onSuccess={handleTourCreated}
+            preloadedData={{
+              userRole,
+              isVenueCompany,
+              properties,
+              dataLoaded
+            }}
           />
         )}
 

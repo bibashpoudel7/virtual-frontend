@@ -37,81 +37,26 @@ export default function Login() {
 
   // Function to detect user type and login with correct endpoint
   const loginUser = async (email: string, password: string): Promise<LoginResponse> => {
-    // Check if we have a cached user type for this email
-    const cachedUserType = typeof window !== 'undefined' ? 
-      localStorage.getItem(`userType_${email}`) : null;
-    
-    if (cachedUserType === 'vendor') {
-      // Try vendor login first if we know this is a vendor
+    try {
+      // Try vendor login first
+      const response = await nestedApiClient.post<LoginResponse>('/vendor/login', { 
+        email, 
+        password 
+      });
+      return response;
+    } catch (vendorError) {
+      const error = vendorError as ApiError;
+      
+      // If vendor login fails, try customer login as fallback
       try {
-        const response = await nestedApiClient.post<LoginResponse>('/vendor/login', { 
+        const customerResponse = await nestedApiClient.post<LoginResponse>('/login', { 
           email, 
           password 
         });
-        return response;
-      } catch (vendorError) {
-        // If vendor login fails, clear cache and try customer login
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem(`userType_${email}`);
-        }
-        return await nestedApiClient.post<LoginResponse>('/login', { 
-          email, 
-          password 
-        });
-      }
-    } else if (cachedUserType === 'customer') {
-      // Try customer login first if we know this is a customer
-      try {
-        const response = await nestedApiClient.post<LoginResponse>('/login', { 
-          email, 
-          password 
-        });
-        return response;
+        return customerResponse;
       } catch (customerError) {
-        const error = customerError as ApiError;
-        
-        // If customer login fails with "not allowed", clear cache and try vendor
-        if (error.response?.data?.message?.includes('not allowed') || 
-            error.response?.status === 403) {
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem(`userType_${email}`);
-          }
-          return await nestedApiClient.post<LoginResponse>('/vendor/login', { 
-            email, 
-            password 
-          });
-        } else {
-          throw customerError;
-        }
-      }
-    } else {
-      const customerLoginPromise = nestedApiClient.post<LoginResponse>('/login', { 
-        email, 
-        password 
-      }).then(response => ({ response, type: 'customer' as const }));
-      
-      const vendorLoginPromise = nestedApiClient.post<LoginResponse>('/vendor/login', { 
-        email, 
-        password 
-      }).then(response => ({ response, type: 'vendor' as const }));
-      
-      try {
-        const result = await Promise.any([customerLoginPromise, vendorLoginPromise]);
-        
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(`userType_${email}`, result.type);
-        }
-        
-        return result.response;
-      } catch (error) {
-        // If both fail, throw a generic error
-        throw {
-          response: {
-            data: {
-              message: 'Invalid email or password',
-            },
-          },
-        } as ApiError;
+        // If both fail, throw the more specific error
+        throw vendorError;
       }
     }
   };
