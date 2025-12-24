@@ -6,7 +6,9 @@ import {
   GetUploadURLResponse, 
   ProcessCubemapRequest, 
   ProcessCubemapResponse,
-  CreateHotspotRequest 
+  CreateHotspotRequest,
+  Property,
+  PropertiesResponse
 } from '@/types/tour';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -14,10 +16,23 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 class TourService {
   private async fetchWithAuth(url: string, options?: RequestInit) {
     const token = localStorage.getItem('accessToken');
+    const userData = localStorage.getItem('user_data');
+    
+    let role = '';
+    if (userData) {
+      try {
+        const user = JSON.parse(userData);
+        // TheNimto backend stores role as 'roles' (number), not 'role'
+        role = user.roles?.toString() || user.role?.toString() || '';
+      } catch (error) {
+        console.error('Error parsing user data:', error);
+      }
+    }
     
     const headers = {
       'Content-Type': 'application/json',
       ...(token && { Authorization: `Bearer ${token}` }),
+      ...(role && { 'X-User-Role': role }),
       ...options?.headers,
     };
 
@@ -39,6 +54,14 @@ class TourService {
       method: 'POST',
       body: JSON.stringify(tour),
     });
+  }
+
+  async getApprovedProperties(): Promise<PropertiesResponse> {
+    return this.fetchWithAuth('properties/approved');
+  }
+
+  async getCompanyInfo(): Promise<any> {
+    return this.fetchWithAuth('properties/company-info');
   }
 
   async getTour(id: string): Promise<Tour> {
