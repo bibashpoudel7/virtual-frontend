@@ -12,6 +12,7 @@ const Footer = () => {
       { name: 'Partners', href: '/partners' },
     ],
     services: [
+      { name: 'Browse Tours', href: '/showcase' },
       { name: 'Virtual Tours', href: '/tours' },
       { name: 'Live Events', href: '/events' },
       { name: 'Custom Solutions', href: '/custom' },

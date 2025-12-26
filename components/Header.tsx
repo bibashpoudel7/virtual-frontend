@@ -5,15 +5,24 @@ import { useAuth } from '../contexts/AuthContext';
 
 const Header: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { isAuthenticated, user, logout } = useAuth();
+  const { isAuthenticated, logout } = useAuth();
 
-  const navigation = [
+  const publicNavigation = [
     { name: 'Home', href: '/', icon: Home },
-    { name: 'Tours', href: '/admin/tours', icon: MapPin },
-    { name: 'Schedule', href: '/schedule', icon: Calendar },
+    { name: 'Browse Tours', href: '/showcase', icon: MapPin },
     { name: 'Pricing', href: '/pricing', icon: DollarSign },
     { name: 'Contact', href: '/contact', icon: Phone },
   ];
+
+  const authenticatedNavigation = [
+    { name: 'Home', href: '/', icon: Home },
+    { name: 'Browse Tours', href: '/showcase', icon: MapPin },
+    { name: 'My Tours', href: '/admin/tours', icon: Calendar },
+    { name: 'Pricing', href: '/pricing', icon: DollarSign },
+    { name: 'Contact', href: '/contact', icon: Phone },
+  ];
+
+  const navigation = isAuthenticated ? authenticatedNavigation : publicNavigation;
 
   const handleLogout = () => {
     logout();
@@ -27,7 +36,9 @@ const Header: React.FC = () => {
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <h1 className="text-2xl font-bold text-indigo-600">VirtualTours</h1>
+              <a href="/" className="text-2xl font-bold text-indigo-600 hover:text-indigo-700 transition-colors">
+                VirtualTours
+              </a>
             </div>
           </div>
 
