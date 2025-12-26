@@ -7,10 +7,10 @@ export async function GET(
   try {
     const { id } = await params;
     const tourId = id;
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
     
     // Fetch tour details with scenes
-    const tourResponse = await fetch(`${backendUrl}/api/tours/${tourId}`, {
+    const tourResponse = await fetch(`${backendUrl}tours/${tourId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -35,7 +35,7 @@ export async function GET(
     }
 
     // Fetch scenes for this tour
-    const scenesResponse = await fetch(`${backendUrl}/api/tours/${tourId}/scenes`, {
+    const scenesResponse = await fetch(`${backendUrl}tours/${tourId}/scenes`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
