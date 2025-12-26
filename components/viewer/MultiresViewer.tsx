@@ -297,7 +297,7 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
 
   const removeOverlappingTiles = useCallback((level: number, col: number, row: number) => {
     const manifestSnapshot = manifestRef.current;
-    if (!manifestSnapshot) return;
+    if (!manifestSnapshot || !manifestSnapshot.levels || !Array.isArray(manifestSnapshot.levels)) return;
 
     const targetLevelInfo = manifestSnapshot.levels[level];
     if (!targetLevelInfo) return;
@@ -356,7 +356,7 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     const targetSceneId = currentSceneIdRef.current;
     const scene = sceneRef.current;
 
-    if (!manifestSnapshot || !scene) {
+    if (!manifestSnapshot || !scene || !manifestSnapshot.levels || !Array.isArray(manifestSnapshot.levels)) {
       pendingSetRef.current.delete(request.key);
       return;
     }
@@ -522,11 +522,12 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     const sceneId = currentSceneIdRef.current;
     const container = containerRef.current;
 
-    if (!manifestSnapshot || !sceneId || !container) {
+    if (!manifestSnapshot || !sceneId || !container || !manifestSnapshot.levels || !Array.isArray(manifestSnapshot.levels)) {
       console.log('[updateVisibleTiles] Missing requirements:', {
         hasManifest: !!manifestSnapshot,
         hasSceneId: !!sceneId,
-        hasContainer: !!container
+        hasContainer: !!container,
+        hasLevels: !!(manifestSnapshot?.levels && Array.isArray(manifestSnapshot.levels))
       });
       return;
     }

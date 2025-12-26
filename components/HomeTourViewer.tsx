@@ -4,7 +4,141 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Tour, Scene } from '@/types/tour';
 import { tourService } from '@/services/tourService';
 import MultiresViewer from './viewer/MultiresViewer';
-import { ChevronLeft, ChevronRight, Play, Maximize, Minimize } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy, X } from 'lucide-react';
+
+// Share Modal Component
+const ShareModal = React.memo(({ 
+  isOpen, 
+  onClose, 
+  tourName, 
+  tourUrl 
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  tourName: string;
+  tourUrl: string;
+}) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(tourUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy:', error);
+    }
+  };
+
+  const shareLinks = {
+    facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(tourUrl)}`,
+    twitter: `https://twitter.com/intent/tweet?url=${encodeURIComponent(tourUrl)}&text=${encodeURIComponent(`Check out this amazing virtual tour: ${tourName}`)}`,
+    linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(tourUrl)}`,
+    pinterest: `https://pinterest.com/pin/create/button/?url=${encodeURIComponent(tourUrl)}&description=${encodeURIComponent(`Virtual Tour: ${tourName}`)}`,
+    email: `mailto:?subject=${encodeURIComponent(`Virtual Tour: ${tourName}`)}&body=${encodeURIComponent(`Check out this amazing virtual tour: ${tourName}\n\n${tourUrl}`)}`
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div 
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div 
+        className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h3 className="text-xl font-semibold text-gray-900">Share</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
+          {/* Social Share Buttons */}
+          <div className="flex justify-center gap-4 mb-6">
+            <a
+              href={shareLinks.facebook}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-12 h-12 bg-gray-100 hover:bg-blue-100 rounded-full flex items-center justify-center transition-colors group cursor-pointer"
+              title="Share on Facebook"
+            >
+              <Facebook className="w-6 h-6 text-gray-600 group-hover:text-blue-600" />
+            </a>
+            <a
+              href={shareLinks.twitter}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-12 h-12 bg-gray-100 hover:bg-blue-100 rounded-full flex items-center justify-center transition-colors group cursor-pointer"
+              title="Share on Twitter"
+            >
+              <Twitter className="w-6 h-6 text-gray-600 group-hover:text-blue-400" />
+            </a>
+            <a
+              href={shareLinks.linkedin}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-12 h-12 bg-gray-100 hover:bg-blue-100 rounded-full flex items-center justify-center transition-colors group cursor-pointer"
+              title="Share on LinkedIn"
+            >
+              <Linkedin className="w-6 h-6 text-gray-600 group-hover:text-blue-700" />
+            </a>
+            <a
+              href={shareLinks.pinterest}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-12 h-12 bg-gray-100 hover:bg-red-100 rounded-full flex items-center justify-center transition-colors group cursor-pointer"
+              title="Share on Pinterest"
+            >
+              <div className="w-6 h-6 bg-red-600 rounded-full flex items-center justify-center text-white text-xs font-bold group-hover:bg-red-700 transition-colors">
+                P
+              </div>
+            </a>
+            <a
+              href={shareLinks.email}
+              className="w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center transition-colors group cursor-pointer"
+              title="Share via Email"
+            >
+              <Mail className="w-6 h-6 text-gray-600 group-hover:text-gray-800" />
+            </a>
+          </div>
+
+          {/* URL Copy Section */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+              <input
+                type="text"
+                value={tourUrl}
+                readOnly
+                className="flex-1 bg-transparent text-sm text-gray-600 outline-none"
+              />
+              <button
+                onClick={handleCopy}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors cursor-pointer ${
+                  copied 
+                    ? 'bg-green-100 text-green-700' 
+                    : 'bg-gray-900 text-white hover:bg-gray-800'
+                }`}
+              >
+                {copied ? 'Copied!' : 'COPY'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+ShareModal.displayName = 'ShareModal';
 
 interface HomeTourViewerProps {
   className?: string;
@@ -44,13 +178,13 @@ const ProgressBar = React.memo(({
 
     if (isAutoplay) {
       // Resume from paused progress or start fresh
-      startTimeRef.current = Date.now() - (pausedProgressRef.current * 6000);
+      startTimeRef.current = Date.now() - (pausedProgressRef.current * 12000);
       
       const updateProgress = () => {
         if (!progressBarRef.current || isTransitioning) return;
         
         const elapsed = Date.now() - startTimeRef.current;
-        const progress = Math.min(1, elapsed / 6000); // 6 second duration
+        const progress = Math.min(1, elapsed / 12000); // 12 second duration
         
         // Store current progress for potential pause
         pausedProgressRef.current = progress;
@@ -198,7 +332,12 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const [isAudioMuted, setIsAudioMuted] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Fetch tours on component mount
   useEffect(() => {
@@ -259,7 +398,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         setTimeout(() => setIsTransitioning(false), 600);
         return nextIndex;
       });
-    }, 6000); // Change scene every 6 seconds
+    }, 12000); // Change scene every 12 seconds
 
     return () => {
       clearInterval(sceneInterval);
@@ -398,6 +537,183 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     };
   }, [isFullscreen, isTransitioning, handlePrevScene, handleNextScene, toggleAutoplay, toggleFullscreen]);
 
+  // Initialize background audio
+  useEffect(() => {
+    // Clean up any existing audio first
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    if (currentTour?.background_audio_url && currentTour.background_audio_url.trim() !== '') {
+      console.log('Loading tour-specific audio:', currentTour.background_audio_url);
+      
+      // Check if it's a sharing service URL that needs extraction
+      const isFileSharing = (currentTour.background_audio_url.includes('jumpshare.com') && currentTour.background_audio_url.includes('/share/')) || 
+                           (currentTour.background_audio_url.includes('audio.com') && currentTour.background_audio_url.includes('/audio/')) || 
+                           (currentTour.background_audio_url.includes('soundcloud.com') && currentTour.background_audio_url.includes('/tracks/')) ||
+                           (currentTour.background_audio_url.includes('dropbox.com') && currentTour.background_audio_url.includes('/s/')) ||
+                           (currentTour.background_audio_url.includes('drive.google.com') && currentTour.background_audio_url.includes('/file/d/'));
+      
+      if (isFileSharing) {
+        // Extract audio URL for sharing services
+        extractTourAudio(currentTour.background_audio_url);
+      } else {
+        // Direct audio URL
+        loadTourAudio(currentTour.background_audio_url);
+      }
+    } else {
+      // No tour-specific audio, load default audio
+      console.log('No tour-specific audio found, loading default audio');
+      loadDefaultAudio();
+    }
+    
+    // Cleanup function
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, [currentTour?.background_audio_url]);
+
+  // Extract audio from sharing services for tour-specific audio
+  const extractTourAudio = async (audioUrl: string) => {
+    try {
+      console.log('Extracting tour audio from sharing service:', audioUrl);
+      const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(audioUrl)}`);
+      const result = await response.json();
+      
+      if (result.success && result.audioUrl) {
+        console.log('Tour audio extraction successful');
+        loadTourAudio(result.audioUrl);
+      } else {
+        console.warn('Tour audio extraction failed, trying direct URL');
+        loadTourAudio(audioUrl);
+      }
+    } catch (error) {
+      console.error('Tour audio extraction error:', error);
+      loadTourAudio(audioUrl);
+    }
+  };
+
+  // Load tour-specific audio
+  const loadTourAudio = (audioUrl: string) => {
+    console.log('Loading tour audio:', audioUrl);
+    const audio = new Audio(audioUrl);
+    audio.loop = true;
+    audio.volume = 0.5; // Set default volume to 50%
+    audio.muted = true; // Start muted
+    audio.crossOrigin = 'anonymous';
+    
+    audio.addEventListener('canplay', () => {
+      console.log('Tour background audio loaded successfully');
+      setAudioError(null);
+    });
+    
+    audio.addEventListener('error', (e) => {
+      console.error('Tour background audio error:', e);
+      setAudioError('Failed to load tour background audio');
+    });
+    
+    audio.addEventListener('play', () => setIsAudioPlaying(true));
+    audio.addEventListener('pause', () => setIsAudioPlaying(false));
+    
+    audioRef.current = audio;
+    setIsAudioMuted(true);
+    setIsAudioPlaying(false);
+  };
+
+  // Load default audio function
+  const loadDefaultAudio = async () => {
+    const defaultAudioUrl = 'https://audio.com/saransh-pachhai/audio/niya-a-bloom-vlog-no-copyright-music';
+    
+    try {
+      console.log('Loading default audio from audio.com...');
+      // Extract direct audio URL from audio.com for default audio
+      const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(defaultAudioUrl)}`);
+      const result = await response.json();
+      
+      if (result.success && result.audioUrl) {
+        console.log('Default audio extraction successful');
+        const audio = new Audio(result.audioUrl);
+        audio.loop = true;
+        audio.volume = 0.3; // Lower volume for default audio
+        audio.muted = true;
+        audio.crossOrigin = 'anonymous';
+        
+        audio.addEventListener('canplay', () => {
+          console.log('Default background audio loaded successfully');
+        });
+        
+        audio.addEventListener('error', (e) => {
+          console.log('Default audio playback error, using visual-only toggle');
+        });
+        
+        audio.addEventListener('play', () => setIsAudioPlaying(true));
+        audio.addEventListener('pause', () => setIsAudioPlaying(false));
+        
+        audioRef.current = audio;
+        setIsAudioMuted(true);
+        setIsAudioPlaying(false);
+      } else {
+        console.warn('Default audio extraction failed, using visual-only toggle');
+        setIsAudioMuted(true);
+        setIsAudioPlaying(false);
+      }
+    } catch (error) {
+      console.error('Default audio extraction error:', error);
+      setIsAudioMuted(true);
+      setIsAudioPlaying(false);
+    }
+  };
+
+  // Audio control functions - Single toggle button (works even without audio)
+  const toggleAudio = useCallback(() => {
+    console.log('Audio toggle clicked', { isAudioPlaying, isAudioMuted, audioRef: !!audioRef.current });
+    
+    if (audioRef.current) {
+      // If we have actual audio
+      if (isAudioPlaying && !isAudioMuted) {
+        // If playing and not muted, pause and mute
+        console.log('Pausing and muting audio');
+        audioRef.current.pause();
+        audioRef.current.muted = true;
+        setIsAudioMuted(true);
+        setIsAudioPlaying(false);
+      } else {
+        // If paused or muted, play and unmute
+        console.log('Playing and unmuting audio');
+        audioRef.current.muted = false;
+        setIsAudioMuted(false);
+        audioRef.current.play().then(() => {
+          setIsAudioPlaying(true);
+        }).catch(err => {
+          console.error('Failed to play audio:', err);
+          setAudioError('Failed to play audio. User interaction may be required.');
+          setIsAudioPlaying(false);
+          setIsAudioMuted(true);
+        });
+      }
+    } else {
+      // No actual audio, just toggle the visual state for demo
+      console.log('No audio ref, toggling visual state');
+      if (isAudioPlaying) {
+        setIsAudioPlaying(false);
+        setIsAudioMuted(true);
+      } else {
+        setIsAudioPlaying(true);
+        setIsAudioMuted(false);
+      }
+    }
+  }, [isAudioPlaying, isAudioMuted]);
+
+  // Share functionality
+  const handleShare = useCallback(async () => {
+    // Always show modal for consistent experience
+    setShowShareModal(true);
+  }, []);
+
   if (loading) {
     return (
       <div className={`relative bg-gray-900 rounded-2xl overflow-hidden ${className}`}>
@@ -492,6 +808,29 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         {/* Top Right Controls - Only show when controls are active */}
         {showControls && (
           <div className="absolute top-4 right-4 z-30 flex gap-2">
+            {/* Share Button */}
+            <button
+              onClick={handleShare}
+              className="bg-black/50 backdrop-blur-sm text-white p-2 rounded-full hover:bg-black/70 transition-colors cursor-pointer"
+              title="Share Tour"
+            >
+              <Share2 className="w-5 h-5" />
+            </button>
+            
+            {/* Audio Control - Single toggle button */}
+            <button
+              onClick={toggleAudio}
+              className={`backdrop-blur-sm text-white p-2 rounded-full transition-colors cursor-pointer ${
+                isAudioPlaying 
+                  ? 'bg-green-600 hover:bg-green-700' 
+                  : 'bg-black/50 hover:bg-black/70'
+              }`}
+              title={isAudioPlaying ? 'Mute Audio' : 'Play Audio'}
+            >
+              {isAudioPlaying ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+            </button>
+            
+            {/* Fullscreen Button */}
             <button
               onClick={toggleFullscreen}
               className="bg-black/50 backdrop-blur-sm text-white p-2 rounded-full hover:bg-black/70 transition-colors cursor-pointer"
@@ -587,6 +926,14 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
           </>
         )}
       </div>
+
+      {/* Share Modal */}
+      <ShareModal
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        tourName={currentTour?.name || 'Virtual Tour'}
+        tourUrl={currentTour ? `${window.location.origin}/tours/${currentTour.id}` : window.location.href}
+      />
     </div>
   );
 };

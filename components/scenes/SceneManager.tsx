@@ -21,6 +21,8 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
   const [tempPreviewUrl, setTempPreviewUrl] = useState<string | null>(null); 
   const [newSceneName, setNewSceneName] = useState('');
   const [newSceneType, setNewSceneType] = useState<'360' | 'image' | 'video'>('360');
+  const [error, setError] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
   const [editedValues, setEditedValues] = useState<{ yaw: number, pitch: number, fov: number, order: number, type: string }>({
     yaw: 0,
     pitch: 0,
@@ -56,17 +58,35 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
 
 
   const createNewScene = async () => {
-    if (!newSceneName.trim()) return;
+    if (!newSceneName.trim()) {
+      setError('Scene name is required');
+      return;
+    }
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5555';
+      setIsCreating(true);
+      setError(null);
+      
+      const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
       const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
 
-      const response = await fetch(`${backendUrl}/api/tours/${tourId}/scenes`, {
+      if (!token) {
+        throw new Error('Authentication required. Please log in.');
+      }
+
+      console.log('Creating scene with:', {
+        tourId,
+        sceneName: newSceneName,
+        sceneType: newSceneType,
+        backendUrl,
+        hasToken: !!token
+      });
+
+      const response = await fetch(`${backendUrl}tours/${tourId}/scenes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           name: newSceneName,
@@ -79,7 +99,16 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
         })
       });
 
-      if (!response.ok) throw new Error('Failed to create scene');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Scene creation error details:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData
+        });
+        const errorMessage = errorData.error || `Failed to create scene (${response.status}: ${response.statusText})`;
+        throw new Error(errorMessage);
+      }
 
       const newScene = await response.json();
 
@@ -99,6 +128,9 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
 
     } catch (error) {
       console.error('Scene creation error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to create scene');
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -155,7 +187,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
     if (!selectedScene) return;
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5555';
+      const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
       const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
 
       const sceneTourId = selectedScene.tour_id || tourId;
@@ -177,7 +209,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
         overlays: selectedScene.overlays || []
       };
 
-      const response = await fetch(`${backendUrl}/api/scenes/${selectedScene.id}`, {
+      const response = await fetch(`${backendUrl}scenes/${selectedScene.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -320,7 +352,10 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
                     <input
                       type="text"
                       value={newSceneName}
-                      onChange={(e) => setNewSceneName(e.target.value)}
+                      onChange={(e) => {
+                        setNewSceneName(e.target.value);
+                        if (error) setError(null); // Clear error when user types
+                      }}
                       placeholder="e.g., Living Room, Entrance Hall"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-500"
                     />
@@ -339,21 +374,33 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
                     </select>
                   </div>
 
+                  {/* Error Display */}
+                  {error && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-red-700 text-sm">{error}</p>
+                    </div>
+                  )}
+
                   <div className="flex gap-3">
                     <button
                       onClick={createNewScene}
-                      disabled={!newSceneName.trim()}
-                      className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                      disabled={!newSceneName.trim() || isCreating}
+                      className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
                     >
-                      Create Scene & Upload Image
+                      {isCreating && (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      )}
+                      {isCreating ? 'Creating...' : 'Create Scene & Upload Image'}
                     </button>
                     <button
                       onClick={() => {
                         setShowInlineCreation(false);
                         setNewSceneName('');
                         setNewSceneType('360');
+                        setError(null);
                       }}
-                      className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 cursor-pointer"
+                      disabled={isCreating}
+                      className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 cursor-pointer"
                     >
                       Cancel
                     </button>

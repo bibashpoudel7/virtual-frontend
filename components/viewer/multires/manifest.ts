@@ -57,6 +57,12 @@ export function parseSceneManifest(scene: Scene): ExtendedManifest | null {
     return null;
   }
 
+  // Check if manifestLike is null or undefined after parsing
+  if (!manifestLike || typeof manifestLike !== 'object') {
+    console.error('[parseSceneManifest] Parsed manifest is null or not an object:', manifestLike);
+    return null;
+  }
+
   const tileSize = manifestLike.tileSize ?? manifestLike.tile_size ?? 512;
   const tilesArray = Array.isArray(manifestLike.tiles) ? manifestLike.tiles : [];
 
@@ -76,10 +82,17 @@ export function parseSceneManifest(scene: Scene): ExtendedManifest | null {
 
   levels.sort((a, b) => a.level - b.level);
 
+  // Safely access nested properties with fallbacks
   const originalWidth =
-    manifestLike.originalWidth ?? manifestLike.dimensions?.width ?? levels.at(-1)?.width ?? 4096;
+    manifestLike.originalWidth ?? 
+    manifestLike.dimensions?.width ?? 
+    levels.at(-1)?.width ?? 
+    4096;
   const originalHeight =
-    manifestLike.originalHeight ?? manifestLike.dimensions?.height ?? levels.at(-1)?.height ?? 2048;
+    manifestLike.originalHeight ?? 
+    manifestLike.dimensions?.height ?? 
+    levels.at(-1)?.height ?? 
+    2048;
 
   const manifest: ExtendedManifest = {
     type: manifestLike.type ?? 'multires',
