@@ -24,7 +24,7 @@ export default function MicrofrontendWrapper({
 }: MicrofrontendWrapperProps) {
   const [isConfigured, setIsConfigured] = useState(false);
   const [configuration, setConfiguration] = useState<MicrofrontendConfig>({
-    apiUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080',
+    apiUrl: process.env.NEXT_PUBLIC_API_BASE_URL_NESTED || 'http://localhost:8080/',
     mainAppUrl: process.env.NEXT_PUBLIC_MAIN_APP_URL || 'http://localhost:3001',
     stripePublicKey: process.env.NEXT_PUBLIC_STRIPE_PUBLIC_KEY || '',
     mode: 'standalone',

@@ -116,10 +116,10 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
     updateStage('scene', 'processing');
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5555';
+      const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
       const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
       
-      const response = await fetch(`${backendUrl}/api/tours/${tourId}/scenes`, {
+      const response = await fetch(`${backendUrl}tours/${tourId}/scenes`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -398,12 +398,12 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       }
 
       // Send URLs and manifest to backend for database storage
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5555';
+      const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
       
       // Get auth token from localStorage or sessionStorage
       const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
       
-      const response = await fetch(`${backendUrl}/api/scenes/${sceneId}/update-images`, {
+      const response = await fetch(`${backendUrl}scenes/${sceneId}/update-images`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

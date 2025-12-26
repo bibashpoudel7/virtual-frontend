@@ -722,7 +722,7 @@ export default function OverlayEditor({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (confirm('Are you sure you want to delete this overlay?')) {
+                    if (overlay.id && confirm('Are you sure you want to delete this overlay?')) {
                       onOverlayDeleted?.(overlay.id);
                     }
                   }}
