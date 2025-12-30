@@ -46,7 +46,22 @@ class TourService {
       throw new Error(error.error || `HTTP error! status: ${response.status}`);
     }
 
-    return response.json();
+    // Handle empty responses
+    if (response.status === 204 || response.headers.get('content-length') === '0') {
+      return;
+    }
+
+    // Try to parse JSON, but handle empty responses gracefully
+    const text = await response.text();
+    if (!text) {
+      return;
+    }
+    
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
   }
 
   async createTour(tour: Partial<Tour>): Promise<Tour> {
@@ -100,7 +115,8 @@ class TourService {
   }
 
   async listHotspots(sceneId: string): Promise<Hotspot[]> {
-    return this.fetchWithAuth(`scenes/${sceneId}/hotspots`);
+    const response = await this.fetchWithAuth(`scenes/${sceneId}/hotspots`);
+    return Array.isArray(response) ? response : (response.hotspots || []);
   }
 
   async uploadToCloudflare(uploadUrl: string, file: File): Promise<void> {

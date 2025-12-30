@@ -108,7 +108,7 @@ export interface Overlay {
   id?: string;
   tour_id: string;
   scene_id: string;
-  kind: 'text' | 'image' | 'video';
+  kind: 'text' | 'image' | 'video' | 'html' | 'badge' | 'tooltip';
   yaw: number;
   pitch: number;
   payload?: string;
