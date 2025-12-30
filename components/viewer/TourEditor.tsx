@@ -7,6 +7,25 @@ import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { HotspotsAPI } from '@/lib/api/hotspots';
 import { tourService } from '@/services/tourService';
 
+// Simple debounce utility with cancel method
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  wait: number
+): ((...args: Parameters<T>) => void) & { cancel: () => void } {
+  let timeout: NodeJS.Timeout;
+  
+  const debounced = (...args: Parameters<T>) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  };
+  
+  debounced.cancel = () => {
+    clearTimeout(timeout);
+  };
+  
+  return debounced;
+}
+
 interface TourEditorProps {
   tour: Tour;
   scenes: Scene[];
@@ -18,6 +37,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const [isEditMode, setIsEditMode] = useState(false); // Disable edit mode by default
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [overlays, setOverlays] = useState<Overlay[]>([]);
+  const [pendingSaves, setPendingSaves] = useState<Set<string>>(new Set()); // Track hotspots with pending saves
   const [showHotspotDialog, setShowHotspotDialog] = useState(false);
   const [showOverlayDialog, setShowOverlayDialog] = useState(false);
   const [pendingHotspot, setPendingHotspot] = useState<{ yaw: number; pitch: number } | null>(null);
@@ -265,13 +285,37 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     } finally {
       setIsLoading(false);
     }
+  // Cleanup debounced calls on unmount
+  useEffect(() => {
+    return () => {
+      // Cancel any pending debounced API calls when component unmounts
+      debouncedUpdateHotspotAPI.cancel();
+    };
+  }, [debouncedUpdateHotspotAPI]);
+
   }, [pendingHotspot, selectedTargetScene, infoText, linkUrl, hotspotType, tour.id, currentSceneId, hotspots]);
 
-  const updateHotspot = useCallback(async (updatedHotspot: Hotspot) => {
+  // Immediate visual update function (no API call)
+  const updateHotspotVisually = useCallback((updatedHotspot: Hotspot) => {
+    if (!updatedHotspot.id) return;
+    
+    // Update local state immediately for visual feedback
+    setHotspots(prevHotspots => 
+      prevHotspots.map(h => 
+        h.id === updatedHotspot.id 
+          ? { ...h, yaw: updatedHotspot.yaw, pitch: updatedHotspot.pitch } 
+          : h
+      )
+    );
+  }, []);
+
+  // API update function (called after debounce)
+  const updateHotspotAPI = useCallback(async (updatedHotspot: Hotspot) => {
     if (!updatedHotspot.id) return;
     
     try {
-      setIsLoading(true);
+      // Add to pending saves
+      setPendingSaves(prev => new Set(prev).add(updatedHotspot.id!));
       
       // Send the full hotspot data with updated position
       const updateData = {
@@ -285,25 +329,43 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         payload: updatedHotspot.payload
       };
       
-      const updated = await HotspotsAPI.updateHotspot(
+      await HotspotsAPI.updateHotspot(
         tour.id,
         currentSceneId,
         updatedHotspot.id,
         updateData as any
       );
       
-      // Update local state
-      setHotspots(hotspots.map(h => 
-        h.id === updatedHotspot.id ? { ...h, yaw: updatedHotspot.yaw, pitch: updatedHotspot.pitch } : h
-      ));
       setError(null);
     } catch (err) {
       console.error('Failed to update hotspot:', err);
       setError('Failed to update hotspot position');
+      
+      // Note: Consider refetching hotspots on error if needed
     } finally {
-      setIsLoading(false);
+      // Remove from pending saves
+      setPendingSaves(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(updatedHotspot.id!);
+        return newSet;
+      });
     }
-  }, [hotspots, tour.id, currentSceneId]);
+  }, [tour.id, currentSceneId]);
+
+  // Debounced API update (1 second delay)
+  const debouncedUpdateHotspotAPI = useCallback(
+    debounce(updateHotspotAPI, 1000),
+    [updateHotspotAPI]
+  );
+
+  // Combined update function that handles both immediate visual update and debounced API call
+  const updateHotspot = useCallback((updatedHotspot: Hotspot) => {
+    // Immediate visual update for smooth dragging
+    updateHotspotVisually(updatedHotspot);
+    
+    // Debounced API update (only called after user stops dragging for 1 second)
+    debouncedUpdateHotspotAPI(updatedHotspot);
+  }, [updateHotspotVisually, debouncedUpdateHotspotAPI]);
 
   const deleteHotspot = useCallback(async (hotspotId: string) => {
     if (!hotspotId) return;
@@ -739,30 +801,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                     {isAudioLoading ? '⏳' : isAudioPlaying ? '⏸️' : '🎵'}
                   </span>
                 </button>
-                
-                {/* Mute Control */}
-                <button
-                  onClick={toggleAudioMute}
-                  disabled={isAudioLoading}
-                  className={`p-2 rounded transition-colors flex items-center justify-center ${
-                    isAudioLoading
-                      ? 'bg-white bg-opacity-10 text-white cursor-not-allowed'
-                      : isAudioMuted 
-                      ? 'bg-red-600 text-white hover:bg-red-700 cursor-pointer' 
-                      : 'bg-white bg-opacity-20 text-white hover:bg-opacity-30 cursor-pointer'
-                  }`}
-                  title={
-                    isAudioLoading 
-                      ? 'Loading audio...' 
-                      : isAudioMuted 
-                      ? 'Unmute Audio' 
-                      : 'Mute Audio'
-                  }
-                >
-                  <span className="text-sm">
-                    {isAudioMuted ? '🔇' : '🔊'}
-                  </span>
-                </button>
               </div>
             </div>
           )}
@@ -1080,6 +1118,16 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                                 {hotspot.kind === 'link' && '🔗'}
                               </span>
                               <span className="font-medium">{displayLabel}</span>
+                              {/* Save indicator */}
+                              {hotspot.id && pendingSaves.has(hotspot.id) && (
+                                <span className="flex items-center gap-1 text-xs text-blue-600">
+                                  <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                  Saving...
+                                </span>
+                              )}
                             </span>
                             {hotspot?.id && (
                               <button

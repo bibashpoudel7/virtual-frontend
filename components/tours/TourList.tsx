@@ -17,6 +17,7 @@ export default function TourList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [updatingTours, setUpdatingTours] = useState<Set<string>>(new Set());
   const [visibilityDropdowns, setVisibilityDropdowns] = useState<Set<string>>(new Set());
   const [deleteModal, setDeleteModal] = useState<{
@@ -33,13 +34,14 @@ export default function TourList() {
   const router = useRouter();
 
   useEffect(() => {
-    // Get user role from localStorage
+    // Get user role and ID from localStorage
     const userData = localStorage.getItem('user_data');
     if (userData) {
       try {
         const user = JSON.parse(userData);
         const role = user.roles?.toString() || user.role?.toString() || null;
         setUserRole(role);
+        setCurrentUserId(user.id || user.user_id || null);
       } catch (error) {
         console.error('Error parsing user data:', error);
       }
@@ -204,7 +206,7 @@ export default function TourList() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Superadmin function to change tour publication status
+  // Superadmin-only function to change tour publication status
   const changePublishStatus = async (tourId: string, newStatus: boolean, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent card click
     
@@ -258,15 +260,10 @@ export default function TourList() {
     }
   };
 
-  // Superadmin function to open delete modal
+  // Function to open delete modal (for superadmins and tour owners)
   const openDeleteModal = (tourId: string, tourName: string, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent card click
     event.preventDefault(); // Prevent any default behavior
-    
-    if (userRole !== '1') {
-      alert('Only superadmins can delete tours');
-      return;
-    }
     
     // Close any open dropdowns first
     setVisibilityDropdowns(new Set());
@@ -279,7 +276,7 @@ export default function TourList() {
     });
   };
 
-  // Superadmin function to confirm delete tour
+  // Function to confirm delete tour (for superadmins and tour owners)
   const confirmDeleteTour = async () => {
     if (!deleteModal.tourId) return;
     
@@ -483,54 +480,56 @@ export default function TourList() {
                       {tour.is_published ? 'Published' : 'Draft'}
                     </span>
                     
-                    {/* Superadmin Actions */}
-                    {userRole === '1' && (
+                    {/* Actions for Superadmins and Tour Owners */}
+                    {(userRole === '1' || tour.user_id === currentUserId) && (
                       <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
-                        {/* Compact Visibility Toggle */}
-                        <div className="relative dropdown-container">
-                          <button
-                            onClick={(e) => toggleVisibilityDropdown(tour.id, e)}
-                            disabled={updatingTours.has(tour.id)}
-                            className="p-1.5 rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100 hover:scale-105 transition-all disabled:opacity-50 cursor-pointer"
-                            title="Change visibility"
-                          >
-                            <Icon icon="material-symbols:visibility-outline" className="w-4 h-4" />
-                          </button>
-                          
-                          {/* Dropdown Menu */}
-                          {visibilityDropdowns.has(tour.id) && (
-                            <div 
-                              className="absolute right-0 top-full mt-2 bg-white border border-gray-200 rounded-lg shadow-xl z-50 min-w-[140px] overflow-hidden"
-                              style={{ position: 'absolute', zIndex: 9999 }}
+                        {/* Visibility Toggle - Only for Superadmins */}
+                        {userRole === '1' && (
+                          <div className="relative dropdown-container">
+                            <button
+                              onClick={(e) => toggleVisibilityDropdown(tour.id, e)}
+                              disabled={updatingTours.has(tour.id)}
+                              className="p-1.5 rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100 hover:scale-105 transition-all disabled:opacity-50 cursor-pointer"
+                              title="Change visibility"
                             >
-                              <button
-                                onClick={(e) => changePublishStatus(tour.id, true, e)}
-                                disabled={tour.is_published}
-                                className={`w-full px-4 py-3 text-left text-sm hover:bg-gray-50 flex items-center gap-3 transition-colors ${
-                                  tour.is_published ? 'text-gray-400 cursor-not-allowed bg-gray-50' : 'text-green-700 hover:bg-green-50 cursor-pointer'
-                                }`}
+                              <Icon icon="material-symbols:visibility-outline" className="w-4 h-4" />
+                            </button>
+                            
+                            {/* Dropdown Menu */}
+                            {visibilityDropdowns.has(tour.id) && (
+                              <div 
+                                className="absolute right-0 top-full mt-2 bg-white border border-gray-200 rounded-lg shadow-xl z-50 min-w-[140px] overflow-hidden"
+                                style={{ position: 'absolute', zIndex: 9999 }}
                               >
-                                <Icon icon="material-symbols:visibility" className="w-4 h-4" />
-                                Published
-                                {tour.is_published && <Icon icon="material-symbols:check" className="w-4 h-4 ml-auto text-green-600" />}
-                              </button>
-                              <div className="border-t border-gray-100"></div>
-                              <button
-                                onClick={(e) => changePublishStatus(tour.id, false, e)}
-                                disabled={!tour.is_published}
-                                className={`w-full px-4 py-3 text-left text-sm hover:bg-gray-50 flex items-center gap-3 transition-colors ${
-                                  !tour.is_published ? 'text-gray-400 cursor-not-allowed bg-gray-50' : 'text-yellow-700 hover:bg-yellow-50 cursor-pointer'
-                                }`}
-                              >
-                                <Icon icon="material-symbols:visibility-off" className="w-4 h-4" />
-                                Draft
-                                {!tour.is_published && <Icon icon="material-symbols:check" className="w-4 h-4 ml-auto text-yellow-600" />}
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                                <button
+                                  onClick={(e) => changePublishStatus(tour.id, true, e)}
+                                  disabled={tour.is_published}
+                                  className={`w-full px-4 py-3 text-left text-sm hover:bg-gray-50 flex items-center gap-3 transition-colors ${
+                                    tour.is_published ? 'text-gray-400 cursor-not-allowed bg-gray-50' : 'text-green-700 hover:bg-green-50 cursor-pointer'
+                                  }`}
+                                >
+                                  <Icon icon="material-symbols:visibility" className="w-4 h-4" />
+                                  Published
+                                  {tour.is_published && <Icon icon="material-symbols:check" className="w-4 h-4 ml-auto text-green-600" />}
+                                </button>
+                                <div className="border-t border-gray-100"></div>
+                                <button
+                                  onClick={(e) => changePublishStatus(tour.id, false, e)}
+                                  disabled={!tour.is_published}
+                                  className={`w-full px-4 py-3 text-left text-sm hover:bg-gray-50 flex items-center gap-3 transition-colors ${
+                                    !tour.is_published ? 'text-gray-400 cursor-not-allowed bg-gray-50' : 'text-yellow-700 hover:bg-yellow-50 cursor-pointer'
+                                  }`}
+                                >
+                                  <Icon icon="material-symbols:visibility-off" className="w-4 h-4" />
+                                  Draft
+                                  {!tour.is_published && <Icon icon="material-symbols:check" className="w-4 h-4 ml-auto text-yellow-600" />}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         
-                        {/* Compact Delete Button */}
+                        {/* Delete Button - For both Superadmins and Tour Owners */}
                         <button
                           onClick={(e) => openDeleteModal(tour.id, tour.name, e)}
                           className="p-1.5 rounded-md bg-red-50 text-red-600 hover:bg-red-100 hover:scale-105 transition-all cursor-pointer"

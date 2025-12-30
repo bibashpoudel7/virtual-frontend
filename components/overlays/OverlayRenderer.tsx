@@ -916,180 +916,219 @@ export default function OverlayRenderer({
       }
     };
 
-    return (
-      <>
-        {/* Right Sidebar - positioned absolutely, doesn't interfere with canvas */}
-        <div className="fixed top-0 right-0 w-80 h-full bg-white shadow-2xl overflow-y-auto z-[500] pointer-events-auto">
-          {/* Close button - top right with dark color */}
-          <button
-            onClick={() => {
-              setIsModalOpen(false);
-              setExpandedOverlay(null);
-            }}
-            className="absolute top-4 right-4 text-gray-800 hover:text-gray-600 transition-colors z-10 cursor-pointer"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+    // Different layout based on fullscreen mode
+    if (isFullscreen) {
+      // Fullscreen mode: Show as overlay on the viewer
+      return (
+        <>
+          {/* Right Sidebar - positioned absolutely, doesn't interfere with canvas */}
+          <div className="fixed top-0 right-0 w-80 h-full bg-white shadow-2xl overflow-y-auto z-[500] pointer-events-auto">
+            {/* Close button - top right with dark color */}
+            <button
+              onClick={() => {
+                setIsModalOpen(false);
+                setExpandedOverlay(null);
+              }}
+              className="absolute top-4 right-4 text-gray-800 hover:text-gray-600 transition-colors z-10 cursor-pointer"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
 
-          <div className="p-6 pt-16">
-            {/* Horizontal line */}
-            <div className="border-t border-gray-200 mb-6"></div>
+            <div className="p-6 pt-16">
+              {/* Horizontal line */}
+              <div className="border-t border-gray-200 mb-6"></div>
 
-            {/* Image content in sidebar */}
-            {expandedOverlay.kind === 'image' && payload.imageUrl && (
-              <div className="mb-4">
-                {/* Image header with icon and text */}
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                  <span className="text-lg font-medium text-gray-700">Image</span>
-                </div>
-                
-                <img
-                  src={payload.imageUrl}
-                  alt={payload.alt || 'Overlay image'}
-                  className="w-full h-48 object-cover rounded-lg"
-                  onError={(e) => {
-                    e.currentTarget.src = '/placeholder-image.jpg';
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Video content in sidebar */}
-            {expandedOverlay.kind === 'video' && payload.videoUrl && (
-              <div className="mb-4">
-                {/* Video header with icon and text */}
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
-                    <svg className="w-5 h-5 text-red-600" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z"/>
-                    </svg>
-                  </div>
-                  <span className="text-lg font-medium text-gray-700">Video</span>
-                </div>
-                
-                {(() => {
-                  // Extract YouTube video ID from various URL formats
-                  let videoId = null;
-                  let videoSrc = payload.videoUrl;
-                  
-                  if (videoSrc.includes('youtube.com/watch?v=')) {
-                    videoId = videoSrc.split('v=')[1]?.split('&')[0];
-                  } else if (videoSrc.includes('youtu.be/')) {
-                    videoId = videoSrc.split('youtu.be/')[1]?.split('?')[0];
-                  } else if (videoSrc.includes('youtube.com/embed/')) {
-                    videoId = videoSrc.split('/embed/')[1]?.split('?')[0];
-                  }
-
-                  const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=0&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&loop=0&fs=1&cc_load_policy=0&iv_load_policy=3&autohide=1&start=0&html5=1&wmode=opaque&vq=hd720`;
-
-                  return (
-                    <iframe
-                      src={embedUrl}
-                      className="w-full h-48 rounded-lg"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                      allowFullScreen
-                      title="Video content"
-                    />
-                  );
-                })()}
-              </div>
-            )}
-
-            {/* Title with share icon - NOW BELOW image/video */}
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-gray-900 flex-1 pr-4 leading-tight">
-                {payload.title || (
-                  expandedOverlay.kind === 'image' ? 'Image Gallery' : 
-                  expandedOverlay.kind === 'video' ? 'Video Content' : 
-                  'Information'
-                )}
-              </h2>
-              
-              {/* Share icon with hover tooltip and click feedback */}
-              <div className="relative flex-shrink-0">
-                <button
-                  onClick={handleCopyLink}
-                  className="p-1 text-gray-600 hover:text-gray-800 transition-colors group cursor-pointer flex items-center justify-center"
-                  title="Copy Link"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
-                  </svg>
-                </button>
-                
-                {/* Hover tooltip */}
-                <div className="absolute bottom-full right-0 mb-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                  <div className="bg-gray-800 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
-                    Copy Link
-                  </div>
-                </div>
-                
-                {/* Success message - positioned below the icon to avoid overlap */}
-                {copySuccess && (
-                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-1">
-                    <span className="text-green-600 font-medium text-sm whitespace-nowrap bg-white px-2 py-1 rounded shadow-sm border">
-                      Copied!
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Text content display */}
-            {expandedOverlay.kind === 'text' && payload.text && (
-              <div className="mb-6">
-                {/* Text header with icon and text */}
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                    <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-1l-4 4z" />
-                    </svg>
-                  </div>
-                  <span className="text-lg font-medium text-gray-700">Text</span>
-                </div>
-                
-                <div className="p-4 bg-gray-50 rounded-lg">
-                  <p className="text-gray-800 leading-relaxed">
-                    {payload.text}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Description - NOW directly below title */}
-            {payload.description && (
-              <div className="mb-6">
-                <p className="text-gray-700 leading-relaxed">
-                  {payload.description}
-                </p>
-              </div>
-            )}
-
-            {/* Action buttons */}
-            <div className="space-y-3">
-              {(payload.clickUrl || payload.imageUrl || payload.videoUrl) && (
-                <button
-                  onClick={() => {
-                    const url = payload.clickUrl || payload.imageUrl || payload.videoUrl;
-                    if (url) {
-                      const formattedUrl = formatUrl(url);
-                      window.open(formattedUrl, '_blank', 'noopener,noreferrer');
-                    }
-                  }}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg transition-colors font-medium cursor-pointer"
-                >
-                  View Original
-                </button>
-              )}
+              {renderModalContent(payload, handleCopyLink)}
             </div>
           </div>
+        </>
+      );
+    } else {
+      // Non-fullscreen mode: Show as floating panel that doesn't block page scrolling
+      return (
+        <>
+          {/* Floating overlay panel - positioned fixed to viewport, not blocking main content */}
+          <div className="fixed bottom-4 right-4 w-96 max-w-[calc(100vw-2rem)] bg-white shadow-2xl border border-gray-200 rounded-lg z-[500] pointer-events-auto max-h-[70vh] overflow-y-auto">
+            {/* Close button - top right */}
+            <button
+              onClick={() => {
+                setIsModalOpen(false);
+                setExpandedOverlay(null);
+              }}
+              className="absolute top-3 right-3 text-gray-800 hover:text-gray-600 transition-colors z-10 cursor-pointer bg-white rounded-full p-1 shadow-sm"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <div className="p-4 pt-12">
+              {renderModalContent(payload, handleCopyLink)}
+            </div>
+          </div>
+        </>
+      );
+    }
+  };
+
+  // Extract modal content rendering to avoid duplication
+  const renderModalContent = (payload: any, handleCopyLink: () => Promise<void>) => {
+    if (!expandedOverlay) return null;
+    return (
+      <>
+        {/* Image content */}
+        {expandedOverlay.kind === 'image' && payload.imageUrl && (
+          <div className="mb-4">
+            {/* Image header with icon and text */}
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <span className="text-lg font-medium text-gray-700">Image</span>
+            </div>
+            
+            <img
+              src={payload.imageUrl}
+              alt={payload.alt || 'Overlay image'}
+              className="w-full h-48 object-cover rounded-lg"
+              onError={(e) => {
+                e.currentTarget.src = '/placeholder-image.jpg';
+              }}
+            />
+          </div>
+        )}
+
+        {/* Video content */}
+        {expandedOverlay.kind === 'video' && payload.videoUrl && (
+          <div className="mb-4">
+            {/* Video header with icon and text */}
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                <svg className="w-5 h-5 text-red-600" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+              </div>
+              <span className="text-lg font-medium text-gray-700">Video</span>
+            </div>
+            
+            {(() => {
+              // Extract YouTube video ID from various URL formats
+              let videoId = null;
+              let videoSrc = payload.videoUrl;
+              
+              if (videoSrc.includes('youtube.com/watch?v=')) {
+                videoId = videoSrc.split('v=')[1]?.split('&')[0];
+              } else if (videoSrc.includes('youtu.be/')) {
+                videoId = videoSrc.split('youtu.be/')[1]?.split('?')[0];
+              } else if (videoSrc.includes('youtube.com/embed/')) {
+                videoId = videoSrc.split('/embed/')[1]?.split('?')[0];
+              }
+
+              const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=0&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&loop=0&fs=1&cc_load_policy=0&iv_load_policy=3&autohide=1&start=0&html5=1&wmode=opaque&vq=hd720`;
+
+              return (
+                <iframe
+                  src={embedUrl}
+                  className="w-full h-48 rounded-lg"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                  title="Video content"
+                />
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Title with share icon - NOW BELOW image/video */}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-gray-900 flex-1 pr-4 leading-tight">
+            {payload.title || (
+              expandedOverlay.kind === 'image' ? 'Image Gallery' : 
+              expandedOverlay.kind === 'video' ? 'Video Content' : 
+              'Information'
+            )}
+          </h2>
+          
+          {/* Share icon with hover tooltip and click feedback */}
+          <div className="relative flex-shrink-0">
+            <button
+              onClick={handleCopyLink}
+              className="p-1 text-gray-600 hover:text-gray-800 transition-colors group cursor-pointer flex items-center justify-center"
+              title="Copy Link"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
+              </svg>
+            </button>
+            
+            {/* Hover tooltip */}
+            <div className="absolute bottom-full right-0 mb-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              <div className="bg-gray-800 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                Copy Link
+              </div>
+            </div>
+            
+            {/* Success message - positioned below the icon to avoid overlap */}
+            {copySuccess && (
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-1">
+                <span className="text-green-600 font-medium text-sm whitespace-nowrap bg-white px-2 py-1 rounded shadow-sm border">
+                  Copied!
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Text content display */}
+        {expandedOverlay.kind === 'text' && payload.text && (
+          <div className="mb-6">
+            {/* Text header with icon and text */}
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-1l-4 4z" />
+                </svg>
+              </div>
+              <span className="text-lg font-medium text-gray-700">Text</span>
+            </div>
+            
+            <div className="p-4 bg-gray-50 rounded-lg">
+              <p className="text-gray-800 leading-relaxed">
+                {payload.text}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Description - NOW directly below title */}
+        {payload.description && (
+          <div className="mb-6">
+            <p className="text-gray-700 leading-relaxed">
+              {payload.description}
+            </p>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="space-y-3">
+          {(payload.clickUrl || payload.imageUrl || payload.videoUrl) && (
+            <button
+              onClick={() => {
+                const url = payload.clickUrl || payload.imageUrl || payload.videoUrl;
+                if (url) {
+                  const formattedUrl = formatUrl(url);
+                  window.open(formattedUrl, '_blank', 'noopener,noreferrer');
+                }
+              }}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg transition-colors font-medium cursor-pointer"
+            >
+              View Original
+            </button>
+          )}
         </div>
       </>
     );
@@ -1131,6 +1170,7 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
   payload,
   videoStates
 }) => {
+  // All state hooks must be declared first
   const videoState = videoStates.get(overlayId);
   const isPlaying = videoState?.isVideoPlaying || false;
   const [isMuted, setIsMuted] = useState(false);
@@ -1139,46 +1179,8 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [autoplayFailed, setAutoplayFailed] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-    
-  // Show placeholder if not playing
-  if (!isPlaying) {
-    return (
-      <div 
-        className="bg-gray-800 rounded flex items-center justify-center"
-        style={{
-          width: payload.width ? `${payload.width}px` : '100%',
-          height: payload.height ? `${payload.height}px` : '192px'
-        }}
-      >
-        <div className="text-center">
-          <svg className="w-12 h-12 text-gray-500 mx-auto mb-2" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M8 5v14l11-7z"/>
-          </svg>
-          <p className="text-gray-400 text-sm">Hover over video icon to play</p>
-        </div>
-      </div>
-    );
-  }
 
-  // Show error if no video ID
-  if (!videoId) {
-    return (
-      <div 
-        className="bg-red-900 rounded flex items-center justify-center"
-        style={{
-          width: payload.width ? `${payload.width}px` : '100%',
-          height: payload.height ? `${payload.height}px` : '192px'
-        }}
-      >
-        <div className="text-center">
-          <p className="text-red-400 text-sm">Invalid video URL</p>
-          <p className="text-red-300 text-xs mt-1">Could not extract video ID</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Auto-start video when component mounts and is playing
+  // All useEffect hooks must be declared after state hooks
   useEffect(() => {
     if (isPlaying && iframeRef.current && !hasUserInteracted) {
       // Create a hidden video element to test autoplay capabilities
@@ -1238,7 +1240,7 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
     }
   }, [isPlaying, videoId, hasUserInteracted, autoplayFailed]);
 
-  // Handle unmute click (force reload with sound)
+  // All callback functions must be declared after hooks
   const handleUnmute = () => {
     setIsMuted(false);
     setHasUserInteracted(true);
@@ -1248,10 +1250,46 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
     setLoadAttempt(prev => prev + 1);
   };
 
-  // Try direct video approach if iframe fails
   const handleIframeError = () => {
     setUseDirectVideo(true);
   };
+    
+  // Early returns must come AFTER all hooks are declared
+  if (!isPlaying) {
+    return (
+      <div 
+        className="bg-gray-800 rounded flex items-center justify-center"
+        style={{
+          width: payload.width ? `${payload.width}px` : '100%',
+          height: payload.height ? `${payload.height}px` : '192px'
+        }}
+      >
+        <div className="text-center">
+          <svg className="w-12 h-12 text-gray-500 mx-auto mb-2" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+          <p className="text-gray-400 text-sm">Hover over video icon to play</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!videoId) {
+    return (
+      <div 
+        className="bg-red-900 rounded flex items-center justify-center"
+        style={{
+          width: payload.width ? `${payload.width}px` : '100%',
+          height: payload.height ? `${payload.height}px` : '192px'
+        }}
+      >
+        <div className="text-center">
+          <p className="text-red-400 text-sm">Invalid video URL</p>
+          <p className="text-red-300 text-xs mt-1">Could not extract video ID</p>
+        </div>
+      </div>
+    );
+  }
 
   // Enhanced embed URL - try with sound first, fallback to muted
   const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=${(isMuted || autoplayFailed) ? 1 : 0}&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&loop=0&fs=1&cc_load_policy=0&iv_load_policy=3&autohide=1&start=0&html5=1&wmode=opaque&vq=hd720&t=0s`;

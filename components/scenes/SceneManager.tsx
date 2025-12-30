@@ -5,6 +5,9 @@ import { Scene } from '@/types/tour';
 import { HotspotsAPI } from '@/lib/api/hotspots';
 import AdvancedSceneUploader from '../upload/AdvancedSceneUploader';
 import SimplePanoramaPreview from './SimplePanoramaPreview';
+import DeleteModal from '@/components/modals/DeleteModal';
+import { toast } from 'react-toastify';
+import { tourService } from '@/services/tourService';
 
 interface SceneManagerProps {
   tourId: string;
@@ -31,16 +34,71 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
     type: '360'
   });
   const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
-  const [hotspotCounts, setHotspotCounts] = useState<Record<string, number>>({});
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [tourOwnership, setTourOwnership] = useState<{
+    isOwner: boolean;
+    isSuperadmin: boolean;
+    loading: boolean;
+  }>({
+    isOwner: false,
+    isSuperadmin: false,
+    loading: true
+  });
+  const [deleteModal, setDeleteModal] = useState<{
+    open: boolean;
+    sceneId: string | null;
+    sceneName: string;
+    isLoading: boolean;
+  }>({
+    open: false,
+    sceneId: null,
+    sceneName: '',
+    isLoading: false
+  });
 
-  // Remove hotspot fetching - let TourEditor handle it
-  // const fetchHotspotCounts = useCallback(async () => {
-  //   // Removed to prevent duplicate API calls
-  // }, []);
+  // Get current user ID and check tour ownership for delete permissions
+  useEffect(() => {
+    const checkTourOwnership = async () => {
+      const userData = localStorage.getItem('user_data');
+      if (!userData) {
+        setTourOwnership({ isOwner: false, isSuperadmin: false, loading: false });
+        return;
+      }
 
-  // useEffect(() => {
-  //   // Removed hotspot fetching
-  // }, []);
+      try {
+        const user = JSON.parse(userData);
+        const userId = user.id || user.user_id || null;
+        const role = user.roles?.toString() || user.role?.toString() || null;
+        
+        setCurrentUserId(userId);
+        setUserRole(role);
+
+        // Check if user is superadmin
+        const isSuperadmin = role === '1';
+        
+        if (isSuperadmin) {
+          setTourOwnership({ isOwner: true, isSuperadmin: true, loading: false });
+          return;
+        }
+
+        if (!userId) {
+          setTourOwnership({ isOwner: false, isSuperadmin: false, loading: false });
+          return;
+        }
+
+        // Check tour ownership by fetching tour details
+        const tour = await tourService.getTour(tourId);
+        const isOwner = tour.user_id === userId;
+        setTourOwnership({ isOwner, isSuperadmin: false, loading: false });
+      } catch (error) {
+        console.error('Error checking tour ownership:', error);
+        setTourOwnership({ isOwner: false, isSuperadmin: false, loading: false });
+      }
+    };
+
+    checkTourOwnership();
+  }, [tourId]);
 
   const handleSceneClick = (scene: Scene) => {
     setSelectedScene(scene);
@@ -119,6 +177,69 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
     } finally {
       setIsCreating(false);
     }
+  };
+
+  // Function to open delete modal
+  const openDeleteModal = (sceneId: string, sceneName: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent scene selection
+    event.preventDefault();
+    
+    setDeleteModal({
+      open: true,
+      sceneId,
+      sceneName,
+      isLoading: false
+    });
+  };
+
+  // Function to confirm delete scene
+  const confirmDeleteScene = async () => {
+    if (!deleteModal.sceneId) return;
+    
+    setDeleteModal(prev => ({ ...prev, isLoading: true }));
+    
+    try {
+      await tourService.deleteScene(deleteModal.sceneId);
+      
+      // Remove the scene from the local state
+      const updatedScenes = scenes?.filter(scene => scene.id !== deleteModal.sceneId) || [];
+      onSceneUpdate?.(updatedScenes);
+      
+      // If the deleted scene was selected, clear selection
+      if (selectedScene?.id === deleteModal.sceneId) {
+        setSelectedScene(null);
+        setShowUploader(false);
+        setShowInlineCreation(false);
+      }
+      
+      // Show success toast
+      toast.success(`Scene "${deleteModal.sceneName}" deleted successfully!`);
+      
+      // Close modal
+      setDeleteModal({
+        open: false,
+        sceneId: null,
+        sceneName: '',
+        isLoading: false
+      });
+      
+    } catch (error) {
+      console.error('Error deleting scene:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to delete scene');
+      setDeleteModal(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+
+  // Close delete modal
+  const closeDeleteModal = () => {
+    if (deleteModal.isLoading) return; // Prevent closing while deleting
+    
+    setDeleteModal({
+      open: false,
+      sceneId: null,
+      sceneName: '',
+      isLoading: false
+    });
   };
 
   // Update edited values when selected scene changes
@@ -307,18 +428,36 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
             {scenes?.map((scene) => (
               <div
                 key={scene.id}
-                onClick={() => handleSceneClick(scene)}
-                className={`p-3 rounded cursor-pointer transition-colors ${selectedScene?.id === scene.id
+                className={`p-3 rounded cursor-pointer transition-colors relative group ${selectedScene?.id === scene.id
                   ? 'bg-blue-100 border-blue-500 border'
                   : 'bg-gray-50 hover:bg-gray-100'
                   }`}
               >
-                <div className="font-medium text-gray-900">{scene.name}</div>
-                <div className="text-sm text-gray-700">
-                  Type: {scene.type} | Order: {scene.order}
+                <div onClick={() => handleSceneClick(scene)} className="flex-1">
+                  <div className="font-medium text-gray-900">{scene.name}</div>
+                  <div className="text-sm text-gray-700">
+                    Type: {scene.type} | Order: {scene.order}
+                  </div>
+                  {scene.src_original_url && (
+                    <div className="text-xs text-green-600 mt-1">✓ Has image</div>
+                  )}
                 </div>
-                {scene.src_original_url && (
-                  <div className="text-xs text-green-600 mt-1">✓ Has image</div>
+                
+                {/* Delete button - show always for selected scene, on hover for others */}
+                {(tourOwnership.isOwner || tourOwnership.isSuperadmin) && !tourOwnership.loading && (
+                  <button
+                    onClick={(e) => openDeleteModal(scene.id, scene.name, e)}
+                    className={`absolute top-2 right-2 p-1 rounded bg-red-50 text-red-600 hover:bg-red-100 transition-opacity cursor-pointer ${
+                      selectedScene?.id === scene.id 
+                        ? 'opacity-100' // Always visible for selected scene
+                        : 'opacity-0 group-hover:opacity-100' // Show on hover for non-selected scenes
+                    }`}
+                    title="Delete scene"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
                 )}
               </div>
             ))}
@@ -717,6 +856,16 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
 
 
       </div>
+      
+      {/* Delete Modal */}
+      <DeleteModal
+        open={deleteModal.open}
+        isLoading={deleteModal.isLoading}
+        title="Delete Scene"
+        message={`Are you sure you want to delete "${deleteModal.sceneName}"? This action cannot be undone and will permanently remove the scene and all its associated hotspots and overlays.`}
+        onConfirm={confirmDeleteScene}
+        onCancel={closeDeleteModal}
+      />
     </>
   );
 }
