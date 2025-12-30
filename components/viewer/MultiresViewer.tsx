@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import * as THREE from 'three';
-import { Tour, Scene, Hotspot } from '@/types/tour';
+import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
+import OverlayRenderer from '../overlays/OverlayRenderer';
 import { calculateVisibleTiles, getAppropriateLevel } from '@/lib/multires-utils';
 import {
   MAX_CONCURRENT_TILE_LOADS,
@@ -27,7 +28,12 @@ interface MultiresViewerProps {
   onHotspotCreate?: (yaw: number, pitch: number) => void;
   onHotspotUpdate?: (hotspot: Hotspot) => void;
   hotspots?: Hotspot[];
+  overlays?: Overlay[];
+  onOverlayUpdate?: (overlay: Overlay) => void;
+  onOverlayModalStateChange?: (isOpen: boolean) => void;
   isAutoplay?: boolean;
+  isOverlayModalOpen?: boolean;
+  isFullscreen?: boolean;
 }
 
 const PICKING_SPHERE = new THREE.Sphere(new THREE.Vector3(), SPHERE_RADIUS);
@@ -64,10 +70,48 @@ function useHotspotUpdater(
 
     // Add hotspots for current scene
     const sceneHotspots = hotspots.filter((hotspot) => hotspot.scene_id === currentSceneId);
-    sceneHotspots.forEach((hotspot) => {
+    console.log('[useHotspotUpdater] Adding hotspots for scene:', currentSceneId, sceneHotspots.length);
+    
+    sceneHotspots.forEach((hotspot, index) => {
+      console.log(`[useHotspotUpdater] Processing hotspot ${index + 1}:`, {
+        id: hotspot.id,
+        kind: hotspot.kind,
+        yaw: hotspot.yaw,
+        pitch: hotspot.pitch,
+        scene_id: hotspot.scene_id,
+        payload: hotspot.payload
+      });
+      
       const sprite = createHotspotSprite(hotspot, scenes);
       group.add(sprite);
+      
+      // Ensure visibility
+      sprite.visible = true;
+      sprite.children.forEach(child => {
+        if (child instanceof THREE.Sprite) {
+          child.visible = true;
+        }
+      });
+      
+      console.log(`[useHotspotUpdater] Added hotspot ${index + 1} to group:`, {
+        position: sprite.position,
+        visible: sprite.visible,
+        childrenCount: sprite.children.length
+      });
     });
+    
+    // Ensure the group itself is visible
+    group.visible = true;
+    
+    console.log('[useHotspotUpdater] Total hotspots in group:', group.children.length);
+    console.log('[useHotspotUpdater] Group visible:', group.visible);
+    console.log('[useHotspotUpdater] Group position:', group.position);
+    console.log('[useHotspotUpdater] Group children details:', group.children.map(child => ({
+      type: child.constructor.name,
+      position: child.position,
+      visible: child.visible,
+      userData: child.userData
+    })));
   }, [hotspots, currentSceneId, hotspotsGroupRef, scenes]);
 }
 
@@ -165,7 +209,12 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
   onHotspotCreate,
   onHotspotUpdate,
   hotspots = [],
+  overlays = [],
+  onOverlayUpdate,
+  onOverlayModalStateChange,
   isAutoplay = false,
+  isOverlayModalOpen = false,
+  isFullscreen = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -173,11 +222,13 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const previewMeshRef = useRef<THREE.Mesh | null>(null);
   const hotspotsGroupRef = useRef<THREE.Group | null>(null);
+  const overlayGroupRef = useRef<THREE.Group | null>(null);
   const raycasterRef = useRef(new THREE.Raycaster());
   const pointerRef = useRef(new THREE.Vector2());
   const draggingSpriteRef = useRef<THREE.Sprite | null>(null);
   const originalHotspotRef = useRef<Hotspot | null>(null);
   const isAutoplayRef = useRef(isAutoplay);
+  const isOverlayModalOpenRef = useRef(isOverlayModalOpen);
 
   const tileCacheRef = useRef<Map<string, TileEntry>>(new Map());
   const geometryCacheRef = useRef<Map<string, THREE.BufferGeometry>>(new Map());
@@ -214,6 +265,12 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     shiftKey: false,
   });
 
+  const [cameraPosition, setCameraPosition] = useState({
+    yaw: currentScene.yaw ?? 0,
+    pitch: currentScene.pitch ?? 0,
+    fov: currentScene.fov ?? tour?.default_fov ?? 75
+  });
+
   const controlsRef = useRef({
     yaw: currentScene.yaw ?? 0,
     pitch: currentScene.pitch ?? 0,
@@ -225,7 +282,6 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
 
   const manifest = useMemo(() => {
     const parsed = parseSceneManifest(currentScene);
-    console.log('[MultiresViewer] Parsed manifest for scene:', currentScene.id, parsed);
     return parsed;
   }, [currentScene]);
   const updateHotspots = useHotspotUpdater(hotspots, currentScene.id, hotspotsGroupRef, scenes);
@@ -375,14 +431,6 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
 
     const tileUrl = buildTileUrl(manifestSnapshot, request.sceneId, request.level, request.col, request.row);
 
-    console.log('[MultiresViewer] Loading tile:', {
-      sceneId: request.sceneId,
-      level: request.level,
-      col: request.col,
-      row: request.row,
-      url: tileUrl
-    });
-
     loader.load(
       tileUrl,
       (texture) => {
@@ -446,7 +494,6 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
         mesh.frustumCulled = false;
         mesh.visible = true; // Ensure tile is visible
         scene.add(mesh);
-        console.log('[MultiresViewer] Tile loaded successfully:', request.key, 'Visible:', mesh.visible);
 
         tileCacheRef.current.set(request.key, {
           key: request.key,
@@ -491,7 +538,6 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
       },
       undefined,
       (error) => {
-        console.error('[MultiresViewer] Failed to load tile:', request.key, error);
         activeLoadsRef.current = Math.max(0, activeLoadsRef.current - 1);
         pendingSetRef.current.delete(request.key);
         processQueue();
@@ -618,14 +664,12 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
     container.appendChild(renderer.domElement);
+    
+    // Set initial cursor style
+    renderer.domElement.style.cursor = 'grab';
+    
     rendererRef.current = renderer;
     
-    console.log('[MultiresViewer] Renderer initialized:', {
-      containerSize: { width, height },
-      pixelRatio: renderer.getPixelRatio(),
-      domElement: renderer.domElement
-    });
-
     const scene = new THREE.Scene();
     // Use a neutral gray background instead of black to prevent flickering
     scene.background = new THREE.Color(0x2a2a2a);
@@ -642,12 +686,16 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     camera.updateProjectionMatrix();
     scene.add(camera);
     cameraRef.current = camera;
-    console.log('[MultiresViewer] Camera initialized at origin');
 
     const hotspotGroup = new THREE.Group();
     hotspotGroup.name = 'hotspots';
     scene.add(hotspotGroup);
     hotspotsGroupRef.current = hotspotGroup;
+
+    const overlayGroup = new THREE.Group();
+    overlayGroup.name = 'overlays';
+    scene.add(overlayGroup);
+    overlayGroupRef.current = overlayGroup;
 
     const handleResize = () => {
       if (!rendererRef.current || !cameraRef.current || !containerRef.current) return;
@@ -701,14 +749,24 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
         controls.yaw += controls.velocityYaw;
         controls.pitch += controls.velocityPitch;
         
-        // Add autoplay rotation when enabled
-        if (isAutoplayRef.current) {
+        // Add autoplay rotation when enabled and modal is not open
+        if (isAutoplayRef.current && !isOverlayModalOpenRef.current) {
           controls.yaw += tour.default_yaw_speed || 0.5;
         }
       }
 
       controls.pitch = Math.max(-85, Math.min(85, controls.pitch));
       cameraRef.current.lookAt(yawPitchToVector(controls.yaw, controls.pitch, 1));
+
+      // Update camera position state for overlay renderer (throttled to reduce re-renders)
+      // Only update every 100ms to prevent performance issues and console spam
+      if (Math.floor(now / 100) !== Math.floor((now - 16) / 100)) {
+        setCameraPosition({
+          yaw: controls.yaw,
+          pitch: controls.pitch,
+          fov: controls.fov
+        });
+      }
 
       const fovDiff = controls.fov - cameraRef.current.fov;
       if (Math.abs(fovDiff) > 0.05) {
@@ -723,10 +781,10 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
 
       if (hotspotsGroupRef.current) {
         const spriteScale = THREE.MathUtils.clamp(32 - (controls.fov - 40) * 0.2, 18, 30);
-        hotspotsGroupRef.current.children.forEach((child) => {
+        hotspotsGroupRef.current.children.forEach((child, index) => {
           if (child instanceof THREE.Group) {
             // Handle new hotspot groups (icon + text)
-            child.children.forEach((groupChild) => {
+            child.children.forEach((groupChild, childIndex) => {
               if (groupChild instanceof THREE.Sprite) {
                 // Scale the icon sprite
                 if (groupChild.position.y === 0) { // This is the icon (at y=0)
@@ -748,23 +806,24 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
         hotspotsGroupRef.current.visible = true;
       }
 
-      rendererRef.current.render(sceneRef.current, cameraRef.current);
-      
-      // Debug: Log scene state periodically
-      if (Math.random() < 0.01) { // Log 1% of frames
-        const visibleMeshes = sceneRef.current.children.filter((child: THREE.Object3D) => 
-          child instanceof THREE.Mesh && child.visible
-        );
-        if (visibleMeshes.length > 0 || Math.random() < 0.1) { // Always log if meshes visible
-          console.log('[MultiresViewer] Render state:', {
-            sceneChildren: sceneRef.current.children.length,
-            visibleMeshes: visibleMeshes.length,
-            cameraPosition: cameraRef.current.position,
-            cameraRotation: cameraRef.current.rotation,
-            controls: { yaw: controls.yaw, pitch: controls.pitch, fov: controls.fov }
-          });
-        }
+      // Scale overlay sprites the same way as hotspots
+      if (overlayGroupRef.current) {
+        const spriteScale = THREE.MathUtils.clamp(32 - (controls.fov - 40) * 0.2, 18, 30);
+        overlayGroupRef.current.children.forEach((child) => {
+          if (child instanceof THREE.Group) {
+            child.children.forEach((groupChild) => {
+              if (groupChild instanceof THREE.Sprite) {
+                groupChild.scale.setScalar(spriteScale);
+                groupChild.visible = true;
+              }
+            });
+            child.visible = true;
+          }
+        });
+        overlayGroupRef.current.visible = true;
       }
+
+      rendererRef.current.render(sceneRef.current, cameraRef.current);
     };
 
     renderer.setAnimationLoop(animate);
@@ -785,24 +844,99 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
       while (node && !node.userData?.hotspot) {
         node = node.parent;
       }
-      return node?.userData?.hotspot ?? null;
+      const hotspot = node?.userData?.hotspot ?? null;
+      return hotspot;
+    };
+
+    const pickOverlay = (event: PointerEvent): Overlay | null => {
+      const renderer = rendererRef.current;
+      const camera = cameraRef.current;
+      const group = overlayGroupRef.current;
+      if (!renderer || !camera || !group) return null;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointerRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycasterRef.current.setFromCamera(pointerRef.current, camera);
+      const intersects = raycasterRef.current.intersectObjects(group.children, true);
+      if (!intersects.length) return null;
+      let node: THREE.Object3D | null = intersects[0].object;
+      while (node && !node.userData?.overlay) {
+        node = node.parent;
+      }
+      const overlay = node?.userData?.overlay ?? null;
+      return overlay;
     };
 
     const pickSphere = (event: PointerEvent): { yaw: number; pitch: number } | null => {
       const renderer = rendererRef.current;
       const camera = cameraRef.current;
       if (!renderer || !camera) return null;
+      
       const rect = renderer.domElement.getBoundingClientRect();
       pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointerRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      
       raycasterRef.current.setFromCamera(pointerRef.current, camera);
       const intersectionPoint = raycasterRef.current.ray.intersectSphere(PICKING_SPHERE, new THREE.Vector3());
-      if (!intersectionPoint) return null;
-      return vectorToYawPitch(intersectionPoint);
+      
+      if (!intersectionPoint) {
+        return null;
+      }
+      
+      const coords = vectorToYawPitch(intersectionPoint);
+      
+      // Validate coordinates
+      if (isNaN(coords.yaw) || isNaN(coords.pitch)) {
+        return null;
+      }
+      
+      // Debug logging to verify coordinate conversion (only when needed)
+      const DEBUG_COORDINATES = false; // Set to true when debugging coordinate issues
+      
+      if (DEBUG_COORDINATES) {
+        console.log('[pickSphere] Click analysis:', {
+          screenClick: { x: event.clientX - rect.left, y: event.clientY - rect.top },
+          normalizedClick: { x: pointerRef.current.x, y: pointerRef.current.y },
+          intersectionPoint: {
+            x: intersectionPoint.x.toFixed(3),
+            y: intersectionPoint.y.toFixed(3),
+            z: intersectionPoint.z.toFixed(3)
+          },
+          calculatedCoords: { yaw: coords.yaw.toFixed(3), pitch: coords.pitch.toFixed(3) },
+          currentCamera: { 
+            yaw: controlsRef.current.yaw.toFixed(3), 
+            pitch: controlsRef.current.pitch.toFixed(3) 
+          }
+        });
+        
+        // Verify round-trip conversion
+        const testPosition = yawPitchToVector(coords.yaw, coords.pitch, SPHERE_RADIUS);
+        const distance = intersectionPoint.distanceTo(testPosition);
+        console.log('[pickSphere] Round-trip verification:', {
+          original: {
+            x: intersectionPoint.x.toFixed(3),
+            y: intersectionPoint.y.toFixed(3),
+            z: intersectionPoint.z.toFixed(3)
+          },
+          converted: {
+            x: testPosition.x.toFixed(3),
+            y: testPosition.y.toFixed(3),
+            z: testPosition.z.toFixed(3)
+          },
+          distance: distance.toFixed(6),
+          isAccurate: distance < 0.1 ? '✅ GOOD' : '❌ BAD - COORDINATE CONVERSION ISSUE'
+        });
+      }
+      
+      return coords;
     };
 
     const handlePointerDown = (event: PointerEvent) => {
       if (!rendererRef.current) return;
+      
+      // Change cursor to grabbing when dragging
+      rendererRef.current.domElement.style.cursor = 'grabbing';
+      
       pointerStateRef.current.isPointerDown = true;
       pointerStateRef.current.startX = event.clientX;
       pointerStateRef.current.startY = event.clientY;
@@ -831,6 +965,16 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     };
 
     const handlePointerMove = (event: PointerEvent) => {
+      // Update cursor based on hotspot or overlay hover
+      if (!pointerStateRef.current.isPointerDown) {
+        const hotspot = pickHotspot(event);
+        const overlay = pickOverlay(event);
+        const canvas = rendererRef.current?.domElement;
+        if (canvas) {
+          canvas.style.cursor = (hotspot || overlay) ? 'pointer' : 'grab';
+        }
+      }
+      
       if (!pointerStateRef.current.isPointerDown) return;
       const dx = event.clientX - pointerStateRef.current.lastX;
       const dy = event.clientY - pointerStateRef.current.lastY;
@@ -840,9 +984,47 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
       if (draggingSpriteRef.current && isEditMode) {
         const coords = pickSphere(event);
         if (coords && originalHotspotRef.current) {
-          const updated: Hotspot = { ...originalHotspotRef.current, yaw: coords.yaw, pitch: coords.pitch };
-          draggingSpriteRef.current.position.copy(yawPitchToVector(updated.yaw, updated.pitch, SPHERE_RADIUS - 5));
+          // Constrain pitch to prevent hotspots from going to extreme positions
+          const constrainedPitch = THREE.MathUtils.clamp(coords.pitch, -80, 80);
+          
+          // Normalize yaw to be within -180 to 180 range
+          let constrainedYaw = coords.yaw;
+          while (constrainedYaw > 180) constrainedYaw -= 360;
+          while (constrainedYaw < -180) constrainedYaw += 360;
+          
+          const updated: Hotspot = { 
+            ...originalHotspotRef.current, 
+            yaw: constrainedYaw, 
+            pitch: constrainedPitch 
+          };
+          
+          // Update position with constrained coordinates
+          const newPosition = yawPitchToVector(updated.yaw, updated.pitch, SPHERE_RADIUS);
+          draggingSpriteRef.current.position.copy(newPosition);
           draggingSpriteRef.current.userData.hotspot = updated;
+          
+          // Ensure the hotspot group remains visible and add visual feedback during drag
+          if (draggingSpriteRef.current instanceof THREE.Group) {
+            draggingSpriteRef.current.visible = true;
+            draggingSpriteRef.current.children.forEach(child => {
+              if (child instanceof THREE.Sprite) {
+                child.visible = true;
+                // Add slight scale increase during drag for visual feedback
+                if (child.position.y === 0) { // This is the icon sprite
+                  child.scale.setScalar(32); // Slightly larger during drag
+                }
+              }
+            });
+          }
+          
+          console.log('[Hotspot Drag] Updated position:', {
+            id: updated.id,
+            yaw: updated.yaw,
+            pitch: updated.pitch,
+            position: newPosition,
+            visible: draggingSpriteRef.current.visible
+          });
+          
           onHotspotUpdate?.(updated);
         }
         return;
@@ -862,11 +1044,28 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
       pointerStateRef.current.isPointerDown = false;
       controlsRef.current.pointerActive = false;
 
+      // Reset cursor after drag
+      const hotspot = pickHotspot(event);
+      const overlay = pickOverlay(event);
+      const canvas = rendererRef.current?.domElement;
+      if (canvas) {
+        canvas.style.cursor = (hotspot || overlay) ? 'pointer' : 'grab';
+      }
+
       const moved =
         Math.abs(event.clientX - pointerStateRef.current.startX) > 6 ||
         Math.abs(event.clientY - pointerStateRef.current.startY) > 6;
 
       if (draggingSpriteRef.current) {
+        // Reset scale for dragged hotspot
+        if (draggingSpriteRef.current instanceof THREE.Group) {
+          draggingSpriteRef.current.children.forEach(child => {
+            if (child instanceof THREE.Sprite && child.position.y === 0) { // Icon sprite
+              child.scale.setScalar(26); // Reset to normal size
+            }
+          });
+        }
+        
         draggingSpriteRef.current = null;
         originalHotspotRef.current = null;
       } else if (!moved) {
@@ -877,10 +1076,28 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
           } else {
             onHotspotClick?.(hotspot);
           }
-        } else if (isEditMode && (pointerStateRef.current.shiftKey || event.shiftKey)) {
-          const coords = pickSphere(event);
-          if (coords) {
-            onHotspotCreate?.(coords.yaw, coords.pitch);
+        } else {
+          // Check for overlay clicks
+          const overlay = pickOverlay(event);
+          if (overlay) {
+            console.log('[Overlay Click] Clicked overlay:', overlay);
+            // For now, just log the overlay click - you can add overlay-specific behavior here
+            // onOverlayClick?.(overlay); // Uncomment if you want to handle overlay clicks
+          } else if (isEditMode && (pointerStateRef.current.shiftKey || event.shiftKey)) {
+            const coords = pickSphere(event);
+            if (coords) {
+              // Constrain coordinates to prevent extreme positions
+              const constrainedYaw = THREE.MathUtils.clamp(coords.yaw, -180, 180);
+              const constrainedPitch = THREE.MathUtils.clamp(coords.pitch, -80, 80);
+              
+              // Add visual feedback for hotspot creation
+              console.log('[Hotspot Creation] Creating hotspot at:', {
+                original: coords,
+                constrained: { yaw: constrainedYaw, pitch: constrainedPitch }
+              });
+              
+              onHotspotCreate?.(constrainedYaw, constrainedPitch);
+            }
           }
         }
       }
@@ -933,11 +1150,6 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
   }, [onHotspotClick, onHotspotCreate, onHotspotUpdate, isEditMode]);
 
   useEffect(() => {
-    console.log('[MultiresViewer] Scene changed:', currentScene.id, {
-      hasManifest: !!manifest,
-      tilesManifest: currentScene.tiles_manifest,
-      manifest: manifest
-    });
     manifestRef.current = manifest;
     currentSceneRef.current = currentScene;
     currentSceneIdRef.current = currentScene.id;
@@ -992,7 +1204,7 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
   // Add a separate effect to update hotspots when the hotspots array changes
   useEffect(() => {
     updateHotspots();
-  }, [hotspots, updateHotspots]);
+  }, [hotspots, updateHotspots, currentScene.id]);
 
   // Handle edit mode changes without reinitializing the entire viewer
   useEffect(() => {
@@ -1016,6 +1228,13 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
       controls.yaw = currentScene.yaw ?? 0;
       controls.pitch = currentScene.pitch ?? 0;
       controls.fov = currentScene.fov ?? tour?.default_fov ?? 75;
+      
+      // Update camera position state immediately
+      setCameraPosition({
+        yaw: controls.yaw,
+        pitch: controls.pitch,
+        fov: controls.fov
+      });
     } else {
       transition.endYaw = currentScene.yaw ?? transition.endYaw;
       transition.endPitch = currentScene.pitch ?? transition.endPitch;
@@ -1049,14 +1268,18 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
 
   // Handle autoplay state changes
   useEffect(() => {
-    console.log('[MultiresViewer] Autoplay state changed:', isAutoplay, '-> ref updated');
     isAutoplayRef.current = isAutoplay;
   }, [isAutoplay]);
+
+  // Handle modal state changes
+  useEffect(() => {
+    isOverlayModalOpenRef.current = isOverlayModalOpen;
+  }, [isOverlayModalOpen]);
 
   const missingMedia = !manifest && !currentScene.src_original_url;
 
   return (
-    <div className="absolute inset-0 bg-black">
+    <div className="absolute inset-0 bg-black viewer-container">
       <div 
         ref={containerRef} 
         className="absolute inset-0"
@@ -1065,6 +1288,25 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-gray-400">
           No imagery available for this scene.
         </div>
+      )}
+      
+      {/* Overlay Renderer */}
+      {containerRef.current && (
+        <OverlayRenderer
+          overlays={overlays}
+          onOverlayUpdate={onOverlayUpdate}
+          onModalStateChange={onOverlayModalStateChange}
+          isEditMode={isEditMode}
+          viewerWidth={containerRef.current.clientWidth}
+          viewerHeight={containerRef.current.clientHeight}
+          currentYaw={cameraPosition.yaw}
+          currentPitch={cameraPosition.pitch}
+          fov={cameraPosition.fov}
+          camera={cameraRef.current}
+          scene={sceneRef.current}
+          overlayGroup={overlayGroupRef.current}
+          isFullscreen={isFullscreen}
+        />
       )}
     </div>
   );

@@ -158,19 +158,32 @@ function getHotspotLabel(hotspot: Hotspot, scenes?: any[]): string {
 
 export function createHotspotSprite(hotspot: Hotspot, scenes?: any[]): THREE.Group {
   const color = hotspot.kind === 'navigation' ? NAV_HOTSPOT_COLOR : INFO_HOTSPOT_COLOR;
-  console.log('[createHotspotSprite] Creating sprite for hotspot:', {
-    id: hotspot.id,
-    kind: hotspot.kind,
-    yaw: hotspot.yaw,
-    pitch: hotspot.pitch,
-    color
-  });
+  
+  // Check for invalid coordinates
+  if (isNaN(hotspot.yaw) || isNaN(hotspot.pitch)) {
+    console.error('[createHotspotSprite] Invalid coordinates detected:', {
+      yaw: hotspot.yaw,
+      pitch: hotspot.pitch
+    });
+    // Use default coordinates if invalid
+    hotspot.yaw = 0;
+    hotspot.pitch = 0;
+  }
+  
+  // Constrain hotspot coordinates to prevent extreme positions
+  const constrainedYaw = THREE.MathUtils.clamp(hotspot.yaw, -180, 180);
+  const constrainedPitch = THREE.MathUtils.clamp(hotspot.pitch, -80, 80);
   
   // Create group to hold both icon and text
   const group = new THREE.Group();
-  const position = yawPitchToVector(hotspot.yaw, hotspot.pitch, SPHERE_RADIUS - 5);
+  // Use the same radius as the picking sphere for accurate positioning
+  const position = yawPitchToVector(constrainedYaw, constrainedPitch, SPHERE_RADIUS);
   group.position.copy(position);
   group.userData.hotspot = hotspot;
+  
+  // Ensure group is always visible
+  group.visible = true;
+  group.frustumCulled = false;
   
   // Create hotspot icon sprite
   const iconTexture = createHotspotTexture(color);
@@ -188,6 +201,7 @@ export function createHotspotSprite(hotspot: Hotspot, scenes?: any[]): THREE.Gro
   
   // Create text label sprite
   const label = getHotspotLabel(hotspot, scenes);
+  
   const textTexture = createTextTexture(label);
   const textMaterial = new THREE.SpriteMaterial({
     map: textTexture,
@@ -202,6 +216,5 @@ export function createHotspotSprite(hotspot: Hotspot, scenes?: any[]): THREE.Gro
   textSprite.frustumCulled = false;
   group.add(textSprite);
   
-  console.log('[createHotspotSprite] Group created with icon and label:', label);
   return group;
 }

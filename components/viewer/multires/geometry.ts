@@ -15,13 +15,44 @@ export function yawPitchToVector(yaw: number, pitch: number, radius: number = SP
   const x = radius * Math.sin(phi) * Math.cos(theta);
   const y = radius * Math.cos(phi);
   const z = radius * Math.sin(phi) * Math.sin(theta);
+  
   return new THREE.Vector3(x, y, z);
 }
 
 export function vectorToYawPitch(vector: THREE.Vector3): { yaw: number; pitch: number } {
   const normalized = vector.clone().normalize();
-  const yaw = THREE.MathUtils.radToDeg(Math.atan2(normalized.z, normalized.x)) - 180;
-  const pitch = THREE.MathUtils.radToDeg(Math.asin(normalized.y));
+  
+  // Reverse the exact math from yawPitchToVector
+  // From yawPitchToVector:
+  // phi = THREE.MathUtils.degToRad(90 - pitch)
+  // theta = THREE.MathUtils.degToRad(yaw + 180)
+  // x = radius * Math.sin(phi) * Math.cos(theta)
+  // y = radius * Math.cos(phi)  
+  // z = radius * Math.sin(phi) * Math.sin(theta)
+  
+  // Calculate phi from y coordinate
+  // y = radius * Math.cos(phi) => phi = Math.acos(y / radius)
+  const phi = Math.acos(Math.max(-1, Math.min(1, normalized.y)));
+  
+  // Calculate pitch from phi
+  // phi = THREE.MathUtils.degToRad(90 - pitch) => pitch = 90 - THREE.MathUtils.radToDeg(phi)
+  const pitch = 90 - THREE.MathUtils.radToDeg(phi);
+  
+  // Calculate theta from x and z coordinates
+  // x = radius * Math.sin(phi) * Math.cos(theta)
+  // z = radius * Math.sin(phi) * Math.sin(theta)
+  // theta = Math.atan2(z / (radius * Math.sin(phi)), x / (radius * Math.sin(phi)))
+  // theta = Math.atan2(z, x)
+  const theta = Math.atan2(normalized.z, normalized.x);
+  
+  // Calculate yaw from theta
+  // theta = THREE.MathUtils.degToRad(yaw + 180) => yaw = THREE.MathUtils.radToDeg(theta) - 180
+  let yaw = THREE.MathUtils.radToDeg(theta) - 180;
+  
+  // Normalize yaw to [-180, 180] range
+  while (yaw > 180) yaw -= 360;
+  while (yaw < -180) yaw += 360;
+  
   return { yaw, pitch };
 }
 
@@ -83,17 +114,6 @@ export function createTileGeometry(
     thetaLength,
   );
   geometry.scale(-1, 1, 1);
-  
-  console.log('[createTileGeometry] Created tile geometry:', {
-    col,
-    row,
-    phiStart,
-    phiLength,
-    thetaStart,
-    thetaLength,
-    radius: SPHERE_RADIUS,
-    segments: { width: widthSegments, height: heightSegments }
-  });
   
   return geometry;
 }

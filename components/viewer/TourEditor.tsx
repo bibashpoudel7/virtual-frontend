@@ -2,7 +2,8 @@
 // frontend/components/viewer/TourEditor.tsx
 import { useState, useCallback, useEffect, useRef } from 'react';
 import MultiresViewer from './MultiresViewer';
-import { Tour, Scene, Hotspot } from '@/types/tour';
+import OverlayEditor from '../overlays/OverlayEditor';
+import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { HotspotsAPI } from '@/lib/api/hotspots';
 import { tourService } from '@/services/tourService';
 
@@ -14,12 +15,17 @@ interface TourEditorProps {
 
 export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorProps) {
   const [currentSceneId, setCurrentSceneId] = useState(scenes[0]?.id || '');
-  const [isEditMode, setIsEditMode] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false); // Disable edit mode by default
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [overlays, setOverlays] = useState<Overlay[]>([]);
   const [showHotspotDialog, setShowHotspotDialog] = useState(false);
+  const [showOverlayDialog, setShowOverlayDialog] = useState(false);
   const [pendingHotspot, setPendingHotspot] = useState<{ yaw: number; pitch: number } | null>(null);
+  const [pendingOverlay, setPendingOverlay] = useState<{ yaw: number; pitch: number } | null>(null);
   const [selectedTargetScene, setSelectedTargetScene] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [deletingHotspotId, setDeletingHotspotId] = useState<string | null>(null);
+  const [deletingOverlayId, setDeletingOverlayId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editPanel, setEditPanel] = useState<'hotspots' | 'overlays' | null>('hotspots');
   const [hotspotType, setHotspotType] = useState<'navigation' | 'info' | 'link'>('navigation');
@@ -46,25 +52,42 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
   const currentScene = scenes.find(s => s.id === currentSceneId) || scenes[0];
 
-  // Load hotspots for current scene
+  // Load hotspots and overlays for all scenes in the tour
   useEffect(() => {
-    const loadHotspots = async () => {
-      if (!currentSceneId || !tour.id) return;
+    const loadAllHotspotsAndOverlays = async () => {
+      if (!tour.id) return;
       
       try {
-        // Don't show loading for hotspot fetching - it's fast enough
-        const sceneHotspots = await HotspotsAPI.getSceneHotspots(tour.id, currentSceneId);
-        setHotspots(sceneHotspots);
+        setIsInitialLoading(true);
+        // Load all hotspots for the entire tour
+        const allTourHotspots = await HotspotsAPI.getTourHotspots(tour.id);
+        setHotspots(allTourHotspots);
+        
+        // Load overlays for all scenes
+        const allOverlays: Overlay[] = [];
+        for (const scene of scenes) {
+          try {
+            const sceneOverlays = await tourService.listOverlays(scene.id);
+            allOverlays.push(...sceneOverlays);
+          } catch (err) {
+            console.warn(`Failed to load overlays for scene ${scene.id}:`, err);
+          }
+        }
+        setOverlays(allOverlays);
+        
         setError(null);
       } catch (err) {
-        console.error('Failed to load hotspots:', err);
-        setError('Failed to load hotspots');
+        console.error('Failed to load hotspots and overlays:', err);
+        setError('Failed to load hotspots and overlays');
         setHotspots([]); // Set empty array on error
+        setOverlays([]);
+      } finally {
+        setIsInitialLoading(false);
       }
     };
 
-    loadHotspots();
-  }, [currentSceneId, tour.id]);
+    loadAllHotspotsAndOverlays();
+  }, [tour.id, scenes]); // Depend on scenes array to reload when scenes change
 
   const handleSceneChange = useCallback((sceneId: string) => {
     if (sceneId === currentSceneId) return; // Don't transition to the same scene
@@ -83,13 +106,86 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       } catch (err) {
         console.error('Invalid hotspot payload:', err);
       }
+    } else if (hotspot.kind === 'info') {
+      // Handle info hotspots - show information modal/popup
+      try {
+        const payload = JSON.parse(hotspot.payload || '{}');
+        const infoText = payload.infoText || payload.text || 'No information available';
+        
+        // Escape HTML to prevent XSS
+        const escapeHtml = (text: string) => {
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div.innerHTML;
+        };
+        
+        // Create and show info modal
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+        modal.innerHTML = `
+          <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            <div class="flex items-center justify-between p-6 border-b border-gray-200">
+              <h3 class="text-xl font-semibold text-gray-900">Information</h3>
+              <button class="info-modal-close text-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="p-6">
+              <p class="text-gray-700 leading-relaxed">${escapeHtml(infoText)}</p>
+            </div>
+          </div>
+        `;
+        
+        // Add click handlers
+        const closeModal = () => {
+          document.body.removeChild(modal);
+        };
+        
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) closeModal();
+        });
+        
+        modal.querySelector('.info-modal-close')?.addEventListener('click', closeModal);
+        
+        document.body.appendChild(modal);
+        
+      } catch (error) {
+        console.error('Error parsing info hotspot payload:', error);
+        alert('Information not available');
+      }
+    } else if (hotspot.kind === 'link') {
+      // Handle link hotspots - open external URL
+      try {
+        const payload = JSON.parse(hotspot.payload || '{}');
+        const url = payload.url || payload.externalUrl;
+        
+        if (url) {
+          // Ensure URL has protocol
+          const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+          window.open(fullUrl, '_blank', 'noopener,noreferrer');
+        } else {
+          alert('Link URL not available');
+        }
+      } catch (error) {
+        console.error('Error parsing link hotspot payload:', error);
+        alert('Link not available');
+      }
     }
   }, [handleSceneChange]);
 
   const handleHotspotCreate = useCallback((yaw: number, pitch: number) => {
-    setPendingHotspot({ yaw, pitch });
-    setShowHotspotDialog(true);
-  }, []);
+    console.log('Click captured coordinates:', { yaw, pitch, editPanel });
+    
+    if (editPanel === 'hotspots') {
+      setPendingHotspot({ yaw, pitch });
+      setShowHotspotDialog(true);
+    } else if (editPanel === 'overlays') {
+      setPendingOverlay({ yaw, pitch });
+      setShowOverlayDialog(true);
+    }
+  }, [editPanel]);
 
   const createHotspot = useCallback(async () => {
     if (!pendingHotspot) return;
@@ -215,7 +311,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     if (!hotspotId) return;
     
     try {
-      setIsLoading(true);
+      setDeletingHotspotId(hotspotId);
       await HotspotsAPI.deleteHotspot(tour.id, currentSceneId, hotspotId);
       setHotspots(hotspots.filter(h => h.id !== hotspotId));
       setError(null);
@@ -223,9 +319,41 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       console.error('Failed to delete hotspot:', err);
       setError('Failed to delete hotspot');
     } finally {
-      setIsLoading(false);
+      setDeletingHotspotId(null);
     }
   }, [hotspots, tour.id, currentSceneId]);
+
+  // Overlay management functions
+  const handleOverlayAdded = useCallback((overlay: Overlay) => {
+    setOverlays(prev => [...prev, overlay]);
+  }, []);
+
+  const handleOverlayDeleted = useCallback(async (overlayId: string) => {
+    try {
+      setDeletingOverlayId(overlayId);
+      await tourService.deleteOverlay(currentSceneId, overlayId);
+      setOverlays(prev => prev.filter(o => o.id !== overlayId));
+      setError(null);
+    } catch (err) {
+      console.error('Failed to delete overlay:', err);
+      setError('Failed to delete overlay');
+    } finally {
+      setDeletingOverlayId(null);
+    }
+  }, [currentSceneId]);
+
+  const handleOverlayUpdated = useCallback(async (overlay: Overlay) => {
+    if (!overlay.id) return;
+    
+    try {
+      const updated = await tourService.updateOverlay(currentSceneId, overlay.id, overlay);
+      setOverlays(prev => prev.map(o => o.id === overlay.id ? updated : o));
+      setError(null);
+    } catch (err) {
+      console.error('Failed to update overlay:', err);
+      setError('Failed to update overlay');
+    }
+  }, [currentSceneId]);
 
   // Viewer fullscreen functionality
   const toggleViewerFullscreen = useCallback(() => {
@@ -367,7 +495,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         audioRef.current = audio;
       } else {
         setIsAudioLoading(false); // Stop loading on failure
-        console.warn('[TourEditor] Default audio extraction failed');
         setAudioError('Default audio extraction failed. Please enter your own audio URL.');
       }
       
@@ -579,21 +706,23 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                 {/* Autoplay Control */}
                 <button
                   onClick={toggleAutoplay}
-                  className={`p-2 rounded transition-colors flex items-center cursor-pointer ${
+                  className={`p-2 rounded transition-colors flex items-center justify-center cursor-pointer ${
                     isAutoplay 
                       ? 'bg-blue-600 text-white hover:bg-blue-700' 
                       : 'bg-white bg-opacity-20 text-white hover:bg-opacity-30'
                   }`}
                   title={isAutoplay ? 'Pause Auto-rotation' : 'Start Auto-rotation'}
                 >
-                  {isAutoplay ? '⏸' : '▶'}
+                  <span className="text-sm font-bold">
+                    {isAutoplay ? '⏸️' : '▶️'}
+                  </span>
                 </button>
 
                 {/* Audio Control */}
                 <button
                   onClick={toggleAudio}
                   disabled={isAudioLoading}
-                  className={`p-2 rounded transition-colors flex items-center ${
+                  className={`p-2 rounded transition-colors flex items-center justify-center ${
                     isAudioLoading
                       ? 'bg-white bg-opacity-10 text-white cursor-not-allowed'
                       : isAudioPlaying 
@@ -608,14 +737,16 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                       : 'Play Background Audio'
                   }
                 >
-                  {isAudioLoading ? '⏳' : isAudioPlaying ? '⏸' : '🎵'}
+                  <span className="text-sm">
+                    {isAudioLoading ? '⏳' : isAudioPlaying ? '⏸️' : '🎵'}
+                  </span>
                 </button>
                 
                 {/* Mute Control */}
                 <button
                   onClick={toggleAudioMute}
                   disabled={isAudioLoading}
-                  className={`p-2 rounded transition-colors ${
+                  className={`p-2 rounded transition-colors flex items-center justify-center ${
                     isAudioLoading
                       ? 'bg-white bg-opacity-10 text-white cursor-not-allowed'
                       : isAudioMuted 
@@ -630,7 +761,9 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                       : 'Mute Audio'
                   }
                 >
-                  {isAudioMuted ? '🔇' : '🔊'}
+                  <span className="text-sm">
+                    {isAudioMuted ? '🔇' : '🔊'}
+                  </span>
                 </button>
               </div>
             </div>
@@ -660,8 +793,11 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               isEditMode={false} // Disable edit mode in fullscreen
               onHotspotCreate={handleHotspotCreate}
               onHotspotUpdate={updateHotspot}
-              hotspots={hotspots}
+              hotspots={hotspots.filter(h => h.scene_id === currentSceneId)}
+              overlays={overlays.filter(o => o.scene_id === currentSceneId)}
+              onOverlayUpdate={handleOverlayUpdated}
               isAutoplay={isAutoplay}
+              isOverlayModalOpen={showOverlayDialog}
             />
           </div>
         </div>
@@ -678,8 +814,11 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               isEditMode={isEditMode}
               onHotspotCreate={handleHotspotCreate}
               onHotspotUpdate={updateHotspot}
-              hotspots={hotspots}
+              hotspots={hotspots.filter(h => h.scene_id === currentSceneId)}
+              overlays={overlays.filter(o => o.scene_id === currentSceneId)}
+              onOverlayUpdate={handleOverlayUpdated}
               isAutoplay={isAutoplay}
+              isOverlayModalOpen={showOverlayDialog}
             />
           </div>
 
@@ -688,7 +827,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         <div className="absolute left-2 top-2 z-40">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="bg-white rounded-lg shadow-lg p-3 hover:bg-gray-50 transition-colors"
+            className="bg-white rounded-lg shadow-lg p-3 hover:bg-gray-50 transition-colors cursor-pointer"
             title="Open sidebar"
           >
             <svg 
@@ -853,29 +992,35 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               <div className="flex gap-2 mb-4">
                 <button
                   onClick={() => setEditPanel('hotspots')}
-                  className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-colors cursor-pointer ${
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${
                     editPanel === 'hotspots'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                      : 'bg-white text-gray-700 border-gray-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700'
                   }`}
                 >
-                  Hotspots
+                  🔥 Hotspots
                 </button>
                 <button
                   onClick={() => setEditPanel('overlays')}
-                  className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-colors cursor-pointer ${
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${
                     editPanel === 'overlays'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      ? 'bg-purple-600 text-white border-purple-600 shadow-md'
+                      : 'bg-white text-gray-700 border-gray-200 hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700'
                   }`}
                 >
-                  Overlays
+                  ✨ Overlays
                 </button>
               </div>
 
               {/* Instructions */}
-              <div className="bg-blue-50 border border-blue-200 rounded p-3 mb-4">
-                <p className="text-sm text-blue-900 font-medium">
+              <div className={`border-2 rounded-lg p-3 mb-4 ${
+                editPanel === 'overlays' 
+                  ? 'bg-purple-50 border-purple-200' 
+                  : 'bg-blue-50 border-blue-200'
+              }`}>
+                <p className={`text-sm font-medium ${
+                  editPanel === 'overlays' ? 'text-purple-900' : 'text-blue-900'
+                }`}>
                   <strong>How to add {editPanel}:</strong><br />
                   Hold <kbd className="px-1 py-0.5 bg-white rounded border text-gray-800 font-semibold">Shift</kbd> + Click on the panorama
                 </p>
@@ -929,26 +1074,41 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                         }
                         
                         return (
-                          <div key={hotspot.id} className="flex items-center justify-between p-2 bg-gray-50 rounded text-sm text-gray-700">
-                            <span className="truncate">
-                              {hotspot.kind === 'navigation' && '🔄'}
-                              {hotspot.kind === 'info' && 'ℹ️'}
-                              {hotspot.kind === 'link' && '🔗'}
-                              {' '}{displayLabel}
+                          <div key={hotspot.id} className="flex items-center justify-between p-3 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
+                            <span className="truncate flex items-center gap-2">
+                              <span className="text-lg">
+                                {hotspot.kind === 'navigation' && '🔄'}
+                                {hotspot.kind === 'info' && 'ℹ️'}
+                                {hotspot.kind === 'link' && '🔗'}
+                              </span>
+                              <span className="font-medium">{displayLabel}</span>
                             </span>
                             {hotspot?.id && (
                               <button
                                 onClick={() => deleteHotspot(hotspot.id ?? '')}
-                                className="text-red-500 hover:text-red-700 cursor-pointer"
+                                disabled={deletingHotspotId === hotspot.id}
+                                className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                title="Delete hotspot"
                               >
-                                ✕
+                                {deletingHotspotId === hotspot.id ? (
+                                  <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                ) : (
+                                  '✕'
+                                )}
                               </button>
                             )}
                           </div>
                         );
                       })}
                     {hotspots.filter(h => h.scene_id === currentSceneId).length === 0 && (
-                      <p className="text-gray-700 text-sm italic">No hotspots yet</p>
+                      <div className="text-center py-6">
+                        <div className="text-4xl mb-2">🔥</div>
+                        <p className="text-gray-500 text-sm font-medium">No hotspots yet</p>
+                        <p className="text-gray-400 text-xs mt-1">Add navigation points to connect scenes</p>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -957,8 +1117,72 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               {/* Overlays List */}
               {editPanel === 'overlays' && (
                 <div>
-                  <h4 className="text-sm font-semibold mb-2 text-gray-900">Current Overlays</h4>
-                  <p className="text-gray-700 text-sm italic">Overlay feature coming soon...</p>
+                  <h4 className="text-sm font-semibold mb-2 text-gray-900">Current Overlays ({overlays.filter(o => o.scene_id === currentSceneId).length})</h4>
+                  <div className="max-h-32 overflow-y-auto space-y-1">
+                    {overlays
+                      .filter(o => o.scene_id === currentSceneId)
+                      .map(overlay => {
+                        let displayLabel: string = overlay.kind;
+                        
+                        try {
+                          const payload = JSON.parse(overlay.payload || '{}');
+                          
+                          if (payload.text) {
+                            displayLabel = payload.text.length > 20 
+                              ? `${payload.text.substring(0, 20)}...` 
+                              : payload.text;
+                          } else if (overlay.kind === 'image' && payload.imageName) {
+                            displayLabel = payload.imageName;
+                          } else if (overlay.kind === 'video' && payload.videoUrl) {
+                            displayLabel = 'Video content';
+                          } else {
+                            displayLabel = `${overlay.kind} overlay`;
+                          }
+                        } catch {
+                          displayLabel = `${overlay.kind} overlay`;
+                        }
+                        
+                        return (
+                          <div key={overlay.id} className="flex items-center justify-between p-3 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
+                            <span className="truncate flex items-center gap-2">
+                              <span className="text-lg">
+                                {overlay.kind === 'text' && '📝'}
+                                {overlay.kind === 'image' && '🖼️'}
+                                {overlay.kind === 'video' && '🎥'}
+                                {overlay.kind === 'badge' && '🏷️'}
+                                {overlay.kind === 'html' && '🌐'}
+                                {overlay.kind === 'tooltip' && '💬'}
+                              </span>
+                              <span className="font-medium">{displayLabel}</span>
+                            </span>
+                            {overlay?.id && (
+                              <button
+                                onClick={() => handleOverlayDeleted(overlay.id ?? '')}
+                                disabled={deletingOverlayId === overlay.id}
+                                className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                title="Delete overlay"
+                              >
+                                {deletingOverlayId === overlay.id ? (
+                                  <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                ) : (
+                                  '✕'
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    {overlays.filter(o => o.scene_id === currentSceneId).length === 0 && (
+                      <div className="text-center py-6">
+                        <div className="text-4xl mb-2">✨</div>
+                        <p className="text-gray-500 text-sm font-medium">No overlays yet</p>
+                        <p className="text-gray-400 text-xs mt-1">Add your first overlay to enhance this scene</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </>
@@ -1044,27 +1268,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                   title={isAudioLoading ? 'Loading audio...' : 'Audio Settings'}
                 >
                   ⚙️
-                </button>
-                
-                <button
-                  onClick={toggleAudioMute}
-                  disabled={isAudioLoading}
-                  className={`p-2 rounded transition-colors ${
-                    isAudioLoading
-                      ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
-                      : isAudioMuted 
-                      ? 'bg-red-600 text-white hover:bg-red-700 cursor-pointer' 
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
-                  }`}
-                  title={
-                    isAudioLoading 
-                      ? 'Loading audio...' 
-                      : isAudioMuted 
-                      ? 'Unmute Audio' 
-                      : 'Mute Audio'
-                  }
-                >
-                  {isAudioMuted ? '🔇' : '🔊'}
                 </button>
               </>
             )}
@@ -1233,13 +1436,24 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               <button
                 onClick={createHotspot}
                 disabled={
+                  isLoading ||
                   (hotspotType === 'navigation' && !selectedTargetScene) ||
                   (hotspotType === 'info' && !infoText.trim()) ||
                   (hotspotType === 'link' && !linkUrl.trim())
                 }
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
               >
-                Create Hotspot
+                {isLoading ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Creating...
+                  </>
+                ) : (
+                  'Create Hotspot'
+                )}
               </button>
               <button
                 onClick={() => {
@@ -1250,7 +1464,8 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                   setInfoText('');
                   setLinkUrl('');
                 }}
-                className="flex-1 px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 cursor-pointer"
+                disabled={isLoading}
+                className="flex-1 px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 Cancel
               </button>
@@ -1292,19 +1507,39 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               <button
                 onClick={handleAudioUpdate}
                 disabled={isUpdatingAudio}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
               >
-                {isUpdatingAudio ? 'Updating...' : 'Update Audio'}
+                {isUpdatingAudio ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Updating...
+                  </>
+                ) : (
+                  'Update Audio'
+                )}
               </button>
               
               {tour.background_audio_url && (
                 <button
                   onClick={handleRemoveAudio}
                   disabled={isUpdatingAudio}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
                   title="Remove audio and use default"
                 >
-                  Remove
+                  {isUpdatingAudio ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Removing...
+                    </>
+                  ) : (
+                    'Remove'
+                  )}
                 </button>
               )}
               
@@ -1319,6 +1554,45 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Overlay Creation Dialog */}
+      {showOverlayDialog && pendingOverlay && (
+        <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
+          <div className="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto relative">
+            {/* Close Button - Top Right */}
+            <button
+              onClick={() => {
+                setShowOverlayDialog(false);
+                setPendingOverlay(null);
+              }}
+              className="absolute top-4 right-4 z-10 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
+              title="Close"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            
+            {/* Modal Content */}
+            <div className="p-6">
+              <OverlayEditor
+                sceneId={currentSceneId}
+                tourId={tour.id}
+                overlays={overlays.filter(o => o.scene_id === currentSceneId)}
+                pendingPosition={pendingOverlay}
+                onOverlayAdded={(overlay) => {
+                  handleOverlayAdded(overlay);
+                  setShowOverlayDialog(false);
+                  setPendingOverlay(null);
+                }}
+                onOverlayDeleted={handleOverlayDeleted}
+                onOverlayUpdated={handleOverlayUpdated}
+                deletingOverlayId={deletingOverlayId}
+              />
             </div>
           </div>
         </div>
