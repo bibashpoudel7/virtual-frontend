@@ -74,14 +74,6 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
         throw new Error('Authentication required. Please log in.');
       }
 
-      console.log('Creating scene with:', {
-        tourId,
-        sceneName: newSceneName,
-        sceneType: newSceneType,
-        backendUrl,
-        hasToken: !!token
-      });
-
       const response = await fetch(`${backendUrl}tours/${tourId}/scenes`, {
         method: 'POST',
         headers: {
@@ -101,11 +93,6 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error('Scene creation error details:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorData
-        });
         const errorMessage = errorData.error || `Failed to create scene (${response.status}: ${response.statusText})`;
         throw new Error(errorMessage);
       }

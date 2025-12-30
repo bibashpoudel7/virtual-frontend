@@ -108,9 +108,8 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
           }
         }
       } catch (err) {
-        // Don't show error for property loading failure - just log it
         console.error('Error loading properties:', err);
-        setProperties([]); // Set empty array so form still works
+        setProperties([]);
       } finally {
         setLoadingProperties(false);
       }

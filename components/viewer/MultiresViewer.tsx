@@ -70,21 +70,10 @@ function useHotspotUpdater(
 
     // Add hotspots for current scene
     const sceneHotspots = hotspots.filter((hotspot) => hotspot.scene_id === currentSceneId);
-    console.log('[useHotspotUpdater] Adding hotspots for scene:', currentSceneId, sceneHotspots.length);
-    
     sceneHotspots.forEach((hotspot, index) => {
-      console.log(`[useHotspotUpdater] Processing hotspot ${index + 1}:`, {
-        id: hotspot.id,
-        kind: hotspot.kind,
-        yaw: hotspot.yaw,
-        pitch: hotspot.pitch,
-        scene_id: hotspot.scene_id,
-        payload: hotspot.payload
-      });
-      
       const sprite = createHotspotSprite(hotspot, scenes);
       group.add(sprite);
-      
+
       // Ensure visibility
       sprite.visible = true;
       sprite.children.forEach(child => {
@@ -92,26 +81,11 @@ function useHotspotUpdater(
           child.visible = true;
         }
       });
-      
-      console.log(`[useHotspotUpdater] Added hotspot ${index + 1} to group:`, {
-        position: sprite.position,
-        visible: sprite.visible,
-        childrenCount: sprite.children.length
-      });
     });
-    
+
     // Ensure the group itself is visible
     group.visible = true;
     
-    console.log('[useHotspotUpdater] Total hotspots in group:', group.children.length);
-    console.log('[useHotspotUpdater] Group visible:', group.visible);
-    console.log('[useHotspotUpdater] Group position:', group.position);
-    console.log('[useHotspotUpdater] Group children details:', group.children.map(child => ({
-      type: child.constructor.name,
-      position: child.position,
-      visible: child.visible,
-      userData: child.userData
-    })));
   }, [hotspots, currentSceneId, hotspotsGroupRef, scenes]);
 }
 
@@ -759,7 +733,6 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
       cameraRef.current.lookAt(yawPitchToVector(controls.yaw, controls.pitch, 1));
 
       // Update camera position state for overlay renderer (throttled to reduce re-renders)
-      // Only update every 100ms to prevent performance issues and console spam
       if (Math.floor(now / 100) !== Math.floor((now - 16) / 100)) {
         setCameraPosition({
           yaw: controls.yaw,
@@ -889,45 +862,7 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
       if (isNaN(coords.yaw) || isNaN(coords.pitch)) {
         return null;
       }
-      
-      // Debug logging to verify coordinate conversion (only when needed)
-      const DEBUG_COORDINATES = false; // Set to true when debugging coordinate issues
-      
-      if (DEBUG_COORDINATES) {
-        console.log('[pickSphere] Click analysis:', {
-          screenClick: { x: event.clientX - rect.left, y: event.clientY - rect.top },
-          normalizedClick: { x: pointerRef.current.x, y: pointerRef.current.y },
-          intersectionPoint: {
-            x: intersectionPoint.x.toFixed(3),
-            y: intersectionPoint.y.toFixed(3),
-            z: intersectionPoint.z.toFixed(3)
-          },
-          calculatedCoords: { yaw: coords.yaw.toFixed(3), pitch: coords.pitch.toFixed(3) },
-          currentCamera: { 
-            yaw: controlsRef.current.yaw.toFixed(3), 
-            pitch: controlsRef.current.pitch.toFixed(3) 
-          }
-        });
-        
-        // Verify round-trip conversion
-        const testPosition = yawPitchToVector(coords.yaw, coords.pitch, SPHERE_RADIUS);
-        const distance = intersectionPoint.distanceTo(testPosition);
-        console.log('[pickSphere] Round-trip verification:', {
-          original: {
-            x: intersectionPoint.x.toFixed(3),
-            y: intersectionPoint.y.toFixed(3),
-            z: intersectionPoint.z.toFixed(3)
-          },
-          converted: {
-            x: testPosition.x.toFixed(3),
-            y: testPosition.y.toFixed(3),
-            z: testPosition.z.toFixed(3)
-          },
-          distance: distance.toFixed(6),
-          isAccurate: distance < 0.1 ? '✅ GOOD' : '❌ BAD - COORDINATE CONVERSION ISSUE'
-        });
-      }
-      
+
       return coords;
     };
 
@@ -1017,14 +952,6 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
             });
           }
           
-          console.log('[Hotspot Drag] Updated position:', {
-            id: updated.id,
-            yaw: updated.yaw,
-            pitch: updated.pitch,
-            position: newPosition,
-            visible: draggingSpriteRef.current.visible
-          });
-          
           onHotspotUpdate?.(updated);
         }
         return;
@@ -1080,22 +1007,13 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
           // Check for overlay clicks
           const overlay = pickOverlay(event);
           if (overlay) {
-            console.log('[Overlay Click] Clicked overlay:', overlay);
-            // For now, just log the overlay click - you can add overlay-specific behavior here
-            // onOverlayClick?.(overlay); // Uncomment if you want to handle overlay clicks
+            // onOverlayClick?.(overlay);
           } else if (isEditMode && (pointerStateRef.current.shiftKey || event.shiftKey)) {
             const coords = pickSphere(event);
             if (coords) {
               // Constrain coordinates to prevent extreme positions
               const constrainedYaw = THREE.MathUtils.clamp(coords.yaw, -180, 180);
               const constrainedPitch = THREE.MathUtils.clamp(coords.pitch, -80, 80);
-              
-              // Add visual feedback for hotspot creation
-              console.log('[Hotspot Creation] Creating hotspot at:', {
-                original: coords,
-                constrained: { yaw: constrainedYaw, pitch: constrainedPitch }
-              });
-              
               onHotspotCreate?.(constrainedYaw, constrainedPitch);
             }
           }

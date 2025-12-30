@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import CreateTour from '@/components/tours/CreateTour';
 import { Home, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Property } from '@/types/tour';
+import { Property, Tour } from '@/types/tour';
 import { tourService } from '@/services/tourService';
 
 interface CompanyInfo {
@@ -27,7 +27,7 @@ export default function ToursPage() {
   const router = useRouter();
   const { logout } = useAuth();
 
-  const handleTourCreated = (tour: any) => {
+  const handleTourCreated = (tour: Tour) => {
     // Switch back to list view and refresh the list
     setView('list');
     setRefreshKey(prev => prev + 1);

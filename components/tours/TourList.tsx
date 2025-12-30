@@ -110,7 +110,6 @@ export default function TourList() {
       
       // Handle null or empty response
       if (!data || data === null) {
-        console.log('API returned null, clearing cache and showing empty state');
         setTours([]);
         // Clear cache when API returns null
         localStorage.removeItem('tours_cache');

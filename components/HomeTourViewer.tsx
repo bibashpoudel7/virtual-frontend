@@ -593,7 +593,6 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       const currentScene = scenes[currentSceneIndex];
       const currentSceneHotspots = allHotspots.filter(h => h.scene_id === currentScene?.id);
       const currentSceneOverlays = allOverlays.filter(o => o.scene_id === currentScene?.id);
-      console.log(`Scene ${currentSceneIndex + 1}: ${currentSceneHotspots.length} hotspots, ${currentSceneOverlays.length} overlays`);
     }
   }, [currentSceneIndex, scenes, allHotspots, allOverlays]);
 
@@ -694,8 +693,6 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     }
 
     if (currentTour?.background_audio_url && currentTour.background_audio_url.trim() !== '') {
-      console.log('Loading tour-specific audio:', currentTour.background_audio_url);
-      
       // Check if it's a sharing service URL that needs extraction
       const isFileSharing = (currentTour.background_audio_url.includes('jumpshare.com') && currentTour.background_audio_url.includes('/share/')) || 
                            (currentTour.background_audio_url.includes('audio.com') && currentTour.background_audio_url.includes('/audio/')) || 
@@ -712,7 +709,6 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       }
     } else {
       // No tour-specific audio, load default audio
-      console.log('No tour-specific audio found, loading default audio');
       loadDefaultAudio();
     }
     
@@ -728,15 +724,12 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   // Extract audio from sharing services for tour-specific audio
   const extractTourAudio = async (audioUrl: string) => {
     try {
-      console.log('Extracting tour audio from sharing service:', audioUrl);
       const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(audioUrl)}`);
       const result = await response.json();
       
       if (result.success && result.audioUrl) {
-        console.log('Tour audio extraction successful');
         loadTourAudio(result.audioUrl);
       } else {
-        console.warn('Tour audio extraction failed, trying direct URL');
         loadTourAudio(audioUrl);
       }
     } catch (error) {
@@ -747,7 +740,6 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
 
   // Load tour-specific audio
   const loadTourAudio = (audioUrl: string) => {
-    console.log('Loading tour audio:', audioUrl);
     const audio = new Audio(audioUrl);
     audio.loop = true;
     audio.volume = 0.5; // Set default volume to 50%
@@ -755,12 +747,10 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     audio.crossOrigin = 'anonymous';
     
     audio.addEventListener('canplay', () => {
-      console.log('Tour background audio loaded successfully');
       setAudioError(null);
     });
     
     audio.addEventListener('error', (e) => {
-      console.error('Tour background audio error:', e);
       setAudioError('Failed to load tour background audio');
     });
     
@@ -777,26 +767,16 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     const defaultAudioUrl = 'https://audio.com/saransh-pachhai/audio/niya-a-bloom-vlog-no-copyright-music';
     
     try {
-      console.log('Loading default audio from audio.com...');
       // Extract direct audio URL from audio.com for default audio
       const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(defaultAudioUrl)}`);
       const result = await response.json();
       
       if (result.success && result.audioUrl) {
-        console.log('Default audio extraction successful');
         const audio = new Audio(result.audioUrl);
         audio.loop = true;
         audio.volume = 0.3; // Lower volume for default audio
         audio.muted = true;
         audio.crossOrigin = 'anonymous';
-        
-        audio.addEventListener('canplay', () => {
-          console.log('Default background audio loaded successfully');
-        });
-        
-        audio.addEventListener('error', (e) => {
-          console.log('Default audio playback error, using visual-only toggle');
-        });
         
         audio.addEventListener('play', () => setIsAudioPlaying(true));
         audio.addEventListener('pause', () => setIsAudioPlaying(false));
@@ -805,12 +785,10 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         setIsAudioMuted(true);
         setIsAudioPlaying(false);
       } else {
-        console.warn('Default audio extraction failed, using visual-only toggle');
         setIsAudioMuted(true);
         setIsAudioPlaying(false);
       }
     } catch (error) {
-      console.error('Default audio extraction error:', error);
       setIsAudioMuted(true);
       setIsAudioPlaying(false);
     }
@@ -818,26 +796,22 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
 
   // Audio control functions - Single toggle button (works even without audio)
   const toggleAudio = useCallback(() => {
-    console.log('Audio toggle clicked', { isAudioPlaying, isAudioMuted, audioRef: !!audioRef.current });
     
     if (audioRef.current) {
       // If we have actual audio
       if (isAudioPlaying && !isAudioMuted) {
         // If playing and not muted, pause and mute
-        console.log('Pausing and muting audio');
         audioRef.current.pause();
         audioRef.current.muted = true;
         setIsAudioMuted(true);
         setIsAudioPlaying(false);
       } else {
         // If paused or muted, play and unmute
-        console.log('Playing and unmuting audio');
         audioRef.current.muted = false;
         setIsAudioMuted(false);
         audioRef.current.play().then(() => {
           setIsAudioPlaying(true);
         }).catch(err => {
-          console.error('Failed to play audio:', err);
           setAudioError('Failed to play audio. User interaction may be required.');
           setIsAudioPlaying(false);
           setIsAudioMuted(true);
@@ -845,7 +819,6 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       }
     } else {
       // No actual audio, just toggle the visual state for demo
-      console.log('No audio ref, toggling visual state');
       if (isAudioPlaying) {
         setIsAudioPlaying(false);
         setIsAudioMuted(true);
@@ -953,7 +926,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
           isFullscreen={isFullscreen}
         />
         
-        {/* Autoplay Controller - Matterport style */}
+        {/* Autoplay Controller */}
         {showControls && currentTour?.autoplay_enabled && (
           <AutoplayController
             tour={currentTour}

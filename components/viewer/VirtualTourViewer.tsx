@@ -50,13 +50,6 @@ export default function VirtualTourViewer({
   // Check if scene has multiresolution tiles
   const hasMultires = Boolean(currentScene.tiles_manifest);
   
-  console.log('[VirtualTourViewer] Scene check:', {
-    sceneId: currentScene.id,
-    hasMultires,
-    tiles_manifest: currentScene.tiles_manifest,
-    src_original_url: currentScene.src_original_url
-  });
-
   // Initialize Three.js scene
   useEffect(() => {
     if (!containerRef.current) return;
@@ -145,7 +138,6 @@ export default function VirtualTourViewer({
           loadEquirectangular();
         }
       } catch (err) {
-        console.error('Error loading panorama:', err);
         setError(err instanceof Error ? err.message : 'Failed to load panorama');
         setIsLoading(false);
       }
@@ -153,7 +145,6 @@ export default function VirtualTourViewer({
 
     async function loadCubemap() {
       try {
-        console.log('Loading cubemap from:', currentScene.cubemap_manifest_url);
         
         // Fetch manifest
         const response = await fetch(currentScene.cubemap_manifest_url!);
@@ -182,10 +173,8 @@ export default function VirtualTourViewer({
         const skybox = new THREE.Mesh(geometry, materials);
         scene.add(skybox);
         
-        console.log('Cubemap loaded successfully');
         setIsLoading(false);
       } catch (err) {
-        console.error('Cubemap loading failed, trying equirectangular fallback:', err);
         // Fallback to equirectangular if available
         if (currentScene.src_original_url) {
           loadEquirectangular();

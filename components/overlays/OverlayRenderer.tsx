@@ -24,6 +24,21 @@ interface OverlayRendererProps {
   isFullscreen?: boolean;
 }
 
+// Helper function to format URLs
+const formatUrl = (url: string): string => {
+  if (!url) return url;
+  
+  // If URL already has protocol, return as is
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  
+  if (url.startsWith('www.') || url.includes('.')) {
+    return `https://${url}`;
+  }    
+  return `https://${url}`;
+};
+
 // Create 3D overlay sprite
 function createOverlaySprite(overlay: Overlay): THREE.Group {
   const group = new THREE.Group();
@@ -248,20 +263,6 @@ export default function OverlayRenderer({
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const modalHoverRef = useRef<boolean>(false);
   const lastHoveredOverlayRef = useRef<string | null>(null);
-
-  const formatUrl = (url: string): string => {
-    if (!url) return url;
-    
-    // If URL already has protocol, return as is
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      return url;
-    }
-    
-    if (url.startsWith('www.') || url.includes('.')) {
-      return `https://${url}`;
-    }    
-    return `https://${url}`;
-  };
 
   useEffect(() => {
     if (!scene || !overlayGroup) {
@@ -543,210 +544,6 @@ export default function OverlayRenderer({
     }
   }, [scene, camera, overlayGroup, isModalOpen]);
 
-  // Video Player Component - Enhanced autoplay implementation with memoization
-  const VideoPlayerWithContinuity = useCallback(({ 
-    videoSrc, 
-    videoId, 
-    overlayId,
-    payload 
-  }: { 
-    videoSrc: string; 
-    videoId: string | null; 
-    overlayId: string;
-    payload: any;
-  }) => {
-    const videoState = videoStates.get(overlayId);
-    const isPlaying = videoState?.isVideoPlaying || false;
-    const [isMuted, setIsMuted] = useState(false); // Start unmuted by default
-    const [hasUserInteracted, setHasUserInteracted] = useState(false);
-    const [useDirectVideo, setUseDirectVideo] = useState(false);
-    const [loadAttempt, setLoadAttempt] = useState(0);
-    const [autoplayFailed, setAutoplayFailed] = useState(false);
-    const iframeRef = useRef<HTMLIFrameElement>(null);
-    
-    // Show placeholder if not playing
-    if (!isPlaying) {
-      return (
-        <div 
-          className="bg-gray-800 rounded flex items-center justify-center"
-          style={{
-            width: payload.width ? `${payload.width}px` : '100%',
-            height: payload.height ? `${payload.height}px` : '192px'
-          }}
-        >
-          <div className="text-center">
-            <svg className="w-12 h-12 text-gray-500 mx-auto mb-2" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z"/>
-            </svg>
-            <p className="text-gray-400 text-sm">Hover over video icon to play</p>
-          </div>
-        </div>
-      );
-    }
-
-    // Show error if no video ID
-    if (!videoId) {
-      return (
-        <div 
-          className="bg-red-900 rounded flex items-center justify-center"
-          style={{
-            width: payload.width ? `${payload.width}px` : '100%',
-            height: payload.height ? `${payload.height}px` : '192px'
-          }}
-        >
-          <div className="text-center">
-            <p className="text-red-400 text-sm">Invalid video URL</p>
-            <p className="text-red-300 text-xs mt-1">Could not extract video ID</p>
-          </div>
-        </div>
-      );
-    }
-
-    // Auto-start video when component mounts and is playing
-    useEffect(() => {
-      if (isPlaying && iframeRef.current && !hasUserInteracted) {
-        // Create a hidden video element to test autoplay capabilities
-        const testVideo = document.createElement('video');
-        testVideo.muted = false;
-        testVideo.autoplay = true;
-        testVideo.style.position = 'absolute';
-        testVideo.style.left = '-9999px';
-        testVideo.style.width = '1px';
-        testVideo.style.height = '1px';
-        
-        // Test if autoplay with sound is possible
-        const testAutoplay = async () => {
-          try {
-            document.body.appendChild(testVideo);
-            await testVideo.play();
-            // If we get here, autoplay with sound is allowed
-            setAutoplayFailed(false);
-            setIsMuted(false);
-          } catch (e) {
-            // Autoplay with sound failed, fallback to muted
-            setAutoplayFailed(true);
-            setIsMuted(true);
-          } finally {
-            if (document.body.contains(testVideo)) {
-              document.body.removeChild(testVideo);
-            }
-          }
-        };
-        
-        testAutoplay();
-        
-        // Try to trigger autoplay via postMessage after a short delay
-        const timeoutId = setTimeout(() => {
-          if (iframeRef.current) {
-            try {
-              // Try to play with sound first
-              iframeRef.current.contentWindow?.postMessage(
-                '{"event":"command","func":"playVideo","args":""}', 
-                '*'
-              );
-              if (!autoplayFailed) {
-                iframeRef.current.contentWindow?.postMessage(
-                  '{"event":"command","func":"unMute","args":""}', 
-                  '*'
-                );
-              }
-            } catch (e) {
-              // If it fails, try muted autoplay
-              setAutoplayFailed(true);
-              setIsMuted(true);
-            }
-          }
-        }, 800);
-        
-        return () => clearTimeout(timeoutId);
-      }
-    }, [isPlaying, videoId, hasUserInteracted, autoplayFailed]);
-
-    // Handle unmute click (force reload with sound)
-    const handleUnmute = () => {
-      setIsMuted(false);
-      setHasUserInteracted(true);
-      setAutoplayFailed(false);
-      
-      // Force iframe reload with unmuted parameters
-      setLoadAttempt(prev => prev + 1);
-    };
-
-    // Try direct video approach if iframe fails
-    const handleIframeError = () => {
-      setUseDirectVideo(true);
-    };
-
-    // Enhanced embed URL - try with sound first, fallback to muted
-    const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=${(isMuted || autoplayFailed) ? 1 : 0}&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&loop=0&fs=1&cc_load_policy=0&iv_load_policy=3&autohide=1&start=0&html5=1&wmode=opaque&vq=hd720&t=0s`;
-
-    return (
-      <div 
-        className="rounded overflow-hidden bg-black relative"
-        style={{
-          width: payload.width ? `${payload.width}px` : '100%',
-          height: payload.height ? `${payload.height}px` : '192px'
-        }}
-      >
-        {!useDirectVideo ? (
-          // Primary iframe approach with aggressive autoplay
-          <iframe
-            ref={iframeRef}
-            key={`${videoId}-${isMuted ? 'muted' : 'unmuted'}-${loadAttempt}`}
-            src={embedUrl}
-            className="w-full h-full"
-            style={{ border: 'none' }}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-            title="Video preview"
-            onLoad={() => {
-              // Silently handle iframe load
-            }}
-            onError={handleIframeError}
-          />
-        ) : (
-          // Fallback: Show thumbnail with direct YouTube link
-          <div className="w-full h-full relative">
-            <img 
-              src={`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`}
-              alt="Video thumbnail"
-              className="w-full h-full object-cover"
-              onError={(e) => {
-                e.currentTarget.src = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-              }}
-            />
-            <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
-              <button
-                onClick={() => window.open(formatUrl(videoSrc), '_blank')}
-                className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition-colors shadow-lg"
-              >
-                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z"/>
-                </svg>
-                Play Video
-              </button>
-            </div>
-          </div>
-        )}
-        
-        {/* Unmute button overlay - only show if autoplay failed or muted */}
-        {!useDirectVideo && (isMuted || autoplayFailed) && !hasUserInteracted && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
-            <button
-              onClick={handleUnmute}
-              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-lg"
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-              </svg>
-              {autoplayFailed ? 'Click for sound' : 'Click to unmute'}
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }, [videoStates]);
-
   // Render hover tooltip
   const renderHoverTooltip = () => {
     // Don't show hover tooltip when modal is open
@@ -936,29 +733,28 @@ export default function OverlayRenderer({
               {/* Video Preview Area */}
               <div className="mb-3 relative">
                 {payload.videoUrl ? (
-                  (() => {
-                    // Extract YouTube video ID from various URL formats
-                    let videoId = null;
-                    let videoSrc = payload.videoUrl;
-                    
-                    // Handle different YouTube URL formats
-                    if (videoSrc.includes('youtube.com/watch?v=')) {
-                      videoId = videoSrc.split('v=')[1]?.split('&')[0];
-                    } else if (videoSrc.includes('youtu.be/')) {
-                      videoId = videoSrc.split('youtu.be/')[1]?.split('?')[0];
-                    } else if (videoSrc.includes('youtube.com/embed/')) {
-                      videoId = videoSrc.split('/embed/')[1]?.split('?')[0];
-                    }
-
-                    return (
-                      <VideoPlayerWithContinuity 
-                        videoSrc={videoSrc} 
-                        videoId={videoId} 
-                        overlayId={hoveredOverlay.id!}
-                        payload={payload} 
-                      />
-                    );
-                  })()
+                  <VideoPlayerWithContinuity 
+                    videoSrc={payload.videoUrl} 
+                    videoId={(() => {
+                      // Extract YouTube video ID from various URL formats
+                      let videoId = null;
+                      let videoSrc = payload.videoUrl;
+                      
+                      // Handle different YouTube URL formats
+                      if (videoSrc.includes('youtube.com/watch?v=')) {
+                        videoId = videoSrc.split('v=')[1]?.split('&')[0];
+                      } else if (videoSrc.includes('youtu.be/')) {
+                        videoId = videoSrc.split('youtu.be/')[1]?.split('?')[0];
+                      } else if (videoSrc.includes('youtube.com/embed/')) {
+                        videoId = videoSrc.split('/embed/')[1]?.split('?')[0];
+                      }
+                      
+                      return videoId;
+                    })()} 
+                    overlayId={hoveredOverlay.id!}
+                    payload={payload}
+                    videoStates={videoStates}
+                  />
                 ) : (
                   <div 
                     className="bg-gray-800 rounded flex items-center justify-center"
@@ -1091,7 +887,7 @@ export default function OverlayRenderer({
     );
   };
 
-  // Render expanded modal (Matterport-style)
+  // Render expanded modal
   const renderExpandedModal = () => {
     if (!isModalOpen || !expandedOverlay) return null;
 
@@ -1318,3 +1114,211 @@ export default function OverlayRenderer({
     </>
   );
 }
+
+// Separate component for video player to avoid hooks in callbacks
+interface VideoPlayerProps {
+  videoSrc: string;
+  videoId: string | null;
+  overlayId: string;
+  payload: any;
+  videoStates: Map<string, any>;
+}
+
+const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({ 
+  videoSrc, 
+  videoId, 
+  overlayId,
+  payload,
+  videoStates
+}) => {
+  const videoState = videoStates.get(overlayId);
+  const isPlaying = videoState?.isVideoPlaying || false;
+  const [isMuted, setIsMuted] = useState(false);
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
+  const [useDirectVideo, setUseDirectVideo] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [autoplayFailed, setAutoplayFailed] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+    
+  // Show placeholder if not playing
+  if (!isPlaying) {
+    return (
+      <div 
+        className="bg-gray-800 rounded flex items-center justify-center"
+        style={{
+          width: payload.width ? `${payload.width}px` : '100%',
+          height: payload.height ? `${payload.height}px` : '192px'
+        }}
+      >
+        <div className="text-center">
+          <svg className="w-12 h-12 text-gray-500 mx-auto mb-2" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+          <p className="text-gray-400 text-sm">Hover over video icon to play</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error if no video ID
+  if (!videoId) {
+    return (
+      <div 
+        className="bg-red-900 rounded flex items-center justify-center"
+        style={{
+          width: payload.width ? `${payload.width}px` : '100%',
+          height: payload.height ? `${payload.height}px` : '192px'
+        }}
+      >
+        <div className="text-center">
+          <p className="text-red-400 text-sm">Invalid video URL</p>
+          <p className="text-red-300 text-xs mt-1">Could not extract video ID</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Auto-start video when component mounts and is playing
+  useEffect(() => {
+    if (isPlaying && iframeRef.current && !hasUserInteracted) {
+      // Create a hidden video element to test autoplay capabilities
+      const testVideo = document.createElement('video');
+      testVideo.muted = false;
+      testVideo.autoplay = true;
+      testVideo.style.position = 'absolute';
+      testVideo.style.left = '-9999px';
+      testVideo.style.width = '1px';
+      testVideo.style.height = '1px';
+      
+      // Test if autoplay with sound is possible
+      const testAutoplay = async () => {
+        try {
+          document.body.appendChild(testVideo);
+          await testVideo.play();
+          // If we get here, autoplay with sound is allowed
+          setAutoplayFailed(false);
+          setIsMuted(false);
+        } catch (e) {
+          // Autoplay with sound failed, fallback to muted
+          setAutoplayFailed(true);
+          setIsMuted(true);
+        } finally {
+          if (document.body.contains(testVideo)) {
+            document.body.removeChild(testVideo);
+          }
+        }
+      };
+      
+      testAutoplay();
+      
+      // Try to trigger autoplay via postMessage after a short delay
+      const timeoutId = setTimeout(() => {
+        if (iframeRef.current) {
+          try {
+            // Try to play with sound first
+            iframeRef.current.contentWindow?.postMessage(
+              '{"event":"command","func":"playVideo","args":""}', 
+              '*'
+            );
+            if (!autoplayFailed) {
+              iframeRef.current.contentWindow?.postMessage(
+                '{"event":"command","func":"unMute","args":""}', 
+                '*'
+              );
+            }
+          } catch (e) {
+            // If it fails, try muted autoplay
+            setAutoplayFailed(true);
+            setIsMuted(true);
+          }
+        }
+      }, 800);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isPlaying, videoId, hasUserInteracted, autoplayFailed]);
+
+  // Handle unmute click (force reload with sound)
+  const handleUnmute = () => {
+    setIsMuted(false);
+    setHasUserInteracted(true);
+    setAutoplayFailed(false);
+    
+    // Force iframe reload with unmuted parameters
+    setLoadAttempt(prev => prev + 1);
+  };
+
+  // Try direct video approach if iframe fails
+  const handleIframeError = () => {
+    setUseDirectVideo(true);
+  };
+
+  // Enhanced embed URL - try with sound first, fallback to muted
+  const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=${(isMuted || autoplayFailed) ? 1 : 0}&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&loop=0&fs=1&cc_load_policy=0&iv_load_policy=3&autohide=1&start=0&html5=1&wmode=opaque&vq=hd720&t=0s`;
+
+  return (
+    <div 
+      className="rounded overflow-hidden bg-black relative"
+      style={{
+        width: payload.width ? `${payload.width}px` : '100%',
+        height: payload.height ? `${payload.height}px` : '192px'
+      }}
+    >
+      {!useDirectVideo ? (
+        // Primary iframe approach with aggressive autoplay
+        <iframe
+          ref={iframeRef}
+          key={`${videoId}-${isMuted ? 'muted' : 'unmuted'}-${loadAttempt}`}
+          src={embedUrl}
+          className="w-full h-full"
+          style={{ border: 'none' }}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          title="Video preview"
+          onLoad={() => {
+            // Silently handle iframe load
+          }}
+          onError={handleIframeError}
+        />
+      ) : (
+        // Fallback: Show thumbnail with direct YouTube link
+        <div className="w-full h-full relative">
+          <img 
+            src={`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`}
+            alt="Video thumbnail"
+            className="w-full h-full object-cover"
+            onError={(e) => {
+              e.currentTarget.src = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+            }}
+          />
+          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
+            <button
+              onClick={() => window.open(formatUrl(videoSrc), '_blank')}
+              className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition-colors shadow-lg"
+            >
+              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+              Play Video
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {/* Unmute button overlay - only show if autoplay failed or muted */}
+      {!useDirectVideo && (isMuted || autoplayFailed) && !hasUserInteracted && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
+          <button
+            onClick={handleUnmute}
+            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-lg"
+          >
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+            </svg>
+            {autoplayFailed ? 'Click for sound' : 'Click to unmute'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};

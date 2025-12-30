@@ -176,8 +176,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   }, [handleSceneChange]);
 
   const handleHotspotCreate = useCallback((yaw: number, pitch: number) => {
-    console.log('Click captured coordinates:', { yaw, pitch, editPanel });
-    
     if (editPanel === 'hotspots') {
       setPendingHotspot({ yaw, pitch });
       setShowHotspotDialog(true);

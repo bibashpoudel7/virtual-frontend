@@ -146,7 +146,11 @@ export default function PhotoViewer360({
     const hotspotSprites = sceneRef.current.children.filter(
       (child) => child.userData.isHotspot
     );
-    hotspotSprites.forEach((sprite) => sceneRef.current!.remove(sprite));
+    hotspotSprites.forEach((sprite) => {
+      if (sceneRef.current) {
+        sceneRef.current.remove(sprite);
+      }
+    });
 
     // Add new hotspot sprites
     hotspots.forEach((hotspot) => {
@@ -193,8 +197,10 @@ export default function PhotoViewer360({
       icon.lookAt(0, 0, 0);
       icon.userData = { isHotspot: true, hotspot };
       
-      sceneRef.current.add(circle);
-      sceneRef.current.add(icon);
+      if (sceneRef.current) {
+        sceneRef.current.add(circle);
+        sceneRef.current.add(icon);
+      }
     });
   }, [hotspots, hoveredHotspot]);
 
