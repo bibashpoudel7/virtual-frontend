@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Tour, Scene } from '@/types/tour';
+import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { tourService } from '@/services/tourService';
 import MultiresViewer from './viewer/MultiresViewer';
+import AutoplayController from './viewer/AutoplayController';
 import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy, X } from 'lucide-react';
 
 // Share Modal Component
@@ -150,13 +151,15 @@ const ProgressBar = React.memo(({
   currentSceneIndex, 
   isAutoplay, 
   isTransitioning, 
-  onSceneChange 
+  onSceneChange,
+  isOverlayModalOpen = false // New prop
 }: {
   scenes: Scene[];
   currentSceneIndex: number;
   isAutoplay: boolean;
   isTransitioning: boolean;
   onSceneChange: (index: number) => void;
+  isOverlayModalOpen?: boolean; // New prop
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number | undefined>(undefined);
@@ -176,7 +179,7 @@ const ProgressBar = React.memo(({
       return;
     }
 
-    if (isAutoplay) {
+    if (isAutoplay && !isOverlayModalOpen) {
       // Resume from paused progress or start fresh
       startTimeRef.current = Date.now() - (pausedProgressRef.current * 12000);
       
@@ -195,7 +198,7 @@ const ProgressBar = React.memo(({
           currentProgressBar.style.width = `${progress * 100}%`;
         }
         
-        if (progress < 1 && isAutoplay) {
+        if (progress < 1 && isAutoplay && !isOverlayModalOpen) {
           animationRef.current = requestAnimationFrame(updateProgress);
         }
       };
@@ -216,7 +219,7 @@ const ProgressBar = React.memo(({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length]);
+  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen]);
 
   if (scenes.length <= 1) return null;
 
@@ -329,6 +332,8 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const [isAutoplay, setIsAutoplay] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [allHotspots, setAllHotspots] = useState<Hotspot[]>([]);
+  const [allOverlays, setAllOverlays] = useState<Overlay[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [showControls, setShowControls] = useState(false);
@@ -336,6 +341,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [isOverlayModalOpen, setIsOverlayModalOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -355,7 +361,6 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         }
 
         const toursData = await tourService.listTours();
-        console.log('Fetched tours:', toursData);
         
         if (toursData && toursData.length > 0) {
           // Select the first tour
@@ -364,8 +369,41 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
           
           // Fetch scenes for the first tour
           const scenesData = await tourService.getScenes(firstTour.id);
-          console.log('Fetched scenes for tour:', firstTour.id, scenesData);
           setScenes(scenesData || []);
+          
+          // Fetch hotspots and overlays for all scenes
+          if (scenesData && scenesData.length > 0) {
+            const allHotspotsPromises = scenesData.map(async (scene: Scene) => {
+              try {
+                const sceneHotspots = await tourService.listHotspots(scene.id);
+                return sceneHotspots || [];
+              } catch (error) {
+                console.error(`Error fetching hotspots for scene ${scene.id}:`, error);
+                return [];
+              }
+            });
+
+            const allOverlaysPromises = scenesData.map(async (scene: Scene) => {
+              try {
+                const sceneOverlays = await tourService.listOverlays(scene.id);
+                return sceneOverlays || [];
+              } catch (error) {
+                console.error(`Error fetching overlays for scene ${scene.id}:`, error);
+                return [];
+              }
+            });
+            
+            const [hotspotsArrays, overlaysArrays] = await Promise.all([
+              Promise.all(allHotspotsPromises),
+              Promise.all(allOverlaysPromises)
+            ]);
+            
+            const flattenedHotspots = hotspotsArrays.flat();
+            const flattenedOverlays = overlaysArrays.flat();
+            
+            setAllHotspots(flattenedHotspots);
+            setAllOverlays(flattenedOverlays);
+          }
         } else {
           setError('No tours available');
         }
@@ -386,7 +424,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
 
   // Auto-advance scenes when autoplay is enabled
   useEffect(() => {
-    if (!isAutoplay || scenes.length <= 1 || isTransitioning) {
+    if (!isAutoplay || scenes.length <= 1 || isTransitioning || isOverlayModalOpen) {
       return;
     }
 
@@ -403,7 +441,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     return () => {
       clearInterval(sceneInterval);
     };
-  }, [isAutoplay, scenes.length, isTransitioning, currentSceneIndex]);
+  }, [isAutoplay, scenes.length, isTransitioning, currentSceneIndex, isOverlayModalOpen]);
 
   const handleSceneChange = useCallback((index: number) => {
     if (index === currentSceneIndex || isTransitioning) return;
@@ -419,7 +457,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     setTimeout(() => {
       setIsTransitioning(false);
     }, 600);
-  }, [currentSceneIndex, isTransitioning]);
+  }, [currentSceneIndex, isTransitioning, scenes]);
 
   const handlePrevScene = useCallback(() => {
     if (isTransitioning) return;
@@ -444,10 +482,120 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     }
   }, [scenes, currentSceneIndex]);
 
+  const handleHotspotClick = useCallback((hotspot: Hotspot) => {
+    if (hotspot.kind === 'navigation') {
+      // Handle navigation hotspots - check both target_scene_id and payload.targetSceneId
+      let targetSceneId = hotspot.target_scene_id;
+      
+      // If no direct target_scene_id, check payload
+      if (!targetSceneId && hotspot.payload) {
+        try {
+          const payload = JSON.parse(hotspot.payload);
+          targetSceneId = payload.targetSceneId;
+        } catch (error) {
+          console.error('Error parsing navigation hotspot payload:', error);
+        }
+      }
+      
+      if (targetSceneId) {
+        const targetSceneIndex = scenes.findIndex(scene => scene.id === targetSceneId);
+        if (targetSceneIndex !== -1) {
+          handleSceneChange(targetSceneIndex);
+        }
+      }
+    } else if (hotspot.kind === 'info') {
+      // Handle info hotspots - show information modal/popup
+      try {
+        const payload = JSON.parse(hotspot.payload || '{}');
+        const infoText = payload.infoText || payload.text || 'No information available';
+        
+        // Escape HTML to prevent XSS
+        const escapeHtml = (text: string) => {
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div.innerHTML;
+        };
+        
+        // Pause autoplay when modal opens
+        const wasAutoplayActive = isAutoplay;
+        if (isAutoplay) {
+          setIsAutoplay(false);
+        }
+        
+        // Create and show info modal
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+        modal.innerHTML = `
+          <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            <div class="flex items-center justify-between p-6 border-b border-gray-200">
+              <h3 class="text-xl font-semibold text-gray-900">Information</h3>
+              <button class="info-modal-close text-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="p-6">
+              <p class="text-gray-700 leading-relaxed">${escapeHtml(infoText)}</p>
+            </div>
+          </div>
+        `;
+        
+        // Add click handlers
+        const closeModal = () => {
+          document.body.removeChild(modal);
+          // Resume autoplay when modal closes
+          if (wasAutoplayActive) {
+            setIsAutoplay(true);
+          }
+        };
+        
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) closeModal();
+        });
+        
+        modal.querySelector('.info-modal-close')?.addEventListener('click', closeModal);
+        
+        document.body.appendChild(modal);
+        
+      } catch (error) {
+        console.error('Error parsing info hotspot payload:', error);
+        alert('Information not available');
+      }
+    } else if (hotspot.kind === 'link') {
+      // Handle link hotspots - open external URL
+      try {
+        const payload = JSON.parse(hotspot.payload || '{}');
+        const url = payload.url || payload.externalUrl;
+        
+        if (url) {
+          // Ensure URL has protocol
+          const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+          window.open(fullUrl, '_blank', 'noopener,noreferrer');
+        } else {
+          alert('Link URL not available');
+        }
+      } catch (error) {
+        console.error('Error parsing link hotspot payload:', error);
+        alert('Link not available');
+      }
+    }
+  }, [scenes, handleSceneChange, isAutoplay, setIsAutoplay]);
+
   const handleCenterPlayClick = useCallback(() => {
     setShowControls(true);
     setIsAutoplay(true);
   }, []);
+
+  // Effect to log scene changes and hotspot/overlay data
+  useEffect(() => {
+    if (scenes.length > 0 && (allHotspots.length > 0 || allOverlays.length > 0)) {
+      const currentScene = scenes[currentSceneIndex];
+      const currentSceneHotspots = allHotspots.filter(h => h.scene_id === currentScene?.id);
+      const currentSceneOverlays = allOverlays.filter(o => o.scene_id === currentScene?.id);
+      console.log(`Scene ${currentSceneIndex + 1}: ${currentSceneHotspots.length} hotspots, ${currentSceneOverlays.length} overlays`);
+    }
+  }, [currentSceneIndex, scenes, allHotspots, allOverlays]);
 
   const toggleFullscreen = useCallback(async () => {
     if (!containerRef.current) return;
@@ -781,6 +929,8 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   }
 
   const currentScene = scenes[currentSceneIndex];
+  const currentSceneHotspots = allHotspots.filter(hotspot => hotspot.scene_id === currentScene?.id);
+  const currentSceneOverlays = allOverlays.filter(overlay => overlay.scene_id === currentScene?.id);
 
   return (
     <div 
@@ -795,7 +945,26 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
           scenes={scenes}
           isAutoplay={isAutoplay}
           onSceneChange={handleViewerSceneChange}
+          onHotspotClick={handleHotspotClick}
+          hotspots={currentSceneHotspots}
+          overlays={currentSceneOverlays}
+          onOverlayModalStateChange={setIsOverlayModalOpen}
+          isOverlayModalOpen={isOverlayModalOpen}
+          isFullscreen={isFullscreen}
         />
+        
+        {/* Autoplay Controller - Matterport style */}
+        {showControls && currentTour?.autoplay_enabled && (
+          <AutoplayController
+            tour={currentTour}
+            scenes={scenes}
+            currentSceneIndex={currentSceneIndex}
+            onSceneChange={handleSceneChange}
+            isAutoplayEnabled={isAutoplay}
+            onAutoplayToggle={setIsAutoplay}
+            isPaused={isOverlayModalOpen}
+          />
+        )}
         
         {!showControls && (
           <div className="absolute top-4 left-4 z-30">
@@ -922,6 +1091,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
               isAutoplay={isAutoplay}
               isTransitioning={isTransitioning}
               onSceneChange={handleSceneChange}
+              isOverlayModalOpen={isOverlayModalOpen}
             />
           </>
         )}

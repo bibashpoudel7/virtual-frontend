@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { Tour, Scene } from '@/types/tour';
+import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import MultiresViewer from '@/components/viewer/MultiresViewer';
 import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, X, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy } from 'lucide-react';
 
@@ -146,13 +146,15 @@ const ProgressBar = React.memo(({
   currentSceneIndex, 
   isAutoplay, 
   isTransitioning, 
-  onSceneChange 
+  onSceneChange,
+  isOverlayModalOpen = false // New prop
 }: {
   scenes: Scene[];
   currentSceneIndex: number;
   isAutoplay: boolean;
   isTransitioning: boolean;
   onSceneChange: (index: number) => void;
+  isOverlayModalOpen?: boolean; // New prop
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number | undefined>(undefined);
@@ -172,7 +174,7 @@ const ProgressBar = React.memo(({
       return;
     }
 
-    if (isAutoplay) {
+    if (isAutoplay && !isOverlayModalOpen) {
       // Resume from paused progress or start fresh
       startTimeRef.current = Date.now() - (pausedProgressRef.current * 12000);
       
@@ -191,7 +193,7 @@ const ProgressBar = React.memo(({
           currentProgressBar.style.width = `${progress * 100}%`;
         }
         
-        if (progress < 1 && isAutoplay) {
+        if (progress < 1 && isAutoplay && !isOverlayModalOpen) {
           animationRef.current = requestAnimationFrame(updateProgress);
         }
       };
@@ -212,7 +214,7 @@ const ProgressBar = React.memo(({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length]);
+  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen]);
 
   if (scenes.length <= 1) return null;
 
@@ -322,6 +324,8 @@ export default function PublicTourViewer() {
   const params = useParams();
   const [tour, setTour] = useState<Tour | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
+  const [allHotspots, setAllHotspots] = useState<Hotspot[]>([]);
+  const [allOverlays, setAllOverlays] = useState<Overlay[]>([]);
   const [currentSceneIndex, setCurrentSceneIndex] = useState(0);
   const [isAutoplay, setIsAutoplay] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -333,6 +337,7 @@ export default function PublicTourViewer() {
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [isOverlayModalOpen, setIsOverlayModalOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -353,25 +358,34 @@ export default function PublicTourViewer() {
       setLoading(true);
       setError(null);
 
-      // Fetch tour data using public endpoint
-      const tourResponse = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}tours/${tourId}/public`);
+      // Use the public API that includes both tour, scenes, and hotspots
+      const response = await fetch(`/api/public/tours/${tourId}`);
 
-      if (!tourResponse.ok) {
+      if (!response.ok) {
         throw new Error('Failed to fetch tour data');
       }
 
-      const tourData = await tourResponse.json();
-      setTour(tourData);
+      const data = await response.json();
+      setTour(data.tour);
+      setScenes(data.scenes || []);
 
-      // Fetch scenes for the tour using public endpoint
-      const scenesResponse = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}tours/${tourId}/scenes/public`);
-
-      if (!scenesResponse.ok) {
-        throw new Error('Failed to fetch scenes');
+      // Fetch hotspots and overlays for all scenes
+      if (data.scenes && data.scenes.length > 0) {
+        const allHotspots: Hotspot[] = [];
+        const allOverlays: Overlay[] = [];
+        
+        data.scenes.forEach((scene: any) => {
+          if (scene.hotspots && scene.hotspots.length > 0) {
+            allHotspots.push(...scene.hotspots);
+          }
+          if (scene.overlays && scene.overlays.length > 0) {
+            allOverlays.push(...scene.overlays);
+          }
+        });
+        
+        setAllHotspots(allHotspots);
+        setAllOverlays(allOverlays);
       }
-
-      const scenesData = await scenesResponse.json();
-      setScenes(scenesData);
 
       setLoading(false);
     } catch (error) {
@@ -383,7 +397,7 @@ export default function PublicTourViewer() {
 
   // Auto-advance scenes when autoplay is enabled
   useEffect(() => {
-    if (!isAutoplay || scenes.length <= 1 || isTransitioning) {
+    if (!isAutoplay || scenes.length <= 1 || isTransitioning || isOverlayModalOpen) {
       return;
     }
 
@@ -400,7 +414,7 @@ export default function PublicTourViewer() {
     return () => {
       clearInterval(sceneInterval);
     };
-  }, [isAutoplay, scenes.length, isTransitioning, currentSceneIndex]);
+  }, [isAutoplay, scenes.length, isTransitioning, currentSceneIndex, isOverlayModalOpen]);
 
   const handleSceneChange = useCallback((index: number) => {
     if (index === currentSceneIndex || isTransitioning) return;
@@ -416,7 +430,7 @@ export default function PublicTourViewer() {
     setTimeout(() => {
       setIsTransitioning(false);
     }, 600);
-  }, [currentSceneIndex, isTransitioning]);
+  }, [currentSceneIndex, isTransitioning, scenes]);
 
   const handlePrevScene = useCallback(() => {
     if (isTransitioning) return;
@@ -441,10 +455,121 @@ export default function PublicTourViewer() {
     }
   }, [scenes, currentSceneIndex]);
 
+  const handleHotspotClick = useCallback((hotspot: Hotspot) => {
+    if (hotspot.kind === 'navigation') {
+      // Handle navigation hotspots - check both target_scene_id and payload.targetSceneId
+      let targetSceneId = hotspot.target_scene_id;
+      
+      // If no direct target_scene_id, check payload
+      if (!targetSceneId && hotspot.payload) {
+        try {
+          const payload = JSON.parse(hotspot.payload);
+          targetSceneId = payload.targetSceneId;
+        } catch (error) {
+          console.error('Error parsing navigation hotspot payload:', error);
+        }
+      }
+      
+      if (targetSceneId) {
+        const targetSceneIndex = scenes.findIndex(scene => scene.id === targetSceneId);
+        if (targetSceneIndex !== -1) {
+          handleSceneChange(targetSceneIndex);
+        }
+      }
+    } else if (hotspot.kind === 'info') {
+      // Handle info hotspots - show information modal/popup
+      console.log('Info hotspot clicked, payload:', hotspot.payload);
+      try {
+        const payload = JSON.parse(hotspot.payload || '{}');
+        const infoText = payload.infoText || payload.text || 'No information available';
+        
+        console.log('Showing info modal with text:', infoText);
+        
+        // Escape HTML to prevent XSS
+        const escapeHtml = (text: string) => {
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div.innerHTML;
+        };
+        
+        // Pause autoplay when modal opens
+        const wasAutoplayActive = isAutoplay;
+        if (isAutoplay) {
+          setIsAutoplay(false);
+        }
+        
+        // Create and show info modal
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+        modal.innerHTML = `
+          <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+            <div class="flex items-center justify-between p-6 border-b border-gray-200">
+              <h3 class="text-xl font-semibold text-gray-900">Information</h3>
+              <button class="info-modal-close text-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="p-6">
+              <p class="text-gray-700 leading-relaxed">${escapeHtml(infoText)}</p>
+            </div>
+          </div>
+        `;
+        
+        // Add click handlers
+        const closeModal = () => {
+          document.body.removeChild(modal);
+          // Resume autoplay when modal closes
+          if (wasAutoplayActive) {
+            setIsAutoplay(true);
+          }
+        };
+        
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) closeModal();
+        });
+        
+        modal.querySelector('.info-modal-close')?.addEventListener('click', closeModal);
+        
+        document.body.appendChild(modal);
+        
+      } catch (error) {
+        console.error('Error parsing info hotspot payload:', error);
+        alert('Information not available');
+      }
+    } else if (hotspot.kind === 'link') {
+      // Handle link hotspots - open external URL
+      try {
+        const payload = JSON.parse(hotspot.payload || '{}');
+        const url = payload.url || payload.externalUrl;
+        
+        if (url) {
+          // Ensure URL has protocol
+          const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+          window.open(fullUrl, '_blank', 'noopener,noreferrer');
+        } else {
+          alert('Link URL not available');
+        }
+      } catch (error) {
+        console.error('Error parsing link hotspot payload:', error);
+        alert('Link not available');
+      }
+    }
+  }, [scenes, handleSceneChange, isAutoplay, setIsAutoplay]);
+
   const handleCenterPlayClick = useCallback(() => {
     setShowControls(true);
     setIsAutoplay(true);
   }, []);
+
+  // Effect to log scene changes and hotspot data
+  useEffect(() => {
+    if (scenes.length > 0 && allHotspots.length > 0) {
+      const currentScene = scenes[currentSceneIndex];
+      const currentSceneHotspots = allHotspots.filter(h => h.scene_id === currentScene?.id);
+    }
+  }, [currentSceneIndex, scenes, allHotspots]);
 
   const toggleFullscreen = useCallback(async () => {
     if (!containerRef.current) return;
@@ -746,6 +871,8 @@ export default function PublicTourViewer() {
   }
 
   const currentScene = scenes[currentSceneIndex];
+  const currentSceneHotspots = allHotspots.filter(hotspot => hotspot.scene_id === currentScene?.id);
+  const currentSceneOverlays = allOverlays.filter(overlay => overlay.scene_id === currentScene?.id);
 
   return (
     <div 
@@ -760,6 +887,11 @@ export default function PublicTourViewer() {
           scenes={scenes}
           isAutoplay={isAutoplay}
           onSceneChange={handleViewerSceneChange}
+          onHotspotClick={handleHotspotClick}
+          hotspots={currentSceneHotspots}
+          overlays={currentSceneOverlays}
+          onOverlayModalStateChange={setIsOverlayModalOpen}
+          isOverlayModalOpen={isOverlayModalOpen}
         />
         
         {/* Tour Title - Only show when controls are not active */}
@@ -910,6 +1042,7 @@ export default function PublicTourViewer() {
               isAutoplay={isAutoplay}
               isTransitioning={isTransitioning}
               onSceneChange={handleSceneChange}
+              isOverlayModalOpen={isOverlayModalOpen}
             />
           </>
         )}
