@@ -9,8 +9,8 @@ export async function GET(
     const tourId = id;
     const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
     
-    // Fetch tour details with scenes
-    const tourResponse = await fetch(`${backendUrl}tours/${tourId}`, {
+    // Fetch tour details using public endpoint
+    const tourResponse = await fetch(`${backendUrl}tours/${tourId}/public`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -19,23 +19,15 @@ export async function GET(
 
     if (!tourResponse.ok) {
       return NextResponse.json(
-        { error: 'Tour not found' },
-        { status: 404 }
+        { error: 'Tour not found or not available for public viewing' },
+        { status: tourResponse.status }
       );
     }
 
     const tour = await tourResponse.json();
-    
-    // Only return tour if it's published
-    if (!tour.is_published) {
-      return NextResponse.json(
-        { error: 'Tour not available' },
-        { status: 403 }
-      );
-    }
 
-    // Fetch scenes for this tour
-    const scenesResponse = await fetch(`${backendUrl}tours/${tourId}/scenes`, {
+    // Fetch scenes for this tour using public endpoint
+    const scenesResponse = await fetch(`${backendUrl}tours/${tourId}/scenes/public`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -47,12 +39,13 @@ export async function GET(
       scenes = await scenesResponse.json();
     }
 
-    // Fetch hotspots for each scene
-    const scenesWithHotspots = await Promise.all(
+    // Fetch hotspots and overlays for each scene using public endpoint
+    const scenesWithHotspotsAndOverlays = await Promise.all(
       scenes.map(async (scene: any) => {
         try {
+          // Fetch hotspots
           const hotspotsResponse = await fetch(
-            `${backendUrl}/api/scenes/${scene.id}/hotspots`,
+            `${backendUrl}scenes/${scene.id}/hotspots/public`,
             {
               method: 'GET',
               headers: {
@@ -66,15 +59,33 @@ export async function GET(
             hotspots = await hotspotsResponse.json();
           }
           
+          // Fetch overlays
+          const overlaysResponse = await fetch(
+            `${backendUrl}scenes/${scene.id}/overlays/public`,
+            {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+          
+          let overlays = [];
+          if (overlaysResponse.ok) {
+            overlays = await overlaysResponse.json();
+          }
+          
           return {
             ...scene,
-            hotspots
+            hotspots,
+            overlays
           };
         } catch (error) {
-          console.error(`Error fetching hotspots for scene ${scene.id}:`, error);
+          console.error(`Error fetching hotspots/overlays for scene ${scene.id}:`, error);
           return {
             ...scene,
-            hotspots: []
+            hotspots: [],
+            overlays: []
           };
         }
       })
@@ -82,7 +93,7 @@ export async function GET(
 
     return NextResponse.json({
       tour,
-      scenes: scenesWithHotspots
+      scenes: scenesWithHotspotsAndOverlays
     });
   } catch (error) {
     console.error('Error fetching tour details:', error);
