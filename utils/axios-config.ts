@@ -1,5 +1,12 @@
 import axios from 'axios';
 
+// Global logout function that can be called from anywhere
+let globalLogoutFunction: (() => void) | null = null;
+
+export const setGlobalLogoutFunction = (logoutFn: () => void) => {
+  globalLogoutFunction = logoutFn;
+};
+
 // Configure axios defaults
 export const configureAxios = () => {
   // Set base URL for the microservice backend
@@ -33,15 +40,33 @@ export const configureAxios = () => {
     (response) => response,
     (error) => {
       if (error.response?.status === 401) {
-        // Clear tokens
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        console.log('Token expired - logging out user');
         
-        // Redirect to login
-        if (typeof window !== 'undefined') {
-          window.location.href = '/login';
+        // Use the global logout function if available
+        if (globalLogoutFunction) {
+          globalLogoutFunction();
+        } else {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('token');
+          localStorage.removeItem('user_data');
+          localStorage.removeItem('user');
+          
+          // Clear any user-specific cache entries
+          Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('userType_') || key.includes('_cache') || 
+                key.includes('user_') || key.includes('tour_')) {
+              localStorage.removeItem(key);
+            }
+          });
+          
+          // Clear axios auth header
+          delete axios.defaults.headers.common['Authorization'];
+          
+          // Redirect to login
+          if (typeof window !== 'undefined') {
+            window.location.href = '/login';
+          }
         }
       }
       return Promise.reject(error);

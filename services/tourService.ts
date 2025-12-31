@@ -13,6 +13,13 @@ import {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 
+// Global logout function reference
+let globalLogoutFunction: (() => void) | null = null;
+
+export const setTourServiceLogoutFunction = (logoutFn: () => void) => {
+  globalLogoutFunction = logoutFn;
+};
+
 class TourService {
   private async fetchWithAuth(url: string, options?: RequestInit) {
     const token = localStorage.getItem('accessToken');
@@ -40,6 +47,24 @@ class TourService {
       ...options,
       headers,
     });
+
+    // Handle 401 errors (token expired)
+    if (response.status === 401) {
+      console.log('Token expired in tour service - logging out user');
+      
+      if (globalLogoutFunction) {
+        globalLogoutFunction();
+      } else {
+        // Fallback: Clear tokens and redirect
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_data');
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
+      }
+      throw new Error('Authentication expired. Please log in again.');
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Request failed' }));

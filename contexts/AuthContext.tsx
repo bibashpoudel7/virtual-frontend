@@ -2,6 +2,8 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import axios from 'axios';
+import { setGlobalLogoutFunction } from '../utils/axios-config';
+import { setTourServiceLogoutFunction } from '../services/tourService';
 
 interface User {
   id: string;
@@ -48,7 +50,50 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const logout = React.useCallback(() => {
+    console.log('Logging out user...');
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('user_data');
+    
+    // Clean up any userType cache entries
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('userType_')) {
+        localStorage.removeItem(key);
+      }
+    });
+    
+    // Clear tours cache and other user-specific data
+    localStorage.removeItem('tours_cache');
+    localStorage.removeItem('tours_cache_time');
+    
+    // Clear any other user-specific cache entries
+    Object.keys(localStorage).forEach(key => {
+      if (key.includes('_cache') || key.includes('user_') || key.includes('tour_')) {
+        localStorage.removeItem(key);
+      }
+    });
+    
+    delete axios.defaults.headers.common['Authorization'];
+    
+    // Notify parent if in iframe
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: 'LOGOUT' }, '*');
+    }
+
+    // Redirect to login page
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login';
+    }
+  }, []);
+
   useEffect(() => {
+    // Set the global logout function for axios and tour service
+    setGlobalLogoutFunction(logout);
+    setTourServiceLogoutFunction(logout);
+
     // Clean up any existing userType cache entries on app start
     Object.keys(localStorage).forEach(key => {
       if (key.startsWith('userType_')) {
@@ -75,7 +120,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     return () => {
       window.removeEventListener('message', handleParentMessage);
     };
-  }, []);
+  }, [logout]);
 
   const checkParentToken = (): string | null => {
     // Check if running inside iframe/microfrontend
@@ -145,6 +190,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     } catch (error: any) {
       console.error('Token validation failed:', error);
       
+      if (error.response?.status === 401) {
+        return;
+      }
+      
       if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
         const storedUserData = localStorage.getItem('user_data');
         if (storedUserData && authToken) {
@@ -183,39 +232,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
         token: authToken,
         user: userData
       }, '*');
-    }
-  };
-
-  const logout = () => {
-    setToken(null);
-    setUser(null);
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('user_data');
-    
-    // Clean up any userType cache entries
-    Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('userType_')) {
-        localStorage.removeItem(key);
-      }
-    });
-    
-    // Clear tours cache and other user-specific data
-    localStorage.removeItem('tours_cache');
-    localStorage.removeItem('tours_cache_time');
-    
-    // Clear any other user-specific cache entries
-    Object.keys(localStorage).forEach(key => {
-      if (key.includes('_cache') || key.includes('user_') || key.includes('tour_')) {
-        localStorage.removeItem(key);
-      }
-    });
-    
-    delete axios.defaults.headers.common['Authorization'];
-    
-    // Notify parent if in iframe
-    if (window.parent !== window) {
-      window.parent.postMessage({ type: 'LOGOUT' }, '*');
     }
   };
 
