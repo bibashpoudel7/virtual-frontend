@@ -1191,12 +1191,20 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                     )}
                   </div>
                   
-                  {/* Hotspot count for this scene */}
-                  <div className="mt-2 flex items-center text-xs text-gray-500">
-                    <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-                    </svg>
-                    {hotspots.filter(h => h.scene_id === scene.id).length} hotspots
+                  {/* Hotspot and Overlay counts for this scene */}
+                  <div className="mt-2 flex items-center gap-4 text-xs text-gray-500">
+                    <div className="flex items-center">
+                      <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                      </svg>
+                      {hotspots.filter(h => h.scene_id === scene.id).length} hotspots
+                    </div>
+                    <div className="flex items-center">
+                      <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" clipRule="evenodd" />
+                      </svg>
+                      {overlays.filter(o => o.scene_id === scene.id).length} overlays
+                    </div>
                   </div>
                 </div>
               </div>

@@ -57,6 +57,33 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
     isLoading: false
   });
 
+  // Fetch hotspots and overlays for a scene
+  const fetchSceneDetails = async (scene: Scene) => {
+    try {
+      const [hotspots, overlays] = await Promise.all([
+        tourService.listHotspots(scene.id),
+        tourService.listOverlays(scene.id)
+      ]);
+      
+      const updatedScene = {
+        ...scene,
+        hotspots: hotspots || [],
+        overlays: overlays || []
+      };
+      
+      // Update the scene in the scenes array
+      const updatedScenes = scenes?.map(s => 
+        s.id === scene.id ? updatedScene : s
+      ) || [];
+      onSceneUpdate?.(updatedScenes);
+      
+      return updatedScene;
+    } catch (error) {
+      console.error('Failed to fetch scene details:', error);
+      return scene;
+    }
+  };
+
   // Get current user ID and check tour ownership for delete permissions
   useEffect(() => {
     const checkTourOwnership = async () => {
@@ -100,7 +127,47 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
     checkTourOwnership();
   }, [tourId]);
 
-  const handleSceneClick = (scene: Scene) => {
+  // Fetch hotspots and overlays for all scenes when scenes change
+  useEffect(() => {
+    const fetchAllSceneDetails = async () => {
+      if (!scenes || scenes.length === 0) return;
+      
+      // Only fetch for scenes that don't have hotspots/overlays data yet
+      const scenesToUpdate = scenes.filter(scene => 
+        !scene.hotspots || !scene.overlays
+      );
+      
+      if (scenesToUpdate.length === 0) return;
+      
+      try {
+        const updatedScenes = await Promise.all(
+          scenes.map(async (scene) => {
+            if (!scene.hotspots || !scene.overlays) {
+              const [hotspots, overlays] = await Promise.all([
+                tourService.listHotspots(scene.id),
+                tourService.listOverlays(scene.id)
+              ]);
+              
+              return {
+                ...scene,
+                hotspots: hotspots || [],
+                overlays: overlays || []
+              };
+            }
+            return scene;
+          })
+        );
+        
+        onSceneUpdate?.(updatedScenes);
+      } catch (error) {
+        console.error('Failed to fetch scene details:', error);
+      }
+    };
+
+    fetchAllSceneDetails();
+  }, [scenes?.length]); // Only run when scenes array length changes
+
+  const handleSceneClick = async (scene: Scene) => {
     setSelectedScene(scene);
     setShowUploader(false);
     setShowInlineCreation(false); 
@@ -112,6 +179,12 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
       order: scene.order || 1,
       type: scene.type || '360'
     });
+    
+    // Fetch hotspots and overlays for this scene if not already loaded
+    if (!scene.hotspots || !scene.overlays || scene.hotspots.length === 0 && scene.overlays.length === 0) {
+      const updatedScene = await fetchSceneDetails(scene);
+      setSelectedScene(updatedScene);
+    }
   };
 
 
@@ -789,7 +862,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
                 <div className="mt-6 pt-6 border-t">
                   <h4 className="font-medium mb-2 text-gray-900">Scene Details</h4>
                   <div className="text-sm text-gray-700 space-y-1">
-                    <p>Hotspots: Available in Viewer & Editor tab</p>
+                    <p>Hotspots: {selectedScene.hotspots?.length || 0}</p>
                     <p>Overlays: {selectedScene.overlays?.length || 0}</p>
                     <p>Priority: {selectedScene.priority}</p>
                   </div>
