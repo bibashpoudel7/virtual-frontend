@@ -22,6 +22,7 @@ interface OverlayRendererProps {
   scene?: THREE.Scene | null;
   overlayGroup?: THREE.Group | null;
   isFullscreen?: boolean;
+  isAutoplay?: boolean;
 }
 
 // Helper function to format URLs
@@ -198,7 +199,8 @@ export default function OverlayRenderer({
   camera = null,
   scene = null,
   overlayGroup = null,
-  isFullscreen = false
+  isFullscreen = false,
+  isAutoplay = false
 }: OverlayRendererProps) {
   const overlaySpritesRef = useRef<Map<string, THREE.Group>>(new Map());
   const [hoveredOverlay, setHoveredOverlay] = useState<Overlay | null>(null);
@@ -233,6 +235,75 @@ export default function OverlayRenderer({
       }
     }
   }, [urlOverlayId, urlSceneId, overlays, isModalOpen]);
+
+  // Handle keyboard events for modal
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && isModalOpen) {
+        setIsModalOpen(false);
+        setExpandedOverlay(null);
+      }
+    };
+
+    const handleMouseDown = (event: MouseEvent) => {
+      if (!isModalOpen) return;
+      
+      // Track mouse down position to detect dragging
+      dragStateRef.current = {
+        isDragging: false,
+        startX: event.clientX,
+        startY: event.clientY
+      };
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isModalOpen || !dragStateRef.current) return;
+      
+      // Check if mouse has moved significantly (indicating a drag)
+      const deltaX = Math.abs(event.clientX - dragStateRef.current.startX);
+      const deltaY = Math.abs(event.clientY - dragStateRef.current.startY);
+      
+      if (deltaX > 5 || deltaY > 5) {
+        dragStateRef.current.isDragging = true;
+      }
+    };
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!isModalOpen) return;
+      
+      const target = event.target as HTMLElement;
+      
+      // Don't close if clicking on the sidebar itself
+      if (target.closest('[data-sidebar="true"]')) {
+        return;
+      }
+      
+      // Don't close if this click is the result of a drag operation
+      if (dragStateRef.current.isDragging) {
+        // Reset drag state for next interaction
+        dragStateRef.current = { isDragging: false, startX: 0, startY: 0 };
+        return;
+      }
+      
+      // Only close on actual clicks (not drag releases)
+      setIsModalOpen(false);
+      setExpandedOverlay(null);
+    };
+
+    if (isModalOpen) {
+      document.addEventListener('keydown', handleKeyDown);
+      document.addEventListener('mousedown', handleMouseDown);
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('click', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [isModalOpen]);
   
   // Notify parent when modal state changes
   useEffect(() => {
@@ -263,6 +334,11 @@ export default function OverlayRenderer({
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const modalHoverRef = useRef<boolean>(false);
   const lastHoveredOverlayRef = useRef<string | null>(null);
+  const dragStateRef = useRef<{ isDragging: boolean; startX: number; startY: number }>({ 
+    isDragging: false, 
+    startX: 0, 
+    startY: 0 
+  });
 
   useEffect(() => {
     if (!scene || !overlayGroup) {
@@ -392,7 +468,6 @@ export default function OverlayRenderer({
     // Reset the last hovered overlay
     lastHoveredOverlayRef.current = null;
     
-    // Don't immediately hide - set a timeout to allow moving to modal
     hoverTimeoutRef.current = setTimeout(() => {
       if (!modalHoverRef.current) {
         setHoveredOverlay(null);
@@ -415,7 +490,7 @@ export default function OverlayRenderer({
           }
         }
       }
-    }, 200);
+    }, 0);
   };
 
   const handleModalHover = () => {
@@ -431,7 +506,6 @@ export default function OverlayRenderer({
   const handleModalHoverEnd = () => {
     modalHoverRef.current = false;
     
-    // Set timeout to hide modal
     hoverTimeoutRef.current = setTimeout(() => {
       setHoveredOverlay(null);
       setHoverPosition(null);
@@ -452,7 +526,7 @@ export default function OverlayRenderer({
           });
         }
       }
-    }, 200);
+    }, 0);
   };
 
   // Handle mouse events for hover detection with improved throttling
@@ -464,12 +538,12 @@ export default function OverlayRenderer({
     let currentHoveredOverlay: Overlay | null = null;
     let lastHoverTime = 0;
     let lastMousePosition = { x: 0, y: 0 };
-    const HOVER_THROTTLE = 200;
-    const MOUSE_MOVE_THRESHOLD = 10;
+    const HOVER_THROTTLE = 16;
+    const MOUSE_MOVE_THRESHOLD = 3;
 
     const handleMouseMove = (event: MouseEvent) => {
-      // Don't process hover events when modal is open to avoid interference
-      if (isModalOpen) return;
+      // Don't process hover events when autoplay is active (but allow when modal is open)
+      if (isAutoplay) return;
       
       const now = Date.now();
       
@@ -542,12 +616,13 @@ export default function OverlayRenderer({
         canvasElement.removeEventListener('mouseleave', handleMouseLeave);
       };
     }
-  }, [scene, camera, overlayGroup, isModalOpen]);
+  }, [scene, camera, overlayGroup, isModalOpen, isAutoplay]);
 
   // Render hover tooltip
   const renderHoverTooltip = () => {
-    // Don't show hover tooltip when modal is open
-    if (!hoveredOverlay || !hoverPosition || isModalOpen) return null;
+    // Show hover tooltip even when modal is open
+    // But don't show if autoplay is active
+    if (!hoveredOverlay || !hoverPosition || isAutoplay) return null;
 
     let payload: any = {};
     try {
@@ -640,13 +715,14 @@ export default function OverlayRenderer({
 
     return (
       <div
-        className="fixed pointer-events-auto z-[400] animate-in fade-in-0 zoom-in-95 duration-200"
+        className="fixed pointer-events-auto z-[400]"
         style={{
           left: tooltipLeft,
           top: tooltipTop,
         }}
         onMouseEnter={handleModalHover}
         onMouseLeave={handleModalHoverEnd}
+        data-sidebar="true"
       >
         <div className="bg-gray-900 text-white rounded-lg shadow-2xl border border-gray-700 overflow-hidden relative" 
              style={{ 
@@ -716,8 +792,9 @@ export default function OverlayRenderer({
                 <button 
                   className="text-blue-400 hover:text-blue-300 text-sm font-medium border-b border-blue-400 hover:border-blue-300 transition-colors cursor-pointer"
                   onClick={() => {
+                    // Always ensure modal stays open and replace content
                     setExpandedOverlay(hoveredOverlay);
-                    setIsModalOpen(true);
+                    setIsModalOpen(true); // Always ensure it's open
                     setHoveredOverlay(null);
                     setHoverPosition(null);
                   }}
@@ -800,8 +877,9 @@ export default function OverlayRenderer({
                 <button 
                   className="text-blue-400 hover:text-blue-300 text-sm font-medium border-b border-blue-400 hover:border-blue-300 transition-colors cursor-pointer"
                   onClick={() => {
+                    // Always ensure modal stays open and replace content
                     setExpandedOverlay(hoveredOverlay);
-                    setIsModalOpen(true);
+                    setIsModalOpen(true); // Always ensure it's open
                     setHoveredOverlay(null);
                     setHoverPosition(null);
                   }}
@@ -918,11 +996,14 @@ export default function OverlayRenderer({
 
     // Different layout based on fullscreen mode
     if (isFullscreen) {
-      // Fullscreen mode: Show as overlay on the viewer
+      // Fullscreen mode: Show as overlay on the viewer with backdrop
       return (
         <>
           {/* Right Sidebar - positioned absolutely, doesn't interfere with canvas */}
-          <div className="fixed top-0 right-0 w-80 h-full bg-white shadow-2xl overflow-y-auto z-[500] pointer-events-auto">
+          <div 
+            className="fixed top-0 right-0 w-96 h-full bg-white shadow-2xl overflow-y-auto z-[500] pointer-events-auto"
+            data-sidebar="true"
+          >
             {/* Close button - top right with dark color */}
             <button
               onClick={() => {
@@ -946,11 +1027,14 @@ export default function OverlayRenderer({
         </>
       );
     } else {
-      // Non-fullscreen mode: Show as floating panel that doesn't block page scrolling
+      // Non-fullscreen mode: Show as floating panel
       return (
         <>
           {/* Floating overlay panel - positioned fixed to viewport, not blocking main content */}
-          <div className="fixed bottom-4 right-4 w-96 max-w-[calc(100vw-2rem)] bg-white shadow-2xl border border-gray-200 rounded-lg z-[500] pointer-events-auto max-h-[70vh] overflow-y-auto">
+          <div 
+            className="fixed bottom-4 right-4 w-96 max-w-[calc(100vw-2rem)] bg-white shadow-2xl border border-gray-200 rounded-lg z-[500] pointer-events-auto max-h-[70vh] overflow-y-auto"
+            data-sidebar="true"
+          >
             {/* Close button - top right */}
             <button
               onClick={() => {

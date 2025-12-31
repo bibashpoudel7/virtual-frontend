@@ -924,6 +924,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
           onOverlayModalStateChange={setIsOverlayModalOpen}
           isOverlayModalOpen={isOverlayModalOpen}
           isFullscreen={isFullscreen}
+          onAutoplayPause={() => setIsAutoplay(false)}
         />
         
         {/* Autoplay Controller */}

@@ -26,6 +26,166 @@ function debounce<T extends (...args: any[]) => any>(
   return debounced;
 }
 
+// Progress bar component for fullscreen mode
+const ProgressBar = ({ 
+  scenes, 
+  currentSceneIndex, 
+  isAutoplay, 
+  isTransitioning, 
+  onSceneChange,
+  isOverlayModalOpen = false
+}: {
+  scenes: Scene[];
+  currentSceneIndex: number;
+  isAutoplay: boolean;
+  isTransitioning: boolean;
+  onSceneChange: (index: number) => void;
+  isOverlayModalOpen?: boolean;
+}) => {
+  const progressBarRef = useRef<HTMLDivElement>(null);
+  const animationRef = useRef<number | undefined>(undefined);
+  const startTimeRef = useRef<number>(0);
+  const pausedProgressRef = useRef<number>(0);
+  const lastSceneIndexRef = useRef<number>(currentSceneIndex);
+
+  useEffect(() => {
+    if (lastSceneIndexRef.current !== currentSceneIndex) {
+      pausedProgressRef.current = 0;
+      lastSceneIndexRef.current = currentSceneIndex;
+    }
+
+    if (isTransitioning || scenes.length <= 1) {
+      return;
+    }
+
+    if (isAutoplay && !isOverlayModalOpen) {
+      startTimeRef.current = Date.now() - (pausedProgressRef.current * 12000);
+      
+      const updateProgress = () => {
+        if (!progressBarRef.current || isTransitioning) return;
+        
+        const elapsed = Date.now() - startTimeRef.current;
+        const progress = Math.min(1, elapsed / 12000);
+        
+        pausedProgressRef.current = progress;
+        
+        const currentProgressBar = progressBarRef.current.querySelector(`[data-scene-index="${currentSceneIndex}"] .progress-fill`) as HTMLElement;
+        if (currentProgressBar) {
+          currentProgressBar.style.width = `${progress * 100}%`;
+        }
+        
+        if (progress < 1 && isAutoplay && !isOverlayModalOpen) {
+          animationRef.current = requestAnimationFrame(updateProgress);
+        }
+      };
+      
+      animationRef.current = requestAnimationFrame(updateProgress);
+    } else {
+      if (progressBarRef.current) {
+        const currentProgressBar = progressBarRef.current.querySelector(`[data-scene-index="${currentSceneIndex}"] .progress-fill`) as HTMLElement;
+        if (currentProgressBar) {
+          currentProgressBar.style.width = `${pausedProgressRef.current * 100}%`;
+        }
+      }
+    }
+    
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen]);
+
+  if (scenes.length <= 1) return null;
+
+  return (
+    <div className="absolute bottom-0 left-0 right-0 p-4" ref={progressBarRef}>
+      <div className="flex gap-1 w-full h-1">
+        {scenes.map((scene, index) => {
+          const isCompleted = index < currentSceneIndex;
+          const isCurrent = index === currentSceneIndex;
+          
+          return (
+            <div
+              key={scene.id}
+              className="flex-1 relative group"
+              data-scene-index={index}
+            >
+              <div className="w-full h-1 bg-white/40 rounded-full overflow-hidden">
+                <div 
+                  className={`progress-fill h-full rounded-full ${
+                    isCompleted || isCurrent 
+                      ? 'bg-red-500' 
+                      : 'bg-white/40'
+                  }`}
+                  style={{ 
+                    width: isCompleted ? '100%' : '0%',
+                    backgroundColor: isCompleted || isCurrent ? '#ef4444' : undefined
+                  }}
+                />
+              </div>
+              
+              <button
+                onClick={() => onSceneChange(index)}
+                disabled={isTransitioning}
+                className="absolute inset-0 -top-2 -bottom-2 cursor-pointer disabled:cursor-not-allowed group"
+                title={scene.name || `Scene ${index + 1}`}
+              >
+                <div className="absolute inset-0 top-2 bottom-2 bg-red-400/30 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                
+                <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-300 delay-150 pointer-events-none z-50">
+                  <div className="bg-black/90 backdrop-blur-sm rounded-lg overflow-hidden shadow-xl border border-white/20">
+                    <div className="w-32 h-20 bg-gray-800 relative overflow-hidden">
+                      {scene.src_original_url ? (
+                        <img 
+                          src={scene.src_original_url} 
+                          alt={scene.name || `Scene ${index + 1}`}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            const img = e.target as HTMLImageElement;
+                            if (!img.dataset.fallbackTried) {
+                              img.dataset.fallbackTried = 'true';
+                              const fallbackUrl = scene.src_original_url?.replace(/\.(jpg|jpeg|png)$/i, '_thumb.$1') || 
+                                                 `https://test.thenimto.com/scenes/${scene.id}/preview.jpg`;
+                              img.src = fallbackUrl;
+                            } else {
+                              img.style.display = 'none';
+                              const placeholder = img.nextElementSibling as HTMLElement;
+                              if (placeholder) placeholder.style.display = 'flex';
+                            }
+                          }}
+                        />
+                      ) : null}
+                      <div 
+                        className="w-full h-full flex items-center justify-center text-white/60 text-xs"
+                        style={{ display: scene.src_original_url ? 'none' : 'flex' }}
+                      >
+                        <div className="text-center">
+                          <div className="w-8 h-8 mx-auto mb-1 bg-white/20 rounded flex items-center justify-center">
+                            📷
+                          </div>
+                          Scene {index + 1}
+                        </div>
+                      </div>
+                      <div className="absolute top-1 right-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
+                        {index + 1}
+                      </div>
+                    </div>
+                    <div className="px-3 py-2 text-white text-xs font-medium">
+                      {scene.name || `Scene ${index + 1}`}
+                    </div>
+                  </div>
+                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-6 border-transparent border-t-black/90"></div>
+                </div>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 interface TourEditorProps {
   tour: Tour;
   scenes: Scene[];
@@ -34,6 +194,8 @@ interface TourEditorProps {
 
 export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorProps) {
   const [currentSceneId, setCurrentSceneId] = useState(scenes[0]?.id || '');
+  const [currentSceneIndex, setCurrentSceneIndex] = useState(0);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false); // Disable edit mode by default
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [overlays, setOverlays] = useState<Overlay[]>([]);
@@ -71,6 +233,14 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const [isUpdatingAudio, setIsUpdatingAudio] = useState(false);
 
   const currentScene = scenes.find(s => s.id === currentSceneId) || scenes[0];
+
+  // Sync currentSceneIndex when currentSceneId changes
+  useEffect(() => {
+    const newIndex = scenes.findIndex(s => s.id === currentSceneId);
+    if (newIndex !== -1 && newIndex !== currentSceneIndex) {
+      setCurrentSceneIndex(newIndex);
+    }
+  }, [currentSceneId, scenes, currentSceneIndex]);
 
   // Load hotspots and overlays for all scenes in the tour
   useEffect(() => {
@@ -112,9 +282,30 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const handleSceneChange = useCallback((sceneId: string) => {
     if (sceneId === currentSceneId) return; // Don't transition to the same scene
     
-    // Direct scene change without transition overlay
+    // Update both scene ID and index
     setCurrentSceneId(sceneId);
-  }, [currentSceneId]);
+    const newIndex = scenes.findIndex(s => s.id === sceneId);
+    if (newIndex !== -1) {
+      setCurrentSceneIndex(newIndex);
+    }
+  }, [currentSceneId, scenes]);
+
+  const handleSceneChangeByIndex = useCallback((index: number) => {
+    if (index === currentSceneIndex || isTransitioning) return;
+    
+    setIsTransitioning(true);
+    
+    // Immediate scene change
+    setTimeout(() => {
+      setCurrentSceneIndex(index);
+      setCurrentSceneId(scenes[index]?.id || '');
+    }, 100);
+    
+    // Reset transition state
+    setTimeout(() => {
+      setIsTransitioning(false);
+    }, 600);
+  }, [currentSceneIndex, isTransitioning, scenes]);
 
   const handleHotspotClick = useCallback((hotspot: Hotspot) => {
     if (hotspot.kind === 'navigation' && hotspot.payload) {
@@ -834,6 +1025,17 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               onOverlayUpdate={handleOverlayUpdated}
               isAutoplay={isAutoplay}
               isOverlayModalOpen={showOverlayDialog}
+              isFullscreen={true}
+            />
+            
+            {/* Progress Bar - Only show in fullscreen mode */}
+            <ProgressBar
+              scenes={scenes}
+              currentSceneIndex={currentSceneIndex}
+              isAutoplay={isAutoplay}
+              isTransitioning={isTransitioning}
+              onSceneChange={handleSceneChangeByIndex}
+              isOverlayModalOpen={showOverlayDialog}
             />
           </div>
         </div>
@@ -855,6 +1057,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               onOverlayUpdate={handleOverlayUpdated}
               isAutoplay={isAutoplay}
               isOverlayModalOpen={showOverlayDialog}
+              isFullscreen={true}
             />
           </div>
 

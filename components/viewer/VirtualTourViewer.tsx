@@ -12,6 +12,7 @@ interface VirtualTourViewerProps {
   scenes: Scene[];
   onSceneChange?: (sceneId: string) => void;
   onHotspotClick?: (hotspot: Hotspot) => void;
+  onAutoplayPause?: () => void;
 }
 
 export default function VirtualTourViewer({
@@ -19,7 +20,8 @@ export default function VirtualTourViewer({
   currentScene,
   onSceneChange,
   onHotspotClick,
-  scenes
+  scenes,
+  onAutoplayPause
 }: VirtualTourViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -30,6 +32,9 @@ export default function VirtualTourViewer({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAutoplay, setIsAutoplay] = useState(tour.autoplay_enabled || false);
+  
+  // State for pause icon animation
+  const [showPauseIcon, setShowPauseIcon] = useState(false);
   
   // Audio controls state
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -42,6 +47,8 @@ export default function VirtualTourViewer({
   const mouseDown = useRef(false);
   const mouseX = useRef(0);
   const mouseY = useRef(0);
+  const startMouseX = useRef(0); 
+  const startMouseY = useRef(0);
   const lon = useRef(currentScene.yaw || 0);
   const lat = useRef(currentScene.pitch || 0);
   const phi = useRef(0);
@@ -230,14 +237,20 @@ export default function VirtualTourViewer({
       mouseDown.current = true;
       mouseX.current = event.clientX;
       mouseY.current = event.clientY;
-      setIsAutoplay(false);
+      startMouseX.current = event.clientX;
+      startMouseY.current = event.clientY;
     }
 
     function onMouseMove(event: MouseEvent) {
       if (!mouseDown.current) return;
       
-      lon.current += (event.clientX - mouseX.current) * 0.15;  // Reduced from 0.3 to 0.15
-      lat.current -= (event.clientY - mouseY.current) * 0.15;  // Reduced from 0.3 to 0.15
+      // Disable autoplay when user starts dragging
+      if (isAutoplay) {
+        setIsAutoplay(false);
+      }
+      
+      lon.current += (event.clientX - mouseX.current) * 0.15;
+      lat.current -= (event.clientY - mouseY.current) * 0.15;
       
       mouseX.current = event.clientX;
       mouseY.current = event.clientY;
@@ -245,6 +258,22 @@ export default function VirtualTourViewer({
 
     function onMouseUp() {
       mouseDown.current = false;
+    }
+
+    function onMouseClick(event: MouseEvent) {
+      // Click anywhere during autoplay to pause
+      // Only pause if it was a click (not a drag) and autoplay is active
+      const dragDistance = Math.sqrt(
+        Math.pow(event.clientX - startMouseX.current, 2) + 
+        Math.pow(event.clientY - startMouseY.current, 2)
+      );
+      
+      if (isAutoplay && dragDistance < 5) {
+        onAutoplayPause?.();
+        // Show pause icon animation
+        setShowPauseIcon(true);
+        setTimeout(() => setShowPauseIcon(false), 1000); // Hide after 1 second
+      }
     }
 
     function onMouseWheel(event: WheelEvent) {
@@ -261,16 +290,22 @@ export default function VirtualTourViewer({
       mouseDown.current = true;
       mouseX.current = touch.clientX;
       mouseY.current = touch.clientY;
-      setIsAutoplay(false);
+      startMouseX.current = touch.clientX;
+      startMouseY.current = touch.clientY;
     }
 
     function onTouchMove(event: TouchEvent) {
       if (!mouseDown.current) return;
       event.preventDefault();
       
+      // Disable autoplay when user starts dragging
+      if (isAutoplay) {
+        setIsAutoplay(false);
+      }
+      
       const touch = event.touches[0];
-      lon.current += (touch.clientX - mouseX.current) * 0.15;  // Reduced from 0.3 to 0.15
-      lat.current -= (touch.clientY - mouseY.current) * 0.15;  // Reduced from 0.3 to 0.15
+      lon.current += (touch.clientX - mouseX.current) * 0.15;
+      lat.current -= (touch.clientY - mouseY.current) * 0.15;
       
       mouseX.current = touch.clientX;
       mouseY.current = touch.clientY;
@@ -278,6 +313,23 @@ export default function VirtualTourViewer({
 
     function onTouchEnd() {
       mouseDown.current = false;
+    }
+
+    function onTouchClick(event: TouchEvent) {
+      // Tap anywhere during autoplay to pause
+      // Only pause if it was a tap (not a drag) and autoplay is active
+      const touch = event.changedTouches[0];
+      const dragDistance = Math.sqrt(
+        Math.pow(touch.clientX - startMouseX.current, 2) + 
+        Math.pow(touch.clientY - startMouseY.current, 2)
+      );
+      
+      if (isAutoplay && dragDistance < 5) {
+        onAutoplayPause?.();
+        // Show pause icon animation
+        setShowPauseIcon(true);
+        setTimeout(() => setShowPauseIcon(false), 1000); // Hide after 1 second
+      }
     }
 
     // Window resize handler
@@ -292,11 +344,13 @@ export default function VirtualTourViewer({
     renderer.domElement.addEventListener('mousedown', onMouseDown);
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+    renderer.domElement.addEventListener('click', onMouseClick);
     renderer.domElement.addEventListener('wheel', onMouseWheel);
     
     renderer.domElement.addEventListener('touchstart', onTouchStart);
     renderer.domElement.addEventListener('touchmove', onTouchMove);
     renderer.domElement.addEventListener('touchend', onTouchEnd);
+    renderer.domElement.addEventListener('touchend', onTouchClick);
     
     window.addEventListener('resize', onWindowResize);
 
@@ -312,11 +366,13 @@ export default function VirtualTourViewer({
       renderer.domElement.removeEventListener('mousedown', onMouseDown);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      renderer.domElement.removeEventListener('click', onMouseClick);
       renderer.domElement.removeEventListener('wheel', onMouseWheel);
       
       renderer.domElement.removeEventListener('touchstart', onTouchStart);
       renderer.domElement.removeEventListener('touchmove', onTouchMove);
       renderer.domElement.removeEventListener('touchend', onTouchEnd);
+      renderer.domElement.removeEventListener('touchend', onTouchClick);
       
       window.removeEventListener('resize', onWindowResize);
       
@@ -686,6 +742,20 @@ export default function VirtualTourViewer({
               {scene.name}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Pause Icon Animation */}
+      {showPauseIcon && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50">
+          <div className="bg-black/50 backdrop-blur-sm rounded-full p-4 animate-fade-in-out">
+            <div className="w-12 h-12 flex items-center justify-center">
+              <div className="flex gap-1.5">
+                <div className="w-2 h-8 bg-white rounded-sm"></div>
+                <div className="w-2 h-8 bg-white rounded-sm"></div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

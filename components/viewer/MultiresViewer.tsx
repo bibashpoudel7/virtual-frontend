@@ -34,6 +34,7 @@ interface MultiresViewerProps {
   isAutoplay?: boolean;
   isOverlayModalOpen?: boolean;
   isFullscreen?: boolean;
+  onAutoplayPause?: () => void;
 }
 
 const PICKING_SPHERE = new THREE.Sphere(new THREE.Vector3(), SPHERE_RADIUS);
@@ -162,12 +163,10 @@ function usePreviewLoader(
         },
         undefined,
         () => {
-          /* ignore preview errors */
         },
       );
     };
     img.onerror = () => {
-      /* ignore preview errors */
     };
     img.src = absoluteUrl;
   }, [manifestRef, currentSceneRef, textureLoaderRef, previewMeshRef, sceneRef]);
@@ -189,6 +188,7 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
   isAutoplay = false,
   isOverlayModalOpen = false,
   isFullscreen = false,
+  onAutoplayPause,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -244,6 +244,9 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     pitch: currentScene.pitch ?? 0,
     fov: currentScene.fov ?? tour?.default_fov ?? 75
   });
+
+  // State for pause icon animation
+  const [showPauseIcon, setShowPauseIcon] = useState(false);
 
   const controlsRef = useRef({
     yaw: currentScene.yaw ?? 0,
@@ -718,8 +721,8 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
           }
         }
       } else if (!controls.pointerActive) {
-        controls.velocityYaw *= 0.85;  // Increased dampening from 0.92 to 0.85 for quicker stop
-        controls.velocityPitch *= 0.85;  // Increased dampening from 0.92 to 0.85
+        controls.velocityYaw *= 0.85;
+        controls.velocityPitch *= 0.85;
         controls.yaw += controls.velocityYaw;
         controls.pitch += controls.velocityPitch;
         
@@ -957,9 +960,9 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
         return;
       }
 
-      controlsRef.current.yaw -= dx * 0.04;  // Further reduced to 0.04 for much smoother control
+      controlsRef.current.yaw -= dx * 0.04;
       controlsRef.current.pitch = THREE.MathUtils.clamp(
-        controlsRef.current.pitch + dy * 0.04,  // Further reduced to 0.04
+        controlsRef.current.pitch + dy * 0.04,
         -85,
         85,
       );
@@ -1016,12 +1019,21 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
               const constrainedPitch = THREE.MathUtils.clamp(coords.pitch, -80, 80);
               onHotspotCreate?.(constrainedYaw, constrainedPitch);
             }
+          } else {
+            // Click anywhere during autoplay to pause
+            // Only pause if autoplay is active, we're not in edit mode, and it was a click (not drag)
+            if (isAutoplayRef.current && !isEditMode && !moved) {
+              onAutoplayPause?.();
+              // Show pause icon animation
+              setShowPauseIcon(true);
+              setTimeout(() => setShowPauseIcon(false), 1000); // Hide after 1 second
+            }
           }
         }
       }
 
-      controlsRef.current.velocityYaw = (pointerStateRef.current.startX - event.clientX) * 0.01;  // Further reduced to 0.01 for minimal inertia
-      controlsRef.current.velocityPitch = (event.clientY - pointerStateRef.current.startY) * 0.01;  // Further reduced to 0.01
+      controlsRef.current.velocityYaw = (pointerStateRef.current.startX - event.clientX) * 0.01;
+      controlsRef.current.velocityPitch = (event.clientY - pointerStateRef.current.startY) * 0.01;
     };
 
     const handleWheel = (event: WheelEvent) => {
@@ -1113,7 +1125,7 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
         }
       });
       keysToDelete.forEach(key => tileCacheRef.current.delete(key));
-    }, 100); // Reduced to 100ms for faster cleanup
+    }, 100);
 
     updateHotspots();
     requestAnimationFrame(() => updateVisibleTilesRef.current());
@@ -1224,7 +1236,22 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
           scene={sceneRef.current}
           overlayGroup={overlayGroupRef.current}
           isFullscreen={isFullscreen}
+          isAutoplay={isAutoplay} // Pass autoplay state to disable hover during autoplay
         />
+      )}
+
+      {/* Pause Icon Animation */}
+      {showPauseIcon && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50">
+          <div className="bg-black/50 backdrop-blur-sm rounded-full p-4 animate-fade-in-out">
+            <div className="w-12 h-12 flex items-center justify-center">
+              <div className="flex gap-1.5">
+                <div className="w-2 h-8 bg-white rounded-sm"></div>
+                <div className="w-2 h-8 bg-white rounded-sm"></div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

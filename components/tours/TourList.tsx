@@ -77,7 +77,7 @@ export default function TourList() {
         // Check if we have cached data
         const cacheKey = 'tours_cache';
         const cacheTimeKey = 'tours_cache_time';
-        const cacheExpiry = 2 * 60 * 1000; // Reduced to 2 minutes for fresher data
+        const cacheExpiry = 2 * 60 * 1000;
         
         const cachedData = localStorage.getItem(cacheKey);
         const cacheTime = localStorage.getItem(cacheTimeKey);

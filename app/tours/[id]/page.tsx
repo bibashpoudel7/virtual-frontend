@@ -892,6 +892,8 @@ export default function PublicTourViewer() {
           overlays={currentSceneOverlays}
           onOverlayModalStateChange={setIsOverlayModalOpen}
           isOverlayModalOpen={isOverlayModalOpen}
+          isFullscreen={true}
+          onAutoplayPause={() => setIsAutoplay(false)}
         />
         
         {/* Tour Title - Only show when controls are not active */}
