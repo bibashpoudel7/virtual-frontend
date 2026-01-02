@@ -247,6 +247,12 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       }
 
       setTiles(tilesMap);
+      
+      // Store the manifest if it's returned (for cube maps)
+      if (result.manifest) {
+        localStorage.setItem(`manifest_${sceneId}`, JSON.stringify(result.manifest));
+      }
+      
       updateStage('tiles', 'complete', { count: result.count });
       setCurrentStage('upload');
       saveState();
@@ -332,70 +338,66 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
     updateStage('save', 'processing');
 
     try {
-      // Create comprehensive tiles manifest JSON - automatically generate levels based on tiles
+      // Get manifest from localStorage (stored by tile generation)
       let tilesManifest = null;
+      const storedManifest = localStorage.getItem(`manifest_${sceneId}`);
       
-      if (tiles.size > 0) {
-        // Parse all tiles to determine levels
-        const tilesByLevel = new Map<number, Array<{col: number, row: number}>>();
-        const allTiles:any = [];
+      if (storedManifest) {
+        // Use the cube map manifest from the API
+        tilesManifest = JSON.parse(storedManifest);
+        console.log('Manifest from localStorage (before adding URLs):', JSON.stringify(tilesManifest, null, 2));
         
-        Array.from(uploadedUrls.entries())
-          .filter(([key]) => key.startsWith('l'))
-          .forEach(([key, url]) => {
-            const match = key.match(/l(\d+)_(\d+)_(\d+)\.jpg/);
-            if (match) {
-              const level = parseInt(match[1]);
-              const row = parseInt(match[2]);
-              const col = parseInt(match[3]);
-              
-              allTiles.push({ key, url, level, row, col });
-              
-              if (!tilesByLevel.has(level)) {
-                tilesByLevel.set(level, []);
+        // Add URLs to the tiles in the manifest
+        if (tilesManifest.type === 'cubemap') {
+          // For cube maps, the tiles don't have URLs yet, we need to add them
+          const tilesWithUrls:any = [];
+          
+          Array.from(uploadedUrls.entries())
+            .filter(([key]) => key !== 'main' && key !== 'preview.jpg')
+            .forEach(([key, url]) => {
+              // Parse cube map tile format: face_l{level}_{x}_{y}.jpg
+              const match = key.match(/(\w+)_l(\d+)_(\d+)_(\d+)\.jpg/);
+              if (match) {
+                const face = match[1];
+                const level = parseInt(match[2]);
+                const x = parseInt(match[3]);
+                const y = parseInt(match[4]);
+                
+                tilesWithUrls.push({ 
+                  face, 
+                  level, 
+                  x, 
+                  y, 
+                  key, 
+                  url 
+                });
               }
-              tilesByLevel.get(level)!.push({ col, row });
-            }
-          });
-        
-        // Generate level information based on actual tiles
-        const levels = Array.from(tilesByLevel.entries())
-          .sort((a, b) => a[0] - b[0]) // Sort by level number
-          .map(([level, tiles]) => {
-            const maxCol = Math.max(...tiles.map(t => t.col));
-            const maxRow = Math.max(...tiles.map(t => t.row));
-            
-            // Calculate dimensions from tile count and tile size
-            // Use 1024 for large images, 512 for normal
-            const tileSize = (maxCol + 1) > 16 ? 1024 : 512;
-            const width = (maxCol + 1) * tileSize;
-            const height = (maxRow + 1) * tileSize;
-            
-            return {
-              level,
-              width,
-              height,
-              tilesX: maxCol + 1,
-              tilesY: maxRow + 1
-            };
-          });
-        
-        // Determine tile size from the highest level
-        const maxCols = Math.max(...levels.map(l => l.tilesX));
-        const detectedTileSize = maxCols > 16 ? 1024 : 512;
-        
+            });
+          
+          tilesManifest.tiles = tilesWithUrls;
+          tilesManifest.preview = uploadedUrls.get('preview.jpg');
+          console.log('Final manifest being saved to database:', JSON.stringify(tilesManifest, null, 2));
+        }
+      } else if (tiles.size > 0) {
+        // Fallback: generate manifest from tiles (shouldn't happen with cube maps)
+        console.warn('No manifest found, generating fallback manifest');
         tilesManifest = {
-          type: 'multires',
-          tileSize: detectedTileSize, // Dynamic tile size
-          dimensions: {
-            width: levels[levels.length - 1]?.width || 4096,  // Use highest level dimensions
-            height: levels[levels.length - 1]?.height || 2048
-          },
+          type: 'cubemap',
+          cubeSize: 2048,
+          tileSize: 512,
           preview: uploadedUrls.get('preview.jpg'),
-          levels,
-          tiles: allTiles
+          faces: ['front', 'back', 'left', 'right', 'top', 'bottom'],
+          levels: [
+            { level: 0, size: 512, tiles: 1 },
+            { level: 1, size: 1024, tiles: 2 },
+            { level: 2, size: 2048, tiles: 4 }
+          ],
+          tiles: []
         };
       }
+      
+      // Clean up localStorage
+      localStorage.removeItem(`manifest_${sceneId}`);
 
       // Send URLs and manifest to backend for database storage
       const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';

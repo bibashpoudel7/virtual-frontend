@@ -22,7 +22,7 @@ interface AuthContextType {
   setAuth: (token: string, user: User) => void;
   logout: () => void;
   checkPaymentRequired: () => Promise<boolean>;
-  getAuthHeaders: () => { Authorization: string } | {};
+  getAuthHeaders: () => { Authorization: string };
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -187,14 +187,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
         // Token is invalid
         logout();
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Token validation failed:', error);
       
-      if (error.response?.status === 401) {
+      if ((error as unknown as { response?: { status?: number } })?.response?.status === 401) {
         return;
       }
       
-      if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
+      if ((error as unknown as { code?: string })?.code === 'ECONNREFUSED' || (error as unknown as { message?: string })?.message?.includes('ECONNREFUSED')) {
         const storedUserData = localStorage.getItem('user_data');
         if (storedUserData && authToken) {
           try {
@@ -250,8 +250,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     }
   };
 
-  const getAuthHeaders = () => {
-    return token ? { Authorization: `Bearer ${token}` } : {};
+  const getAuthHeaders = (): { Authorization: string } => {
+    return { Authorization: token ? `Bearer ${token}` : '' };
   };
 
   const value = {

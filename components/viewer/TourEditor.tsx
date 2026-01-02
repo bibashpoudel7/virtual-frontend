@@ -1,7 +1,7 @@
 'use client';
 // frontend/components/viewer/TourEditor.tsx
 import { useState, useCallback, useEffect, useRef } from 'react';
-import MultiresViewer from './MultiresViewer';
+import CubeMapViewer from './CubeMapViewer';
 import OverlayEditor from '../overlays/OverlayEditor';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { HotspotsAPI } from '@/lib/api/hotspots';
@@ -231,6 +231,11 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const [showAudioSettings, setShowAudioSettings] = useState(false);
   const [newAudioUrl, setNewAudioUrl] = useState('');
   const [isUpdatingAudio, setIsUpdatingAudio] = useState(false);
+  
+  // Hotspot editing state
+  const [editingHotspot, setEditingHotspot] = useState<string | null>(null);
+  const [editingPitch, setEditingPitch] = useState<string>('');
+  const [editingYaw, setEditingYaw] = useState<string>('');
 
   const currentScene = scenes.find(s => s.id === currentSceneId) || scenes[0];
 
@@ -557,6 +562,22 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     // Debounced API update (only called after user stops dragging for 1 second)
     debouncedUpdateHotspotAPI(updatedHotspot);
   }, [updateHotspotVisually, debouncedUpdateHotspotAPI]);
+  
+  // Function to update hotspot coordinates from manual input
+  const updateHotspotCoordinates = useCallback((hotspotId: string, yaw: number, pitch: number) => {
+    const hotspot = hotspots.find(h => h.id === hotspotId);
+    if (!hotspot) return;
+    
+    // Create updated hotspot with new coordinates
+    const updatedHotspot = {
+      ...hotspot,
+      yaw: yaw,
+      pitch: pitch
+    };
+    
+    // Use the existing updateHotspot function for real-time updates
+    updateHotspot(updatedHotspot);
+  }, [hotspots, updateHotspot]);
 
   const deleteHotspot = useCallback(async (hotspotId: string) => {
     if (!hotspotId) return;
@@ -1011,7 +1032,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           
           {/* Clean Viewer */}
           <div className="w-full h-full">
-            <MultiresViewer
+            <CubeMapViewer
               tour={tour}
               currentScene={currentScene}
               scenes={scenes}
@@ -1026,6 +1047,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               isAutoplay={isAutoplay}
               isOverlayModalOpen={showOverlayDialog}
               isFullscreen={true}
+              highlightedHotspotId={editingHotspot}
             />
             
             {/* Progress Bar - Only show in fullscreen mode */}
@@ -1043,7 +1065,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         <>
           {/* Normal Editor Mode */}
           <div className="w-full h-full">
-            <MultiresViewer
+            <CubeMapViewer
               tour={tour}
               currentScene={currentScene}
               scenes={scenes}
@@ -1058,6 +1080,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               isAutoplay={isAutoplay}
               isOverlayModalOpen={showOverlayDialog}
               isFullscreen={true}
+              highlightedHotspotId={editingHotspot}
             />
           </div>
 
@@ -1320,42 +1343,115 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                           }
                         }
                         
+                        const isEditing = editingHotspot === hotspot.id;
+                        
                         return (
-                          <div key={hotspot.id} className="flex items-center justify-between p-3 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
-                            <span className="truncate flex items-center gap-2">
-                              <span className="text-lg">
-                                {hotspot.kind === 'navigation' && '🔄'}
-                                {hotspot.kind === 'info' && 'ℹ️'}
-                                {hotspot.kind === 'link' && '🔗'}
-                              </span>
-                              <span className="font-medium">{displayLabel}</span>
-                              {/* Save indicator */}
-                              {hotspot.id && pendingSaves.has(hotspot.id) && (
-                                <span className="flex items-center gap-1 text-xs text-blue-600">
-                                  <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                  </svg>
-                                  Saving...
+                          <div key={hotspot.id} className="p-3 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
+                            <div className="flex items-center justify-between">
+                              <span className="truncate flex items-center gap-2">
+                                <span className="text-lg">
+                                  {hotspot.kind === 'navigation' && '🔄'}
+                                  {hotspot.kind === 'info' && 'ℹ️'}
+                                  {hotspot.kind === 'link' && '🔗'}
                                 </span>
-                              )}
-                            </span>
-                            {hotspot?.id && (
-                              <button
-                                onClick={() => deleteHotspot(hotspot.id ?? '')}
-                                disabled={deletingHotspotId === hotspot.id}
-                                className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
-                                title="Delete hotspot"
-                              >
-                                {deletingHotspotId === hotspot.id ? (
-                                  <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                  </svg>
-                                ) : (
-                                  '✕'
+                                <span className="font-medium">{displayLabel}</span>
+                                {/* Save indicator */}
+                                {hotspot.id && pendingSaves.has(hotspot.id) && (
+                                  <span className="flex items-center gap-1 text-xs text-blue-600">
+                                    <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Saving...
+                                  </span>
                                 )}
-                              </button>
+                              </span>
+                              <div className="flex items-center gap-1">
+                                {hotspot?.id && (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        if (isEditing) {
+                                          setEditingHotspot(null);
+                                        } else {
+                                          setEditingHotspot(hotspot.id || null);
+                                          setEditingPitch((hotspot.pitch || 0).toFixed(2));
+                                          setEditingYaw((hotspot.yaw || 0).toFixed(2));
+                                        }
+                                      }}
+                                      className="text-blue-500 hover:text-blue-700 hover:bg-blue-100 cursor-pointer flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                      title={isEditing ? "Close editor" : "Edit coordinates"}
+                                    >
+                                      {isEditing ? '✓' : '✏️'}
+                                    </button>
+                                    <button
+                                      onClick={() => deleteHotspot(hotspot.id ?? '')}
+                                      disabled={deletingHotspotId === hotspot.id}
+                                      className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                      title="Delete hotspot"
+                                    >
+                                      {deletingHotspotId === hotspot.id ? (
+                                        <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                      ) : (
+                                        '✕'
+                                      )}
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            
+                            {/* Coordinate Editor */}
+                            {isEditing && (
+                              <div className="mt-3 p-3 bg-white rounded-lg border border-blue-300">
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">Yaw (°)</label>
+                                    <input
+                                      type="number"
+                                      value={editingYaw}
+                                      onChange={(e) => {
+                                        setEditingYaw(e.target.value);
+                                        // Update hotspot immediately for real-time feedback
+                                        const yawValue = parseFloat(e.target.value);
+                                        if (!isNaN(yawValue)) {
+                                          updateHotspotCoordinates(hotspot.id!, yawValue, hotspot.pitch || 0);
+                                        }
+                                      }}
+                                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                      step="0.1"
+                                      min="-180"
+                                      max="180"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">Pitch (°)</label>
+                                    <input
+                                      type="number"
+                                      value={editingPitch}
+                                      onChange={(e) => {
+                                        setEditingPitch(e.target.value);
+                                        // Update hotspot immediately for real-time feedback
+                                        const pitchValue = parseFloat(e.target.value);
+                                        if (!isNaN(pitchValue)) {
+                                          updateHotspotCoordinates(hotspot.id!, hotspot.yaw || 0, pitchValue);
+                                        }
+                                      }}
+                                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                      step="0.1"
+                                      min="-90"
+                                      max="90"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="mt-2 text-xs text-gray-500">
+                                  <div>Horizontal: -180° to 180°</div>
+                                  <div>Vertical: -90° (down) to 90° (up)</div>
+                                </div>
+                              </div>
                             )}
                           </div>
                         );

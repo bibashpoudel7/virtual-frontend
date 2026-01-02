@@ -10,7 +10,7 @@ export const setGlobalLogoutFunction = (logoutFn: () => void) => {
 // Configure axios defaults
 export const configureAxios = () => {
   // Set base URL for the microservice backend
-  axios.defaults.baseURL = process.env.NEXT_PUBLIC_API_BASE_URL_NESTED || 'http://localhost:8080/';
+  axios.defaults.baseURL = process.env.NEXT_PUBLIC_API_BASE_URL_NESTED
 
   // Add request interceptor to include token
   axios.interceptors.request.use(

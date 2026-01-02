@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { tourService } from '@/services/tourService';
-import MultiresViewer from './viewer/MultiresViewer';
+import CubeMapViewer from './viewer/CubeMapViewer';
 import AutoplayController from './viewer/AutoplayController';
 import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy, X } from 'lucide-react';
 
@@ -336,7 +336,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const [allOverlays, setAllOverlays] = useState<Overlay[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [showControls, setShowControls] = useState(false);
+  const [showControls, setShowControls] = useState(true);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
@@ -422,42 +422,35 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     fetchTours();
   }, []);
 
-  // Auto-advance scenes when autoplay is enabled
-  useEffect(() => {
-    if (!isAutoplay || scenes.length <= 1 || isTransitioning || isOverlayModalOpen) {
-      return;
-    }
+  // Removed duplicate autoplay logic - AutoplayController handles scene transitions
 
-    const sceneInterval = setInterval(() => {
-      setCurrentSceneIndex((prev) => {
-        const nextIndex = (prev + 1) % scenes.length;
-        // Trigger smooth transition
-        setIsTransitioning(true);
-        setTimeout(() => setIsTransitioning(false), 600);
-        return nextIndex;
-      });
-    }, 12000); // Change scene every 12 seconds
-
-    return () => {
-      clearInterval(sceneInterval);
-    };
-  }, [isAutoplay, scenes.length, isTransitioning, currentSceneIndex, isOverlayModalOpen]);
-
-  const handleSceneChange = useCallback((index: number) => {
-    if (index === currentSceneIndex || isTransitioning) return;
+  const handleSceneChange = useCallback((index: number, immediate: boolean = false) => {
+    if (index === currentSceneIndex) return;
     
-    setIsTransitioning(true);
+    // Skip transition check for immediate changes
+    if (!immediate && isTransitioning) return;
     
-    // Faster transition - immediate scene change with quick overlay
-    setTimeout(() => {
+    console.log('Scene change requested:', { from: currentSceneIndex, to: index, immediate });
+    
+    if (immediate) {
+      // Immediate scene change for navigation - no delay
       setCurrentSceneIndex(index);
-    }, 100);
-    
-    // Reset transition state after animation completes
-    setTimeout(() => {
       setIsTransitioning(false);
-    }, 600);
-  }, [currentSceneIndex, isTransitioning, scenes]);
+    } else {
+      // Normal transition with fade effect
+      setIsTransitioning(true);
+      
+      // Faster transition - immediate scene change with quick overlay
+      setTimeout(() => {
+        setCurrentSceneIndex(index);
+      }, 100);
+      
+      // Reset transition state after animation completes
+      setTimeout(() => {
+        setIsTransitioning(false);
+      }, 600);
+    }
+  }, [currentSceneIndex, isTransitioning]);
 
   const handlePrevScene = useCallback(() => {
     if (isTransitioning) return;
@@ -483,6 +476,8 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   }, [scenes, currentSceneIndex]);
 
   const handleHotspotClick = useCallback((hotspot: Hotspot) => {
+    console.log('Hotspot clicked:', hotspot);
+    
     if (hotspot.kind === 'navigation') {
       // Handle navigation hotspots - check both target_scene_id and payload.targetSceneId
       let targetSceneId = hotspot.target_scene_id;
@@ -497,11 +492,21 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         }
       }
       
+      console.log('Navigation to scene:', targetSceneId);
+      
       if (targetSceneId) {
         const targetSceneIndex = scenes.findIndex(scene => scene.id === targetSceneId);
+        console.log('Target scene index:', targetSceneIndex, 'from scenes:', scenes.map(s => s.id));
+        
         if (targetSceneIndex !== -1) {
-          handleSceneChange(targetSceneIndex);
+          // Skip transition for navigation-triggered scene changes
+          // since we already did the animation in CubeMapViewer
+          handleSceneChange(targetSceneIndex, true);
+        } else {
+          console.error('Target scene not found:', targetSceneId);
         }
+      } else {
+        console.error('No target scene ID found in navigation hotspot');
       }
     } else if (hotspot.kind === 'info') {
       // Handle info hotspots - show information modal/popup
@@ -912,7 +917,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     >
       {/* Tour Viewer */}
       <div className={`${isFullscreen ? 'h-screen' : 'aspect-video'} relative`}>
-        <MultiresViewer
+        <CubeMapViewer
           tour={currentTour}
           currentScene={currentScene}
           scenes={scenes}
@@ -925,6 +930,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
           isOverlayModalOpen={isOverlayModalOpen}
           isFullscreen={isFullscreen}
           onAutoplayPause={() => setIsAutoplay(false)}
+          autoRotate={isAutoplay}
         />
         
         {/* Autoplay Controller */}

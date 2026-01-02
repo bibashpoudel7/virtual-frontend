@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
-import MultiresViewer from '@/components/viewer/MultiresViewer';
+import CubeMapViewer from '@/components/viewer/CubeMapViewer';
 import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, X, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy } from 'lucide-react';
 
 // Share Modal Component
@@ -881,7 +881,7 @@ export default function PublicTourViewer() {
     >
       {/* Tour Viewer */}
       <div className={`${isFullscreen ? 'h-screen' : 'h-screen'} relative`}>
-        <MultiresViewer
+        <CubeMapViewer
           tour={tour}
           currentScene={currentScene}
           scenes={scenes}

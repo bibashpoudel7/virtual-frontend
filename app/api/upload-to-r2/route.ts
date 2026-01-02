@@ -63,6 +63,14 @@ export async function PUT(request: NextRequest) {
     
     // Upload to R2
     try {
+      console.log('Attempting R2 upload:', {
+        bucket: R2_BUCKET_NAME,
+        key: key,
+        contentType: contentType,
+        endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+        hasCredentials: !!(R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY)
+      });
+
       const command = new PutObjectCommand({
         Bucket: R2_BUCKET_NAME,
         Key: key,
@@ -83,10 +91,31 @@ export async function PUT(request: NextRequest) {
         key: key,
       });
     } catch (uploadError:any) {
-      console.error('R2 upload error:', uploadError);
+      console.error('R2 upload error:', uploadError.message || uploadError);
+      console.error('Error details:', {
+        code: uploadError.Code,
+        statusCode: uploadError.$metadata?.httpStatusCode,
+        requestId: uploadError.$metadata?.requestId,
+        fault: uploadError.$fault,
+        bucket: R2_BUCKET_NAME,
+        key: key
+      });
+      
+      // Provide more specific error messages
+      let errorMessage = 'Failed to upload to R2';
+      if (uploadError.Code === 'Unauthorized' || uploadError.$metadata?.httpStatusCode === 403) {
+        errorMessage = 'R2 authentication failed. Please check your R2 access keys and permissions.';
+      } else if (uploadError.Code === 'NoSuchBucket') {
+        errorMessage = `R2 bucket "${R2_BUCKET_NAME}" not found. Please check your bucket configuration.`;
+      }
+      
       return NextResponse.json(
-        { error: 'Failed to upload to R2', details: uploadError.message },
-        { status: 500 }
+        { 
+          error: errorMessage, 
+          details: uploadError.message,
+          code: uploadError.Code 
+        },
+        { status: uploadError.$metadata?.httpStatusCode || 500 }
       );
     }
 

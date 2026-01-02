@@ -74,50 +74,6 @@ export function calculateVisibleTiles(
       visibleTiles.push({ col, row });
     }
   }
-  // return visibleTiles;
-  
-  // Add larger margin to ensure complete coverage
-  const margin = 0.5; // 50% margin for better coverage
-  const uMin = centerU - horizontalCoverage * (1 + margin);
-  const uMax = centerU + horizontalCoverage * (1 + margin);
-  const vMin = Math.max(0, centerV - verticalCoverage * (1 + margin));
-  const vMax = Math.min(1, centerV + verticalCoverage * (1 + margin));
-  
-  // Calculate which tiles intersect with the visible area
-  for (let row = 0; row < level.rows; row++) {
-    const tileVMin = row / level.rows;
-    const tileVMax = (row + 1) / level.rows;
-    
-    // Check if tile is in vertical range
-    if (tileVMax < vMin || tileVMin > vMax) {
-      continue;
-    }
-    
-    for (let col = 0; col < level.cols; col++) {
-      const tileUMin = col / level.cols;
-      const tileUMax = (col + 1) / level.cols;
-      
-      // Check horizontal range with wraparound
-      let isVisible = false;
-      
-      // Handle wraparound at 360 degrees
-      if (uMin < 0) {
-        // Viewport wraps around left edge
-        isVisible = tileUMax >= (1 + uMin) || tileUMin <= uMax;
-      } else if (uMax > 1) {
-        // Viewport wraps around right edge
-        isVisible = tileUMin <= (uMax - 1) || tileUMax >= uMin;
-      } else {
-        // No wraparound
-        isVisible = !(tileUMax < uMin || tileUMin > uMax);
-      }
-      
-      if (isVisible) {
-        visibleTiles.push({ col, row });
-      }
-    }
-  }
-  
   return visibleTiles;
 }
 
@@ -163,10 +119,11 @@ export function getAppropriateLevel(
     if (fov <= 90) return 1;      // Use full resolution for most views
     else return 0;                // Only very wide view uses low resolution
   } else if (numLevels === 3) {
-    // 3-level pyramid - use all levels
-    if (fov <= 30) return 2;      // High zoom - highest resolution
-    else if (fov <= 60) return 1; // Medium view
-    else return 0;                // Wide view - base resolution
+    // 3-level pyramid (level 0: low res, level 1: medium, level 2: high res)
+    // Optimize for better quality at all zoom levels
+    if (fov <= 40) return 2;      // Zoomed in - use highest resolution (level 2)
+    else if (fov <= 80) return 1; // Normal view - use medium resolution (level 1)
+    else return 0;                // Wide/zoomed out - use base resolution (level 0)
   } else {
     // Dynamic selection for other level counts
     const fovRange = 100 - 5;

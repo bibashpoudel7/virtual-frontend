@@ -10,6 +10,7 @@ export function yawPitchToVector(yaw: number, pitch: number, radius: number = SP
   // Convert yaw and pitch to spherical coordinates
   // Yaw: horizontal rotation (0 = front, positive = right)
   // Pitch: vertical rotation (0 = horizon, positive = up)
+  // Add 180 degrees to yaw to align with the sphere texture orientation
   const phi = THREE.MathUtils.degToRad(90 - pitch);
   const theta = THREE.MathUtils.degToRad(yaw + 180);
   const x = radius * Math.sin(phi) * Math.cos(theta);
@@ -25,7 +26,7 @@ export function vectorToYawPitch(vector: THREE.Vector3): { yaw: number; pitch: n
   // Reverse the exact math from yawPitchToVector
   // From yawPitchToVector:
   // phi = THREE.MathUtils.degToRad(90 - pitch)
-  // theta = THREE.MathUtils.degToRad(yaw + 180)
+  // theta = THREE.MathUtils.degToRad(yaw)
   // x = radius * Math.sin(phi) * Math.cos(theta)
   // y = radius * Math.cos(phi)  
   // z = radius * Math.sin(phi) * Math.sin(theta)
@@ -74,13 +75,15 @@ export function createTileGeometry(
   const phiOverlap = tilePhi * overlapRatio;
   const thetaOverlap = tileTheta * overlapRatio;
 
-  // Correct phi calculation - tiles go from left to right in texture
-  // But sphere phi goes counterclockwise from +X axis
-  // We need to map texture columns correctly
+  // Phi calculation for equirectangular projection
+  // In equirectangular: left edge = 0, right edge = 2*PI
+  // Three.js sphere: phi goes from 0 to 2*PI around the equator
+  // The tiles are created left-to-right, so col 0 = leftmost
   let phiStart = col * tilePhi - phiOverlap;
   let phiLength = tilePhi + phiOverlap * 2;
   const fullPhi = Math.PI * 2;
 
+  // Clamp to valid range
   if (phiStart < 0) {
     phiLength += phiStart;
     phiStart = 0;
@@ -101,8 +104,10 @@ export function createTileGeometry(
     thetaLength = maxTheta - thetaStart;
   }
 
-  const widthSegments = Math.max(32, (levelInfo.cols || 1) * 4);
-  const heightSegments = Math.max(16, (levelInfo.rows || 1) * 4);
+  // More segments for smoother rendering, especially at lower levels
+  const segmentMultiplier = levelInfo.level <= 1 ? 8 : 4;
+  const widthSegments = Math.max(64, segmentMultiplier * 8);
+  const heightSegments = Math.max(32, segmentMultiplier * 4);
 
   const geometry = new THREE.SphereGeometry(
     SPHERE_RADIUS,
@@ -113,6 +118,8 @@ export function createTileGeometry(
     thetaStart,
     thetaLength,
   );
+  
+  // Scale to create inside-out sphere
   geometry.scale(-1, 1, 1);
   
   return geometry;

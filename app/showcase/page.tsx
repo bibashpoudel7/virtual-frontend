@@ -42,7 +42,7 @@ export default function ShowcasePage() {
     }
   };
 
-  const filteredTours = tours.filter(tour => {
+  const filteredTours = tours?.filter(tour => {
     const matchesSearch = 
       tour.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       tour.property_name?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -114,7 +114,7 @@ export default function ShowcasePage() {
               Try Again
             </button>
           </div>
-        ) : filteredTours.length === 0 ? (
+        ) : filteredTours?.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-500 text-lg">
               {searchTerm ? 'No virtual tours found matching your search.' : 'No virtual tours available at the moment.'}
@@ -122,7 +122,7 @@ export default function ShowcasePage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredTours.map((tour, index) => (
+            {filteredTours?.map((tour, index) => (
               <div
                 key={tour.id}
                 className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-2xl transition-shadow duration-300 cursor-pointer group"

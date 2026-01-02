@@ -142,12 +142,12 @@ function usePreviewLoader(
             geometry.scale(-1, 1, 1);
             const material = new THREE.MeshBasicMaterial({ 
               map: texture, 
-              side: THREE.BackSide,
+              side: THREE.FrontSide,  // Use FrontSide since geometry is inverted
               transparent: true,
               opacity: 1.0
             });
             const mesh = new THREE.Mesh(geometry, material);
-            mesh.renderOrder = -1000;
+            mesh.renderOrder = -10; // Preview renders behind all tiles
             mesh.frustumCulled = false;
             previewMeshRef.current = mesh;
             scene.add(mesh);
@@ -258,9 +258,8 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
   });
 
   const manifest = useMemo(() => {
-    const parsed = parseSceneManifest(currentScene);
-    return parsed;
-  }, [currentScene]);
+    return parseSceneManifest(currentScene);
+  }, [currentScene.id]);
   const updateHotspots = useHotspotUpdater(hotspots, currentScene.id, hotspotsGroupRef, scenes);
   const loadPreviewTexture = usePreviewLoader(
     manifestRef,
@@ -407,7 +406,7 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     activeLoadsRef.current += 1;
 
     const tileUrl = buildTileUrl(manifestSnapshot, request.sceneId, request.level, request.col, request.row);
-
+    
     loader.load(
       tileUrl,
       (texture) => {
@@ -448,26 +447,19 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
             geometryCacheRef.current.set(geometryKey, geom);
             return geom;
           })();
-
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.wrapS = THREE.ClampToEdgeWrapping;
-        texture.wrapT = THREE.ClampToEdgeWrapping;
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.needsUpdate = true;
         
         const material = new THREE.MeshBasicMaterial({
           map: texture,
-          side: THREE.DoubleSide,  // Use DoubleSide to ensure visibility
-          depthWrite: false,
+          side: THREE.FrontSide,  // Use FrontSide since geometry is already inverted with scale(-1,1,1)
+          depthWrite: true,
           depthTest: true,
-          transparent: true,  // Enable transparency for smooth transitions
-          opacity: 1.0,
+          transparent: false,  // Disable transparency for better performance
           toneMapped: false,
         });
 
         const mesh = new THREE.Mesh(geometry, material);
-        mesh.renderOrder = 10 + request.level;
+        // Set render order so higher res tiles render on top
+        mesh.renderOrder = request.level;
         mesh.frustumCulled = false;
         mesh.visible = true; // Ensure tile is visible
         scene.add(mesh);
@@ -488,14 +480,8 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
         // Keep preview visible until we have enough tiles loaded
         const tileCount = tileCacheRef.current.size;
         if (previewMeshRef.current && tileCount > 4) {
-          // Fade out preview gradually
-          const material = previewMeshRef.current.material as THREE.MeshBasicMaterial;
-          if (material.opacity > 0.1) {
-            material.transparent = true;
-            material.opacity = Math.max(0, material.opacity - 0.1);
-          } else {
-            previewMeshRef.current.visible = false;
-          }
+          // Hide preview once tiles are loaded instead of fading
+          previewMeshRef.current.visible = false;
         }
 
         if (tileCacheRef.current.size > TILE_CACHE_LIMIT) {
@@ -525,7 +511,10 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
   const scheduleTile = useCallback(
     (level: number, col: number, row: number, priority: number) => {
       const sceneId = currentSceneIdRef.current;
-      if (!sceneId) return;
+      if (!sceneId) {
+        console.warn('[scheduleTile] No sceneId available');
+        return;
+      }
 
       const key = getTileKey(sceneId, level, col, row);
       if (tileCacheRef.current.has(key) || pendingSetRef.current.has(key)) {
@@ -546,12 +535,6 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     const container = containerRef.current;
 
     if (!manifestSnapshot || !sceneId || !container || !manifestSnapshot.levels || !Array.isArray(manifestSnapshot.levels)) {
-      console.log('[updateVisibleTiles] Missing requirements:', {
-        hasManifest: !!manifestSnapshot,
-        hasSceneId: !!sceneId,
-        hasContainer: !!container,
-        hasLevels: !!(manifestSnapshot?.levels && Array.isArray(manifestSnapshot.levels))
-      });
       return;
     }
 
@@ -566,7 +549,7 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     if (!levelInfo) {
       return;
     }
-
+    
     const visible = calculateVisibleTiles(
       { yaw: controls.yaw, pitch: controls.pitch, fov: controls.fov },
       levelInfo,
@@ -600,19 +583,27 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
         return;
       }
 
-      // Keep tiles from other levels visible to prevent flashing
-      // Only hide if it's the same level but out of view
-      if (entry.level === levelIndex) {
-        entry.mesh.visible = false; // Hide same-level tiles that are out of view
+      // Keep lower resolution tiles visible as fallback
+      // This prevents black areas when higher res tiles are loading
+      if (entry.level < levelIndex) {
+        entry.mesh.visible = true; // Keep lower res tiles as background
+        entry.mesh.renderOrder = entry.level; // Lower res tiles render behind
+      } else if (entry.level === levelIndex) {
+        // Hide same-level tiles that are out of view
+        entry.mesh.visible = false;
       } else {
-        entry.mesh.visible = true; // Keep other level tiles visible for smooth transition
+        // Higher res tiles from previous zoom - can be hidden
+        entry.mesh.visible = false;
       }
 
       if (!entry.pendingRemovalAt) {
         entry.pendingRemovalAt = now;
       } else if (now - entry.pendingRemovalAt > TILE_UNLOAD_COOLDOWN) {
-        disposeTileEntry(entry);
-        tileCacheRef.current.delete(key);
+        // Don't unload lower res tiles too quickly - keep them as fallback
+        if (entry.level >= levelIndex || now - entry.pendingRemovalAt > TILE_UNLOAD_COOLDOWN * 2) {
+          disposeTileEntry(entry);
+          tileCacheRef.current.delete(key);
+        }
       }
     });
   }, [scheduleTile]);
@@ -635,8 +626,8 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', alpha: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    const width = container.clientWidth;
-    const height = container.clientHeight;
+    const width = container.clientWidth || 800;
+    const height = container.clientHeight || 600;
     renderer.setSize(width, height, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
@@ -645,12 +636,14 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     // Set initial cursor style
     renderer.domElement.style.cursor = 'grab';
     
+    
     rendererRef.current = renderer;
     
     const scene = new THREE.Scene();
-    // Use a neutral gray background instead of black to prevent flickering
-    scene.background = new THREE.Color(0x2a2a2a);
+    // Use a dark gray background
+    scene.background = new THREE.Color(0x1a1a1a);
     sceneRef.current = scene;
+    
 
     const camera = new THREE.PerspectiveCamera(
       controlsRef.current.fov,
@@ -804,6 +797,11 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
 
     renderer.setAnimationLoop(animate);
     window.addEventListener('resize', handleResize);
+    
+    // Trigger initial tile load
+    setTimeout(() => {
+      updateVisibleTilesRef.current();
+    }, 0);
 
     const pickHotspot = (event: PointerEvent): Hotspot | null => {
       const renderer = rendererRef.current;
@@ -1038,7 +1036,8 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
 
     const handleWheel = (event: WheelEvent) => {
       event.preventDefault();
-      controlsRef.current.fov = THREE.MathUtils.clamp(controlsRef.current.fov + event.deltaY * 0.02, 35, 100);
+      // Allow more zoom in (fov 10) and full zoom out (fov 120)
+      controlsRef.current.fov = THREE.MathUtils.clamp(controlsRef.current.fov + event.deltaY * 0.02, 10, 120);
     };
 
     renderer.domElement.addEventListener('pointerdown', handlePointerDown);
@@ -1128,8 +1127,12 @@ const MultiresViewer: React.FC<MultiresViewerProps> = ({
     }, 100);
 
     updateHotspots();
-    requestAnimationFrame(() => updateVisibleTilesRef.current());
-  }, [manifest, currentScene, loadPreviewTexture, updateHotspots]);
+    
+    // Force immediate tile update on scene change  
+    setTimeout(() => {
+      updateVisibleTilesRef.current();
+    }, 100);
+  }, [manifest, currentScene.id, loadPreviewTexture, updateHotspots]);
 
   // Add a separate effect to update hotspots when the hotspots array changes
   useEffect(() => {
