@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Overlay } from '@/types/tour';
 import { tourService } from '@/services/tourService';
+import { storageUploader } from '@/lib/storage-upload';
 
 interface OverlayEditorProps {
   sceneId: string;
@@ -82,7 +83,7 @@ interface CreateOverlayRequest {
 //   },
 // ];
 
-export default function OverlayEditor({ 
+export default function OverlayEditor({
   sceneId,
   tourId,
   overlays = [],
@@ -153,14 +154,26 @@ export default function OverlayEditor({
       const reader = new FileReader();
       reader.onloadend = () => {
         setImagePreview(reader.result as string);
-        setFormData({
-          ...formData,
-          payload: { 
-            ...formData.payload, 
-            imageData: reader.result as string,
-            imageName: file.name
-          }
-        });
+
+        if (isEditing) {
+          setEditFormData({
+            ...editFormData,
+            payload: {
+              ...editFormData.payload,
+              imageData: reader.result as string,
+              imageName: file.name
+            }
+          });
+        } else {
+          setFormData({
+            ...formData,
+            payload: {
+              ...formData.payload,
+              imageData: reader.result as string,
+              imageName: file.name
+            }
+          });
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -169,12 +182,12 @@ export default function OverlayEditor({
   const handleEditOverlay = (overlay: Overlay) => {
     setSelectedOverlay(overlay);
     setIsEditing(true);
-    
+
     // Parse the overlay payload
     let payload: any = {};
     try {
-      payload = typeof overlay.payload === 'string' 
-        ? JSON.parse(overlay.payload) 
+      payload = typeof overlay.payload === 'string'
+        ? JSON.parse(overlay.payload)
         : overlay.payload || {};
     } catch {
       payload = {};
@@ -201,26 +214,58 @@ export default function OverlayEditor({
 
   const handleUpdateOverlay = async () => {
     if (!selectedOverlay || !editFormData) return;
-    
+
     setEditLoading(true);
     setError(null);
 
     try {
+      const finalPayload = { ...editFormData.payload };
+
+      // Handle image upload if needed
+      if (editFormData.kind === 'image' && uploadedImage) {
+        try {
+          // Generate a unique key for the image
+          const timestamp = Date.now();
+          const cleanFileName = uploadedImage.name.replace(/[^a-zA-Z0-9.]/g, '_');
+          const key = `tours/${tourId}/overlays/${timestamp}-${cleanFileName}`;
+
+          // Upload to R2
+          const imageUrl = await storageUploader.uploadFile(
+            uploadedImage,
+            key,
+            uploadedImage.type
+          );
+
+          // Update payload with the uploaded URL
+          finalPayload.imageUrl = imageUrl;
+          finalPayload.imageSource = 'url'; // Switch to URL source after upload
+
+          // Remove temporary image data used for preview
+          delete (finalPayload as any).imageData;
+          delete (finalPayload as any).imageName;
+        } catch (uploadError) {
+          console.error('Failed to upload image to R2:', uploadError);
+          throw new Error('Failed to upload image to cloud storage. Please try again.');
+        }
+      }
+
       const updatedOverlay = {
         ...selectedOverlay,
         kind: editFormData.kind,
         yaw: editFormData.yaw,
         pitch: editFormData.pitch,
-        payload: JSON.stringify(editFormData.payload)
+        payload: finalPayload
       };
-      
+
       const response = await tourService.updateOverlay(sceneId, selectedOverlay.id!, updatedOverlay);
       onOverlayUpdated?.(response);
-      
+
       // Reset editing state
       setIsEditing(false);
       setSelectedOverlay(null);
       setEditFormData(null);
+      setUploadedImage(null);
+      setImagePreview(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update overlay');
     } finally {
@@ -232,6 +277,8 @@ export default function OverlayEditor({
     setIsEditing(false);
     setSelectedOverlay(null);
     setEditFormData(null);
+    setUploadedImage(null);
+    setImagePreview(null);
   };
 
   const renderEditOverlayFields = () => {
@@ -316,7 +363,7 @@ export default function OverlayEditor({
             </div> */}
           </>
         );
-      
+
       // Add other overlay types here (image, video) - similar pattern
       case 'image':
         return (
@@ -350,17 +397,66 @@ export default function OverlayEditor({
             </div>
 
             <div>
-              <label className="block text-sm font-semibold mb-2 text-gray-900">Image URL</label>
-              <input
-                type="url"
-                value={editFormData.payload?.imageUrl || ''}
-                onChange={(e) => setEditFormData({
-                  ...editFormData,
-                  payload: { ...editFormData.payload, imageUrl: e.target.value }
-                })}
-                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-gray-900 bg-white focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
-                placeholder="https://example.com/image.jpg"
-              />
+              <label className="block text-sm font-semibold mb-2 text-gray-900">Image Source</label>
+              <div className="space-y-3">
+                <select
+                  value={editFormData.payload?.imageSource || (editFormData.payload?.imageUrl ? 'url' : 'upload')}
+                  onChange={(e) => setEditFormData({
+                    ...editFormData,
+                    payload: { ...editFormData.payload, imageSource: e.target.value }
+                  })}
+                  className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-gray-900 bg-white cursor-pointer focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
+                >
+                  <option value="upload">Upload Image</option>
+                  <option value="url">From URL</option>
+                </select>
+
+                {editFormData.payload?.imageSource === 'url' && (
+                  <input
+                    type="url"
+                    value={editFormData.payload?.imageUrl || ''}
+                    onChange={(e) => setEditFormData({
+                      ...editFormData,
+                      payload: { ...editFormData.payload, imageUrl: e.target.value }
+                    })}
+                    className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-gray-900 bg-white focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
+                    placeholder="https://example.com/image.jpg"
+                  />
+                )}
+
+                {(editFormData.payload?.imageSource === 'upload' || !editFormData.payload?.imageSource) && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-4 py-2 border-2 border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors cursor-pointer font-medium text-gray-900"
+                    >
+                      {editFormData.payload?.imageUrl ? 'Change Image' : 'Choose Image'}
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      className="hidden"
+                    />
+                    {uploadedImage && (
+                      <span className="ml-3 text-sm text-gray-800 font-medium">{uploadedImage.name}</span>
+                    )}
+                  </div>
+                )}
+
+                {(imagePreview || editFormData.payload?.imageUrl) && (
+                  <div className="mt-3 p-3 border-2 border-gray-200 rounded-lg bg-gray-50">
+                    <p className="text-sm text-gray-800 font-semibold mb-2">Preview:</p>
+                    <img
+                      src={imagePreview || editFormData.payload?.imageUrl}
+                      alt="Preview"
+                      className="max-w-full h-32 object-contain rounded"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -518,15 +614,46 @@ export default function OverlayEditor({
     setLoading(true);
     setError(null);
 
-    try {      
+    try {
+      const finalPayload = { ...formData.payload };
+
+      // Handle image upload if needed
+      if (formData.kind === 'image' && uploadedImage) {
+        try {
+          // Generate a unique key for the image
+          const timestamp = Date.now();
+          const cleanFileName = uploadedImage.name.replace(/[^a-zA-Z0-9.]/g, '_');
+          const key = `tours/${tourId}/overlays/${timestamp}-${cleanFileName}`;
+
+          // Upload to R2
+          const imageUrl = await storageUploader.uploadFile(
+            uploadedImage,
+            key,
+            uploadedImage.type
+          );
+
+          // Update payload with the uploaded URL
+          finalPayload.imageUrl = imageUrl;
+          finalPayload.imageSource = 'url'; // Switch to URL source after upload
+
+          // Remove temporary image data used for preview
+          delete (finalPayload as any).imageData;
+          delete (finalPayload as any).imageName;
+        } catch (uploadError) {
+          console.error('Failed to upload image to R2:', uploadError);
+          throw new Error('Failed to upload image to cloud storage. Please try again.');
+        }
+      }
+
       const overlayData = {
         ...formData,
+        payload: finalPayload,
         tour_id: tourId,
       };
-      
+
       const response = await tourService.createOverlay(sceneId, overlayData);
       onOverlayAdded?.(response);
-      
+
       // Reset form
       setIsAdding(false);
       setFormData({
@@ -625,7 +752,7 @@ export default function OverlayEditor({
             </div> */}
           </>
         );
-      
+
       case 'image':
         return (
           <>
@@ -668,7 +795,7 @@ export default function OverlayEditor({
                   })}
                   className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-gray-900 bg-white cursor-pointer focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
                 >
-                  {/* <option value="upload">Upload Image</option> */}
+                  <option value="upload">Upload Image</option>
                   <option value="url">From URL</option>
                   {/* <option value="library">From Library</option> */}
                 </select>
@@ -686,7 +813,7 @@ export default function OverlayEditor({
                   />
                 )}
 
-                {/* {(formData.payload?.imageSource === 'upload' || !formData.payload?.imageSource) && (
+                {(formData.payload?.imageSource === 'upload' || !formData.payload?.imageSource) && (
                   <div>
                     <button
                       type="button"
@@ -706,14 +833,14 @@ export default function OverlayEditor({
                       <span className="ml-3 text-sm text-gray-800 font-medium">{uploadedImage.name}</span>
                     )}
                   </div>
-                )} */}
+                )}
 
                 {imagePreview && (
                   <div className="mt-3 p-3 border-2 border-gray-200 rounded-lg bg-gray-50">
                     <p className="text-sm text-gray-800 font-semibold mb-2">Preview:</p>
-                    <img 
-                      src={imagePreview} 
-                      alt="Preview" 
+                    <img
+                      src={imagePreview}
+                      alt="Preview"
                       className="max-w-full h-32 object-contain rounded"
                     />
                   </div>
@@ -806,7 +933,7 @@ export default function OverlayEditor({
             )}
           </>
         );
-      
+
       case 'video':
         return (
           <>
@@ -1207,7 +1334,7 @@ export default function OverlayEditor({
               </svg>
             </button>
           </div>
-          
+
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -1380,12 +1507,12 @@ export default function OverlayEditor({
             </div>
           );
         })}
-        
+
         {overlays.length === 0 && !isAdding && (
           <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
             <div className="text-4xl mb-3">✨</div>
             <p className="text-gray-700 font-semibold mb-2">No overlays yet</p>
-            <p className="text-sm text-gray-600">Click "Add Overlay" to create your first overlay</p>
+            <p className="text-sm text-gray-600">Click &quot;Add Overlay&quot; to create your first overlay</p>
           </div>
         )}
       </div>
