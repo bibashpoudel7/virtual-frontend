@@ -147,14 +147,14 @@ const ProgressBar = React.memo(({
   isAutoplay, 
   isTransitioning, 
   onSceneChange,
-  isOverlayModalOpen = false // New prop
+  isOverlayModalOpen = false
 }: {
   scenes: Scene[];
   currentSceneIndex: number;
   isAutoplay: boolean;
   isTransitioning: boolean;
   onSceneChange: (index: number) => void;
-  isOverlayModalOpen?: boolean; // New prop
+  isOverlayModalOpen?: boolean;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number | undefined>(undefined);
@@ -242,7 +242,7 @@ const ProgressBar = React.memo(({
                       : 'bg-white/40'
                   }`}
                   style={{ 
-                    width: isCompleted ? '100%' : '0%', // Let the useEffect handle current scene progress
+                    width: isCompleted ? '100%' : '0%',
                     backgroundColor: isCompleted || isCurrent ? '#ef4444' : undefined
                   }}
                 />
@@ -338,8 +338,11 @@ export default function PublicTourViewer() {
   const [audioError, setAudioError] = useState<string | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const [isOverlayModalOpen, setIsOverlayModalOpen] = useState(false);
+  const [showPauseOverlay, setShowPauseOverlay] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const autoplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const tourId = params.id as string;
 
@@ -395,42 +398,53 @@ export default function PublicTourViewer() {
     }
   };
 
-  // Auto-advance scenes when autoplay is enabled
-  useEffect(() => {
-    if (!isAutoplay || scenes.length <= 1 || isTransitioning || isOverlayModalOpen) {
-      return;
-    }
-
-    const sceneInterval = setInterval(() => {
-      setCurrentSceneIndex((prev) => {
-        const nextIndex = (prev + 1) % scenes.length;
-        // Trigger smooth transition
-        setIsTransitioning(true);
-        setTimeout(() => setIsTransitioning(false), 600);
-        return nextIndex;
-      });
-    }, 12000); // Change scene every 12 seconds
-
-    return () => {
-      clearInterval(sceneInterval);
-    };
-  }, [isAutoplay, scenes.length, isTransitioning, currentSceneIndex, isOverlayModalOpen]);
-
   const handleSceneChange = useCallback((index: number) => {
     if (index === currentSceneIndex || isTransitioning) return;
-    
+
     setIsTransitioning(true);
-    
+
     // Faster transition - immediate scene change with quick overlay
     setTimeout(() => {
       setCurrentSceneIndex(index);
     }, 100);
-    
+
     // Reset transition state after animation completes
     setTimeout(() => {
       setIsTransitioning(false);
     }, 600);
   }, [currentSceneIndex, isTransitioning, scenes]);
+
+  // Auto-advance scenes when autoplay is enabled
+  useEffect(() => {
+    if (!isAutoplay || scenes.length <= 1 || isTransitioning || isOverlayModalOpen) {
+      if (autoplayTimeoutRef.current) {
+        clearTimeout(autoplayTimeoutRef.current);
+        autoplayTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    // Clear any existing timeout
+    if (autoplayTimeoutRef.current) {
+      clearTimeout(autoplayTimeoutRef.current);
+    }
+
+    // Fixed 12 seconds to match progress bar duration
+    const autoplayInterval = 12000;
+
+    autoplayTimeoutRef.current = setTimeout(() => {
+      const nextIndex = (currentSceneIndex + 1) % scenes.length;
+      handleSceneChange(nextIndex);
+    }, autoplayInterval);
+
+    // Cleanup function
+    return () => {
+      if (autoplayTimeoutRef.current) {
+        clearTimeout(autoplayTimeoutRef.current);
+        autoplayTimeoutRef.current = null;
+      }
+    };
+  }, [isAutoplay, currentSceneIndex, scenes.length, isTransitioning, isOverlayModalOpen, handleSceneChange]);
 
   const handlePrevScene = useCallback(() => {
     if (isTransitioning) return;
@@ -444,9 +458,19 @@ export default function PublicTourViewer() {
     handleSceneChange(newIndex);
   }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange]);
 
+  const triggerPauseAnimation = useCallback(() => {
+    if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
+    setShowPauseOverlay(true);
+    pauseTimeoutRef.current = setTimeout(() => setShowPauseOverlay(false), 500);
+  }, []);
+
   const toggleAutoplay = useCallback(() => {
-    setIsAutoplay(!isAutoplay);
-  }, [isAutoplay]);
+    const nextState = !isAutoplay;
+    if (!nextState) {
+      triggerPauseAnimation();
+    }
+    setIsAutoplay(nextState);
+  }, [isAutoplay, triggerPauseAnimation]);
 
   const handleViewerSceneChange = useCallback((sceneId: string) => {
     const sceneIndex = scenes.findIndex(s => s.id === sceneId);
@@ -478,13 +502,9 @@ export default function PublicTourViewer() {
       }
     } else if (hotspot.kind === 'info') {
       // Handle info hotspots - show information modal/popup
-      console.log('Info hotspot clicked, payload:', hotspot.payload);
       try {
         const payload = JSON.parse(hotspot.payload || '{}');
         const infoText = payload.infoText || payload.text || 'No information available';
-        
-        console.log('Showing info modal with text:', infoText);
-        
         // Escape HTML to prevent XSS
         const escapeHtml = (text: string) => {
           const div = document.createElement('div');
@@ -686,7 +706,6 @@ export default function PublicTourViewer() {
       }
     } else {
       // No tour-specific audio, load default audio
-      console.log('No tour-specific audio found, loading default audio');
       loadDefaultAudio();
     }
     
@@ -885,17 +904,29 @@ export default function PublicTourViewer() {
           tour={tour}
           currentScene={currentScene}
           scenes={scenes}
-          isAutoplay={isAutoplay}
           onSceneChange={handleViewerSceneChange}
           onHotspotClick={handleHotspotClick}
           hotspots={currentSceneHotspots}
           overlays={currentSceneOverlays}
-          onOverlayModalStateChange={setIsOverlayModalOpen}
-          isOverlayModalOpen={isOverlayModalOpen}
-          isFullscreen={true}
-          onAutoplayPause={() => setIsAutoplay(false)}
+          autoRotate={isAutoplay}
+          onOverlayPause={() => {
+            setIsAutoplay(false);
+            triggerPauseAnimation();
+          }}
         />
-        
+
+        {/* Transient Pause Icon Overlay */}
+        <div
+          className={`absolute inset-0 flex items-center justify-center pointer-events-none z-40 transition-opacity duration-300 ${showPauseOverlay ? 'opacity-100' : 'opacity-0'}`}
+        >
+          <div className="bg-black/30 backdrop-blur-sm rounded-full p-8 flex items-center justify-center border border-white/20">
+            <div className="flex gap-2">
+              <div className="w-4 h-12 bg-white rounded-sm shadow-xl"></div>
+              <div className="w-4 h-12 bg-white rounded-sm shadow-xl"></div>
+            </div>
+          </div>
+        </div>
+
         {/* Tour Title - Only show when controls are not active */}
         {!showControls && (
           <div className="absolute top-4 left-4 z-30">

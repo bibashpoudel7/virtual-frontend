@@ -159,11 +159,11 @@ const HomePage = () => {
             <div className="relative">
               <HomeTourViewer className="aspect-video shadow-2xl" />
               {/* Only show outside badge when user is logged in */}
-              {typeof window !== 'undefined' && (localStorage.getItem('accessToken') || localStorage.getItem('auth_token')) && (
+              {/* {typeof window !== 'undefined' && (localStorage.getItem('accessToken') || localStorage.getItem('auth_token')) && (
                 <div className="absolute bottom-[-3rem] right-[-1.5rem] bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg font-bold shadow-lg">
                   <span className="text-2xl">360°</span> Experience
                 </div>
-              )}
+              )} */}
             </div>
           </div>
         </div>

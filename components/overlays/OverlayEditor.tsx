@@ -188,7 +188,7 @@ export default function OverlayEditor({
       payload: {
         text: payload.text || '',
         imageUrl: payload.imageUrl || '',
-        imageSource: payload.imageSource || 'upload',
+        imageSource: payload.imageSource || 'url',
         videoUrl: payload.videoUrl || '',
         width: payload.width || 200,
         height: payload.height || 200,
@@ -661,16 +661,16 @@ export default function OverlayEditor({
               <label className="block text-sm font-semibold mb-2 text-gray-900">Image Source</label>
               <div className="space-y-3">
                 <select
-                  value={formData.payload?.imageSource || 'upload'}
+                  value={formData.payload?.imageSource || 'url'}
                   onChange={(e) => setFormData({
                     ...formData,
                     payload: { ...formData.payload, imageSource: e.target.value }
                   })}
                   className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-gray-900 bg-white cursor-pointer focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
                 >
-                  <option value="upload">Upload Image</option>
+                  {/* <option value="upload">Upload Image</option> */}
                   <option value="url">From URL</option>
-                  <option value="library">From Library</option>
+                  {/* <option value="library">From Library</option> */}
                 </select>
 
                 {formData.payload?.imageSource === 'url' && (
@@ -686,7 +686,7 @@ export default function OverlayEditor({
                   />
                 )}
 
-                {(formData.payload?.imageSource === 'upload' || !formData.payload?.imageSource) && (
+                {/* {(formData.payload?.imageSource === 'upload' || !formData.payload?.imageSource) && (
                   <div>
                     <button
                       type="button"
@@ -706,7 +706,7 @@ export default function OverlayEditor({
                       <span className="ml-3 text-sm text-gray-800 font-medium">{uploadedImage.name}</span>
                     )}
                   </div>
-                )}
+                )} */}
 
                 {imagePreview && (
                   <div className="mt-3 p-3 border-2 border-gray-200 rounded-lg bg-gray-50">
@@ -719,7 +719,7 @@ export default function OverlayEditor({
                   </div>
                 )}
 
-                {formData.payload?.imageSource === 'library' && (
+                {/* {formData.payload?.imageSource === 'library' && (
                   <div className="grid grid-cols-4 gap-2 p-3 border-2 border-gray-200 rounded-lg bg-gray-50">
                     <p className="col-span-4 text-sm text-gray-800 font-semibold mb-2">Select from library:</p>
                     {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
@@ -739,7 +739,7 @@ export default function OverlayEditor({
                       </button>
                     ))}
                   </div>
-                )}
+                )} */}
               </div>
             </div>
 
@@ -1044,17 +1044,24 @@ export default function OverlayEditor({
       {isAdding && (
         <div className="mb-6 p-4 border-2 border-gray-200 rounded-lg bg-gray-50">
           <h4 className="font-semibold mb-3 text-gray-900">New Overlay</h4>
-          
+
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-semibold mb-2 text-gray-900">Overlay Type</label>
               <select
                 value={formData.kind}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  kind: e.target.value,
-                  payload: { style: 'default', animation: 'fade' }
-                })}
+                onChange={(e) => {
+                  const newKind = e.target.value;
+                  const newPayload: any = { style: 'default', animation: 'fade' };
+                  if (newKind === 'image') {
+                    newPayload.imageSource = 'url';
+                  }
+                  setFormData({
+                    ...formData,
+                    kind: newKind,
+                    payload: newPayload
+                  });
+                }}
                 className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-gray-900 bg-white cursor-pointer focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
               >
                 {overlayTypes.map(type => (
@@ -1313,16 +1320,15 @@ export default function OverlayEditor({
       <div className="space-y-3">
         {overlays.map((overlay) => {
           const overlayType = overlayTypes.find(t => t.value === overlay.kind);
-          
+
           return (
             <div
               key={overlay.id}
               onClick={() => handleEditOverlay(overlay)}
-              className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                selectedOverlay?.id === overlay.id && isEditing
-                  ? 'border-blue-500 bg-blue-50 shadow-md'
-                  : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'
-              }`}
+              className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${selectedOverlay?.id === overlay.id && isEditing
+                ? 'border-blue-500 bg-blue-50 shadow-md'
+                : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                }`}
             >
               <div className="flex justify-between items-start">
                 <div className="flex items-start space-x-3">
@@ -1348,27 +1354,27 @@ export default function OverlayEditor({
                     </svg>
                   </button>
                   <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (overlay.id && confirm('Are you sure you want to delete this overlay?')) {
-                      onOverlayDeleted?.(overlay.id);
-                    }
-                  }}
-                  disabled={deletingOverlayId === overlay.id}
-                  className="text-red-500 hover:text-red-700 hover:bg-red-100 p-2 rounded-full transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Delete overlay"
-                >
-                  {deletingOverlayId === overlay.id ? (
-                    <svg className="animate-spin w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  )}
-                </button>
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (overlay.id && confirm('Are you sure you want to delete this overlay?')) {
+                        onOverlayDeleted?.(overlay.id);
+                      }
+                    }}
+                    disabled={deletingOverlayId === overlay.id}
+                    className="text-red-500 hover:text-red-700 hover:bg-red-100 p-2 rounded-full transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Delete overlay"
+                  >
+                    {deletingOverlayId === overlay.id ? (
+                      <svg className="animate-spin w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>

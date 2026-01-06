@@ -304,7 +304,7 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
             <span className="text-sm font-bold text-gray-900">Publish immediately</span>
           </label>
 
-          <label className="flex items-center cursor-pointer">
+          {/* <label className="flex items-center cursor-pointer">
             <input
               type="checkbox"
               checked={formData.autoplay_enabled}
@@ -312,7 +312,7 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
               className="mr-3 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
             />
             <span className="text-sm font-bold text-gray-900">Enable autoplay</span>
-          </label>
+          </label> */}
         </div>
 
         <button

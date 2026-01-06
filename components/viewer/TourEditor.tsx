@@ -214,12 +214,15 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const [infoText, setInfoText] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [isFullscreen, ] = useState(false);
+  const [isFullscreen,] = useState(false);
   const [isViewerFullscreen, setIsViewerFullscreen] = useState(false);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-  
+  const [preloadedScenes, setPreloadedScenes] = useState<Set<string>>(new Set());
+  const [showPauseOverlay, setShowPauseOverlay] = useState(false);
+  const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
+
   // Audio controls state
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const autoplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
@@ -253,7 +256,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       if (!tour.id) return;
       
       try {
-        setIsInitialLoading(true);
         // Load all hotspots for the entire tour
         const allTourHotspots = await HotspotsAPI.getTourHotspots(tour.id);
         setHotspots(allTourHotspots);
@@ -276,8 +278,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         setError('Failed to load hotspots and overlays');
         setHotspots([]); // Set empty array on error
         setOverlays([]);
-      } finally {
-        setIsInitialLoading(false);
       }
     };
 
@@ -286,30 +286,43 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
   const handleSceneChange = useCallback((sceneId: string) => {
     if (sceneId === currentSceneId) return; // Don't transition to the same scene
-    
+
+    setIsTransitioning(true);
+
     // Update both scene ID and index
     setCurrentSceneId(sceneId);
     const newIndex = scenes.findIndex(s => s.id === sceneId);
     if (newIndex !== -1) {
       setCurrentSceneIndex(newIndex);
     }
+
+    // Reset transition state after scene has time to load
+    setTimeout(() => {
+      setIsTransitioning(false);
+    }, 1500);
   }, [currentSceneId, scenes]);
+
+  const handleOverlayPause = useCallback(() => {
+    setIsAutoplay(false);
+    setShowPauseOverlay(true);
+    setTimeout(() => setShowPauseOverlay(false), 500);
+  }, []);
 
   const handleSceneChangeByIndex = useCallback((index: number) => {
     if (index === currentSceneIndex || isTransitioning) return;
-    
+
     setIsTransitioning(true);
-    
-    // Immediate scene change
+
+    // Immediate scene change with enhanced loading feedback
     setTimeout(() => {
       setCurrentSceneIndex(index);
       setCurrentSceneId(scenes[index]?.id || '');
-    }, 100);
-    
-    // Reset transition state
+    }, 50);
+
+    // Reset transition state after scene loads
     setTimeout(() => {
       setIsTransitioning(false);
-    }, 600);
+    }, 1200);
   }, [currentSceneIndex, isTransitioning, scenes]);
 
   const handleHotspotClick = useCallback((hotspot: Hotspot) => {
@@ -334,7 +347,14 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           div.textContent = text;
           return div.innerHTML;
         };
-        
+
+        // Pause autoplay when modal opens
+        const wasAutoplayActive = isAutoplay;
+        if (isAutoplay) {
+          handleOverlayPause();
+        }
+        setIsInfoModalOpen(true);
+
         // Create and show info modal
         const modal = document.createElement('div');
         modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4';
@@ -357,6 +377,11 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         // Add click handlers
         const closeModal = () => {
           document.body.removeChild(modal);
+          setIsInfoModalOpen(false);
+          // Resume autoplay when modal closes
+          if (wasAutoplayActive) {
+            setIsAutoplay(true);
+          }
         };
         
         modal.addEventListener('click', (e) => {
@@ -389,7 +414,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         alert('Link not available');
       }
     }
-  }, [handleSceneChange]);
+  }, [handleSceneChange, isAutoplay]);
 
   const handleHotspotCreate = useCallback((yaw: number, pitch: number) => {
     if (editPanel === 'hotspots') {
@@ -537,7 +562,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       console.error('Failed to update hotspot:', err);
       setError('Failed to update hotspot position');
       
-      // Note: Consider refetching hotspots on error if needed
     } finally {
       // Remove from pending saves
       setPendingSaves(prev => {
@@ -647,15 +671,86 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     }
   }, [isViewerFullscreen]);
 
+  // Preload adjacent scenes for faster transitions
+  useEffect(() => {
+    const preloadScene = (sceneId: string) => {
+      if (preloadedScenes.has(sceneId)) return;
+
+      const scene = scenes.find(s => s.id === sceneId);
+      if (!scene?.tiles_manifest) return;
+
+      try {
+        const manifest = typeof scene.tiles_manifest === 'string'
+          ? JSON.parse(scene.tiles_manifest)
+          : scene.tiles_manifest;
+
+        if (manifest.type === 'cubemap' && manifest.levels?.[0]) {
+          // Preload level 0 tiles for quick initial display
+          const faceOrder = ['right', 'left', 'top', 'bottom', 'front', 'back'];
+
+          faceOrder.forEach(face => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.src = `https://test.thenimto.com/scenes/${sceneId}/tiles/${face}_l0_0_0.jpg`;
+          });
+
+          setPreloadedScenes((prev: Set<string>) => new Set(prev).add(sceneId));
+        }
+      } catch (error) {
+        console.warn('Failed to preload scene:', sceneId, error);
+      }
+    };
+
+    // Preload current scene and adjacent scenes
+    const currentIndex = scenes.findIndex(s => s.id === currentSceneId);
+    if (currentIndex !== -1) {
+      // Preload previous scene
+      if (currentIndex > 0) {
+        preloadScene(scenes[currentIndex - 1].id);
+      }
+      // Preload next scene
+      if (currentIndex < scenes.length - 1) {
+        preloadScene(scenes[currentIndex + 1].id);
+      }
+    }
+  }, [currentSceneId, scenes, preloadedScenes]);
+
   // Client-side only flag
   useEffect(() => {
     setIsClient(true);
-    // Set initial loading to false after a short delay to allow scene to initialize
-    const timer = setTimeout(() => {
-      setIsInitialLoading(false);
-    }, 300);
-    return () => clearTimeout(timer);
   }, []);
+
+  // Built-in autoplay mechanism (Syncs with progress bar)
+  useEffect(() => {
+    if (!isAutoplay || isTransitioning || scenes.length <= 1 || showHotspotDialog || showOverlayDialog) {
+      if (autoplayTimeoutRef.current) {
+        clearTimeout(autoplayTimeoutRef.current);
+        autoplayTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    // Clear any existing timeout
+    if (autoplayTimeoutRef.current) {
+      clearTimeout(autoplayTimeoutRef.current);
+    }
+
+    // Fixed 12 seconds to match progress bar duration
+    const autoplayInterval = 12000;
+
+    autoplayTimeoutRef.current = setTimeout(() => {
+      const nextIndex = (currentSceneIndex + 1) % scenes.length;
+      handleSceneChangeByIndex(nextIndex);
+    }, autoplayInterval);
+
+    // Cleanup function
+    return () => {
+      if (autoplayTimeoutRef.current) {
+        clearTimeout(autoplayTimeoutRef.current);
+        autoplayTimeoutRef.current = null;
+      }
+    };
+  }, [isAutoplay, currentSceneIndex, scenes.length, isTransitioning, showHotspotDialog, showOverlayDialog, handleSceneChangeByIndex]);
 
   // Initialize background audio
   useEffect(() => {
@@ -958,16 +1053,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
   return (
     <div className="absolute inset-0">
-      {/* Initial Loading Overlay */}
-      {isInitialLoading && (
-        <div className="absolute inset-0 bg-gray-800 z-50 flex items-center justify-center">
-          <div className="bg-white rounded-lg shadow-xl p-6 flex items-center space-x-3">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-            <span className="text-gray-900 font-medium">Initializing viewer...</span>
-          </div>
-        </div>
-      )}
-
       {/* Fullscreen Viewer Mode */}
       {isViewerFullscreen ? (
         <div className="fixed inset-0 z-50 bg-black">
@@ -1031,7 +1116,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           </div>
           
           {/* Clean Viewer */}
-          <div className="w-full h-full">
+          <div className="w-full h-full relative">
             <CubeMapViewer
               tour={tour}
               currentScene={currentScene}
@@ -1043,13 +1128,22 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               onHotspotUpdate={updateHotspot}
               hotspots={hotspots.filter(h => h.scene_id === currentSceneId)}
               overlays={overlays.filter(o => o.scene_id === currentSceneId)}
-              onOverlayUpdate={handleOverlayUpdated}
-              isAutoplay={isAutoplay}
-              isOverlayModalOpen={showOverlayDialog}
-              isFullscreen={true}
+              autoRotate={isAutoplay}
               highlightedHotspotId={editingHotspot}
+              onOverlayPause={handleOverlayPause}
             />
-            
+
+            {/* Pause Animation Overlay */}
+            {showPauseOverlay && (
+              <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
+                <div className="bg-black/60 rounded-full p-8 animate-in fade-in zoom-in duration-300">
+                  <svg className="w-16 h-16 text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                  </svg>
+                </div>
+              </div>
+            )}
+
             {/* Progress Bar - Only show in fullscreen mode */}
             <ProgressBar
               scenes={scenes}
@@ -1057,14 +1151,14 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               isAutoplay={isAutoplay}
               isTransitioning={isTransitioning}
               onSceneChange={handleSceneChangeByIndex}
-              isOverlayModalOpen={showOverlayDialog}
+              isOverlayModalOpen={showOverlayDialog || showHotspotDialog || isInfoModalOpen}
             />
           </div>
         </div>
       ) : (
         <>
           {/* Normal Editor Mode */}
-          <div className="w-full h-full">
+          <div className="w-full h-full relative">
             <CubeMapViewer
               tour={tour}
               currentScene={currentScene}
@@ -1076,475 +1170,476 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               onHotspotUpdate={updateHotspot}
               hotspots={hotspots.filter(h => h.scene_id === currentSceneId)}
               overlays={overlays.filter(o => o.scene_id === currentSceneId)}
-              onOverlayUpdate={handleOverlayUpdated}
-              isAutoplay={isAutoplay}
-              isOverlayModalOpen={showOverlayDialog}
-              isFullscreen={true}
+              autoRotate={isAutoplay}
               highlightedHotspotId={editingHotspot}
+              onOverlayPause={handleOverlayPause}
             />
+
+            {/* Pause Animation Overlay */}
+            {showPauseOverlay && (
+              <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
+                <div className="bg-black/60 rounded-full p-8 animate-in fade-in zoom-in duration-300">
+                  <svg className="w-16 h-16 text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                  </svg>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Sidebar Toggle Button - Only show when sidebar is closed */}
-      {!sidebarOpen && (
-        <div className="absolute left-2 top-2 z-40">
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="bg-white rounded-lg shadow-lg p-3 hover:bg-gray-50 transition-colors cursor-pointer"
-            title="Open sidebar"
-          >
-            <svg 
-              className="w-5 h-5 text-gray-700 cursor-pointer" 
-              fill="none" 
-              stroke="currentColor" 
-              viewBox="0 0 24 24"
-            >
-              {/* Hamburger menu icon */}
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-        </div>
-      )}
+          {!sidebarOpen && (
+            <div className="absolute left-2 top-2 z-40">
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="bg-white rounded-lg shadow-lg p-3 hover:bg-gray-50 transition-colors cursor-pointer"
+                title="Open sidebar"
+              >
+                <svg
+                  className="w-5 h-5 text-gray-700 cursor-pointer"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  {/* Hamburger menu icon */}
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+            </div>
+          )}
 
-      {/* Left Sidebar - Scene Navigation */}
-      <div className={`absolute left-0 top-0 bottom-0 z-30 transition-all duration-300 ease-in-out ${
-        sidebarOpen ? 'w-80 opacity-100' : 'w-0 opacity-0 pointer-events-none'
-      }`}>
-        <div className="bg-white shadow-xl h-full flex flex-col overflow-hidden rounded-r-lg">
-          {/* Header */}
-          <div className="p-4 border-b border-gray-200 flex-shrink-0">
-            <div className="flex items-start justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-lg font-semibold text-gray-900">Scenes</h3>
-                  {/* Close Sidebar Button - Top Right */}
-                  <button
-                    onClick={() => setSidebarOpen(false)}
-                    className="p-2 hover:bg-gray-100 bg-gray-50 rounded-lg transition-colors shadow-sm"
-                    title="Close sidebar"
-                  >
-                    <svg 
-                      className="w-4 h-4 text-gray-600 hover:text-gray-800 cursor-pointer" 
-                      fill="none" 
-                      stroke="currentColor" 
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-                <div className="flex items-center justify-between mt-2">
-                  <p className="text-sm text-gray-600 whitespace-nowrap">Click to navigate between scenes</p>
-                  <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded ml-3">
-                    {scenes.length} scenes
+          {/* Left Sidebar - Scene Navigation */}
+          <div className={`absolute left-0 top-0 bottom-0 z-30 transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-80 opacity-100' : 'w-0 opacity-0 pointer-events-none'
+            }`}>
+            <div className="bg-white shadow-xl h-full flex flex-col overflow-hidden rounded-r-lg">
+              {/* Header */}
+              <div className="p-4 border-b border-gray-200 flex-shrink-0">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <h3 className="text-lg font-semibold text-gray-900">Scenes</h3>
+                      {/* Close Sidebar Button - Top Right */}
+                      <button
+                        onClick={() => setSidebarOpen(false)}
+                        className="p-2 hover:bg-gray-100 bg-gray-50 rounded-lg transition-colors shadow-sm"
+                        title="Close sidebar"
+                      >
+                        <svg
+                          className="w-4 h-4 text-gray-600 hover:text-gray-800 cursor-pointer"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between mt-2">
+                      <p className="text-sm text-gray-600 whitespace-nowrap">Click to navigate between scenes</p>
+                      <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded ml-3">
+                        {scenes.length} scenes
+                      </div>
+                    </div>
+
+                    {/* Status Indicators */}
+                    {isClient && (
+                      <div className="flex gap-2 mt-3">
+                        {isAutoplay && (
+                          <span className="text-xs bg-blue-600 text-white px-2 py-1 rounded flex items-center gap-1">
+                            <span className="animate-pulse">●</span>
+                            Auto-rotating
+                          </span>
+                        )}
+                        {isAudioPlaying && (
+                          <span className="text-xs bg-green-600 text-white px-2 py-1 rounded flex items-center gap-1">
+                            <span className="animate-pulse">♪</span>
+                            Audio playing
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-                
-                {/* Status Indicators */}
-                {isClient && (
-                <div className="flex gap-2 mt-3">
-                  {isAutoplay && (
-                    <span className="text-xs bg-blue-600 text-white px-2 py-1 rounded flex items-center gap-1">
-                      <span className="animate-pulse">●</span>
-                      Auto-rotating
-                    </span>
-                  )}
-                  {isAudioPlaying && (
-                    <span className="text-xs bg-green-600 text-white px-2 py-1 rounded flex items-center gap-1">
-                      <span className="animate-pulse">♪</span>
-                      Audio playing
-                    </span>
-                  )}
-                </div>
-                )}
+              </div>
+
+              {/* Scenes List */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {scenes.map((scene, index) => (
+                  <div
+                    key={scene.id}
+                    onClick={() => handleSceneChange(scene.id)}
+                    className={`relative cursor-pointer rounded-lg border-2 transition-all duration-200 ${scene.id === currentSceneId
+                      ? 'border-blue-500 bg-blue-50 shadow-md'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 hover:shadow-sm'
+                      } ${isTransitioning && scene.id === currentSceneId ? 'opacity-50' : ''}`}
+                  >
+                    {/* Scene Thumbnail */}
+                    <div className="aspect-video bg-gray-100 rounded-t-lg overflow-hidden relative">
+                      {scene.src_original_url ? (
+                        <img
+                          src={scene.src_original_url}
+                          alt={scene.name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            // Fallback to a placeholder if image fails to load
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400">
+                          <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                        </div>
+                      )}
+
+                      {/* Scene number badge */}
+                      <div className="absolute top-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded">
+                        {index + 1}
+                      </div>
+                    </div>
+
+                    {/* Scene Info */}
+                    <div className="p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-medium text-gray-900 truncate">{scene.name}</h4>
+                          <p className="text-xs text-gray-500">Scene {index + 1}</p>
+                        </div>
+                        {scene.id === currentSceneId && (
+                          <div className="flex items-center text-blue-600 ml-2">
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Hotspot and Overlay counts for this scene */}
+                      <div className="mt-2 flex items-center gap-4 text-xs text-gray-500">
+                        <div className="flex items-center">
+                          <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                          </svg>
+                          {hotspots.filter(h => h.scene_id === scene.id).length} hotspots
+                        </div>
+                        <div className="flex items-center">
+                          <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" clipRule="evenodd" />
+                          </svg>
+                          {overlays.filter(o => o.scene_id === scene.id).length} overlays
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
-          
-          {/* Scenes List */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {scenes.map((scene, index) => (
-              <div
-                key={scene.id}
-                onClick={() => handleSceneChange(scene.id)}
-                className={`relative cursor-pointer rounded-lg border-2 transition-all duration-200 ${
-                  scene.id === currentSceneId
-                    ? 'border-blue-500 bg-blue-50 shadow-md'
-                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 hover:shadow-sm'
-                }`}
-              >
-                {/* Scene Thumbnail */}
-                <div className="aspect-video bg-gray-100 rounded-t-lg overflow-hidden relative">
-                  {scene.src_original_url ? (
-                    <img
-                      src={scene.src_original_url}
-                      alt={scene.name}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        // Fallback to a placeholder if image fails to load
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-400">
-                      <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                  )}
-                  
-                  {/* Scene number badge */}
-                  <div className="absolute top-2 left-2 bg-black bg-opacity-60 text-white text-xs px-2 py-1 rounded">
-                    {index + 1}
-                  </div>
-                </div>
-                
-                {/* Scene Info */}
-                <div className="p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-gray-900 truncate">{scene.name}</h4>
-                      <p className="text-xs text-gray-500">Scene {index + 1}</p>
-                    </div>
-                    {scene.id === currentSceneId && (
-                      <div className="flex items-center text-blue-600 ml-2">
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                        </svg>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Hotspot and Overlay counts for this scene */}
-                  <div className="mt-2 flex items-center gap-4 text-xs text-gray-500">
-                    <div className="flex items-center">
-                      <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-                      </svg>
-                      {hotspots.filter(h => h.scene_id === scene.id).length} hotspots
-                    </div>
-                    <div className="flex items-center">
-                      <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" clipRule="evenodd" />
-                      </svg>
-                      {overlays.filter(o => o.scene_id === scene.id).length} overlays
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
 
-      {/* Edit Controls Panel - Responsive to sidebar */}
-      <div className={`absolute bottom-4 left-2 z-30 transition-all duration-300 ${
-        sidebarOpen ? 'ml-80 pl-2' : 'ml-0'
-      }`}>
-        <div className="bg-white rounded-lg shadow-xl p-4" style={{ width: '320px' }}>
-          {/* Edit Mode Toggle */}
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">Editor Controls</h3>
-            <button
-              onClick={() => setIsEditMode(!isEditMode)}
-              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors cursor-pointer ${
-                isEditMode 
-                  ? 'bg-green-600 text-white' 
-                  : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-              }`}
-            >
-              {isEditMode ? 'ON' : 'OFF'}
-            </button>
-          </div>
-
-          {isEditMode && (
-            <>
-              {/* Edit Type Selector */}
-              <div className="flex gap-2 mb-4">
+          {/* Edit Controls Panel - Responsive to sidebar */}
+          <div className={`absolute bottom-4 left-2 z-30 transition-all duration-300 ${sidebarOpen ? 'ml-80 pl-2' : 'ml-0'
+            }`}>
+            <div className="bg-white rounded-lg shadow-xl p-4" style={{ width: '320px' }}>
+              {/* Edit Mode Toggle */}
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">Editor Controls</h3>
                 <button
-                  onClick={() => setEditPanel('hotspots')}
-                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${
-                    editPanel === 'hotspots'
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-md'
-                      : 'bg-white text-gray-700 border-gray-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700'
-                  }`}
+                  onClick={() => setIsEditMode(!isEditMode)}
+                  className={`px-3 py-1 rounded-full text-sm font-medium transition-colors cursor-pointer ${isEditMode
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+                    }`}
                 >
-                  🔥 Hotspots
-                </button>
-                <button
-                  onClick={() => setEditPanel('overlays')}
-                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${
-                    editPanel === 'overlays'
-                      ? 'bg-purple-600 text-white border-purple-600 shadow-md'
-                      : 'bg-white text-gray-700 border-gray-200 hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700'
-                  }`}
-                >
-                  ✨ Overlays
+                  {isEditMode ? 'ON' : 'OFF'}
                 </button>
               </div>
 
-              {/* Instructions */}
-              <div className={`border-2 rounded-lg p-3 mb-4 ${
-                editPanel === 'overlays' 
-                  ? 'bg-purple-50 border-purple-200' 
-                  : 'bg-blue-50 border-blue-200'
-              }`}>
-                <p className={`text-sm font-medium ${
-                  editPanel === 'overlays' ? 'text-purple-900' : 'text-blue-900'
-                }`}>
-                  <strong>How to add {editPanel}:</strong><br />
-                  Hold <kbd className="px-1 py-0.5 bg-white rounded border text-gray-800 font-semibold">Shift</kbd> + Click on the panorama
-                </p>
-              </div>
+              {isEditMode && (
+                <>
+                  {/* Edit Type Selector */}
+                  <div className="flex gap-2 mb-4">
+                    <button
+                      onClick={() => setEditPanel('hotspots')}
+                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${editPanel === 'hotspots'
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700'
+                        }`}
+                    >
+                      🔥 Hotspots
+                    </button>
+                    <button
+                      onClick={() => setEditPanel('overlays')}
+                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${editPanel === 'overlays'
+                        ? 'bg-purple-600 text-white border-purple-600 shadow-md'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700'
+                        }`}
+                    >
+                      ✨ Overlays
+                    </button>
+                  </div>
 
-              {/* Hotspots List */}
-              {editPanel === 'hotspots' && (
-                <div>
-                  <h4 className="text-sm font-semibold mb-2 text-gray-900">Current Hotspots ({hotspots.filter(h => h.scene_id === currentSceneId).length})</h4>
-                  <div className="max-h-32 overflow-y-auto space-y-1">
-                    {hotspots
-                      .filter(h => h.scene_id === currentSceneId)
-                      .map(hotspot => {
-                        let displayLabel: string = hotspot.kind;
-                        let targetScene = null;
-                        
-                        try {
-                          const payload = JSON.parse(hotspot.payload || '{}');
-                          
-                          // Check if there's a custom label in the payload
-                          if (payload.label) {
-                            displayLabel = payload.label;
-                          } else if (hotspot.kind === 'navigation' && payload.targetSceneId) {
-                            // Find target scene and create "Go to [scene name]" label
-                            targetScene = scenes.find(s => s.id === payload.targetSceneId);
-                            if (targetScene) {
-                              displayLabel = `Go to ${targetScene.name}`;
-                            }
-                          } else if (hotspot.kind === 'info' && payload.infoText) {
-                            // For info hotspots, show truncated info text
-                            displayLabel = payload.infoText.length > 20 
-                              ? `${payload.infoText.substring(0, 20)}...` 
-                              : payload.infoText;
-                          } else if (hotspot.kind === 'link' && payload.url) {
-                            // For link hotspots, show domain name
+                  {/* Instructions */}
+                  <div className={`border-2 rounded-lg p-3 mb-4 ${editPanel === 'overlays'
+                    ? 'bg-purple-50 border-purple-200'
+                    : 'bg-blue-50 border-blue-200'
+                    }`}>
+                    <p className={`text-sm font-medium ${editPanel === 'overlays' ? 'text-purple-900' : 'text-blue-900'
+                      }`}>
+                      <strong>How to add {editPanel}:</strong><br />
+                      Hold <kbd className="px-1 py-0.5 bg-white rounded border text-gray-800 font-semibold">Shift</kbd> + Click on the panorama
+                    </p>
+                  </div>
+
+                  {/* Hotspots List */}
+                  {editPanel === 'hotspots' && (
+                    <div>
+                      <h4 className="text-sm font-semibold mb-2 text-gray-900">Current Hotspots ({hotspots.filter(h => h.scene_id === currentSceneId).length})</h4>
+                      <div className="max-h-32 overflow-y-auto space-y-1">
+                        {hotspots
+                          .filter(h => h.scene_id === currentSceneId)
+                          .map(hotspot => {
+                            let displayLabel: string = hotspot.kind;
+                            let targetScene = null;
+
                             try {
-                              const urlObj = new URL(payload.url);
-                              displayLabel = `Link to ${urlObj.hostname}`;
+                              const payload = JSON.parse(hotspot.payload || '{}');
+
+                              // Check if there's a custom label in the payload
+                              if (payload.label) {
+                                displayLabel = payload.label;
+                              } else if (hotspot.kind === 'navigation' && payload.targetSceneId) {
+                                // Find target scene and create "Go to [scene name]" label
+                                targetScene = scenes.find(s => s.id === payload.targetSceneId);
+                                if (targetScene) {
+                                  displayLabel = `Go to ${targetScene.name}`;
+                                }
+                              } else if (hotspot.kind === 'info' && payload.infoText) {
+                                // For info hotspots, show truncated info text
+                                displayLabel = payload.infoText.length > 20
+                                  ? `${payload.infoText.substring(0, 20)}...`
+                                  : payload.infoText;
+                              } else if (hotspot.kind === 'link' && payload.url) {
+                                // For link hotspots, show domain name
+                                try {
+                                  const urlObj = new URL(payload.url);
+                                  displayLabel = `Link to ${urlObj.hostname}`;
+                                } catch {
+                                  displayLabel = 'External Link';
+                                }
+                              }
                             } catch {
-                              displayLabel = 'External Link';
+                              // Fallback to target scene name if payload parsing fails
+                              if (hotspot.kind === 'navigation' && hotspot.target_scene_id) {
+                                targetScene = scenes.find(s => s.id === hotspot.target_scene_id);
+                                if (targetScene) {
+                                  displayLabel = `Go to ${targetScene.name}`;
+                                }
+                              }
                             }
-                          }
-                        } catch {
-                          // Fallback to target scene name if payload parsing fails
-                          if (hotspot.kind === 'navigation' && hotspot.target_scene_id) {
-                            targetScene = scenes.find(s => s.id === hotspot.target_scene_id);
-                            if (targetScene) {
-                              displayLabel = `Go to ${targetScene.name}`;
-                            }
-                          }
-                        }
-                        
-                        const isEditing = editingHotspot === hotspot.id;
-                        
-                        return (
-                          <div key={hotspot.id} className="p-3 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
-                            <div className="flex items-center justify-between">
-                              <span className="truncate flex items-center gap-2">
-                                <span className="text-lg">
-                                  {hotspot.kind === 'navigation' && '🔄'}
-                                  {hotspot.kind === 'info' && 'ℹ️'}
-                                  {hotspot.kind === 'link' && '🔗'}
-                                </span>
-                                <span className="font-medium">{displayLabel}</span>
-                                {/* Save indicator */}
-                                {hotspot.id && pendingSaves.has(hotspot.id) && (
-                                  <span className="flex items-center gap-1 text-xs text-blue-600">
-                                    <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                    </svg>
-                                    Saving...
-                                  </span>
-                                )}
-                              </span>
-                              <div className="flex items-center gap-1">
-                                {hotspot?.id && (
-                                  <>
-                                    <button
-                                      onClick={() => {
-                                        if (isEditing) {
-                                          setEditingHotspot(null);
-                                        } else {
-                                          setEditingHotspot(hotspot.id || null);
-                                          setEditingPitch((hotspot.pitch || 0).toFixed(2));
-                                          setEditingYaw((hotspot.yaw || 0).toFixed(2));
-                                        }
-                                      }}
-                                      className="text-blue-500 hover:text-blue-700 hover:bg-blue-100 cursor-pointer flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
-                                      title={isEditing ? "Close editor" : "Edit coordinates"}
-                                    >
-                                      {isEditing ? '✓' : '✏️'}
-                                    </button>
-                                    <button
-                                      onClick={() => deleteHotspot(hotspot.id ?? '')}
-                                      disabled={deletingHotspotId === hotspot.id}
-                                      className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
-                                      title="Delete hotspot"
-                                    >
-                                      {deletingHotspotId === hotspot.id ? (
-                                        <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+
+                            const isEditing = editingHotspot === hotspot.id;
+
+                            return (
+                              <div key={hotspot.id} className="p-3 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
+                                <div className="flex items-center justify-between">
+                                  <span className="truncate flex items-center gap-2">
+                                    <span className="text-lg">
+                                      {hotspot.kind === 'navigation' && '🔄'}
+                                      {hotspot.kind === 'info' && 'ℹ️'}
+                                      {hotspot.kind === 'link' && '🔗'}
+                                    </span>
+                                    <span className="font-medium">{displayLabel}</span>
+                                    {/* Save indicator */}
+                                    {hotspot.id && pendingSaves.has(hotspot.id) && (
+                                      <span className="flex items-center gap-1 text-xs text-blue-600">
+                                        <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                         </svg>
-                                      ) : (
-                                        '✕'
-                                      )}
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                            
-                            {/* Coordinate Editor */}
-                            {isEditing && (
-                              <div className="mt-3 p-3 bg-white rounded-lg border border-blue-300">
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="block text-xs font-medium text-gray-700 mb-1">Yaw (°)</label>
-                                    <input
-                                      type="number"
-                                      value={editingYaw}
-                                      onChange={(e) => {
-                                        setEditingYaw(e.target.value);
-                                        // Update hotspot immediately for real-time feedback
-                                        const yawValue = parseFloat(e.target.value);
-                                        if (!isNaN(yawValue)) {
-                                          updateHotspotCoordinates(hotspot.id!, yawValue, hotspot.pitch || 0);
-                                        }
-                                      }}
-                                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                      step="0.1"
-                                      min="-180"
-                                      max="180"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-medium text-gray-700 mb-1">Pitch (°)</label>
-                                    <input
-                                      type="number"
-                                      value={editingPitch}
-                                      onChange={(e) => {
-                                        setEditingPitch(e.target.value);
-                                        // Update hotspot immediately for real-time feedback
-                                        const pitchValue = parseFloat(e.target.value);
-                                        if (!isNaN(pitchValue)) {
-                                          updateHotspotCoordinates(hotspot.id!, hotspot.yaw || 0, pitchValue);
-                                        }
-                                      }}
-                                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                      step="0.1"
-                                      min="-90"
-                                      max="90"
-                                    />
+                                        Saving...
+                                      </span>
+                                    )}
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    {hotspot?.id && (
+                                      <>
+                                        <button
+                                          onClick={() => {
+                                            if (isEditing) {
+                                              setEditingHotspot(null);
+                                            } else {
+                                              setEditingHotspot(hotspot.id || null);
+                                              setEditingPitch((hotspot.pitch || 0).toFixed(2));
+                                              setEditingYaw((hotspot.yaw || 0).toFixed(2));
+                                            }
+                                          }}
+                                          className="text-blue-500 hover:text-blue-700 hover:bg-blue-100 cursor-pointer flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                          title={isEditing ? "Close editor" : "Edit coordinates"}
+                                        >
+                                          {isEditing ? '✓' : '✏️'}
+                                        </button>
+                                        <button
+                                          onClick={() => deleteHotspot(hotspot.id ?? '')}
+                                          disabled={deletingHotspotId === hotspot.id}
+                                          className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                          title="Delete hotspot"
+                                        >
+                                          {deletingHotspotId === hotspot.id ? (
+                                            <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                          ) : (
+                                            '✕'
+                                          )}
+                                        </button>
+                                      </>
+                                    )}
                                   </div>
                                 </div>
-                                <div className="mt-2 text-xs text-gray-500">
-                                  <div>Horizontal: -180° to 180°</div>
-                                  <div>Vertical: -90° (down) to 90° (up)</div>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    {hotspots.filter(h => h.scene_id === currentSceneId).length === 0 && (
-                      <div className="text-center py-6">
-                        <div className="text-4xl mb-2">🔥</div>
-                        <p className="text-gray-500 text-sm font-medium">No hotspots yet</p>
-                        <p className="text-gray-400 text-xs mt-1">Add navigation points to connect scenes</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
 
-              {/* Overlays List */}
-              {editPanel === 'overlays' && (
-                <div>
-                  <h4 className="text-sm font-semibold mb-2 text-gray-900">Current Overlays ({overlays.filter(o => o.scene_id === currentSceneId).length})</h4>
-                  <div className="max-h-32 overflow-y-auto space-y-1">
-                    {overlays
-                      .filter(o => o.scene_id === currentSceneId)
-                      .map(overlay => {
-                        let displayLabel: string = overlay.kind;
-                        
-                        try {
-                          const payload = JSON.parse(overlay.payload || '{}');
-                          
-                          if (payload.text) {
-                            displayLabel = payload.text.length > 20 
-                              ? `${payload.text.substring(0, 20)}...` 
-                              : payload.text;
-                          } else if (overlay.kind === 'image' && payload.imageName) {
-                            displayLabel = payload.imageName;
-                          } else if (overlay.kind === 'video' && payload.videoUrl) {
-                            displayLabel = 'Video content';
-                          } else {
-                            displayLabel = `${overlay.kind} overlay`;
-                          }
-                        } catch {
-                          displayLabel = `${overlay.kind} overlay`;
-                        }
-                        
-                        return (
-                          <div key={overlay.id} className="flex items-center justify-between p-3 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
-                            <span className="truncate flex items-center gap-2">
-                              <span className="text-lg">
-                                {overlay.kind === 'text' && '📝'}
-                                {overlay.kind === 'image' && '🖼️'}
-                                {overlay.kind === 'video' && '🎥'}
-                                {overlay.kind === 'badge' && '🏷️'}
-                                {overlay.kind === 'html' && '🌐'}
-                                {overlay.kind === 'tooltip' && '💬'}
-                              </span>
-                              <span className="font-medium">{displayLabel}</span>
-                            </span>
-                            {overlay?.id && (
-                              <button
-                                onClick={() => handleOverlayDeleted(overlay.id ?? '')}
-                                disabled={deletingOverlayId === overlay.id}
-                                className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
-                                title="Delete overlay"
-                              >
-                                {deletingOverlayId === overlay.id ? (
-                                  <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                  </svg>
-                                ) : (
-                                  '✕'
+                                {/* Coordinate Editor */}
+                                {isEditing && (
+                                  <div className="mt-3 p-3 bg-white rounded-lg border border-blue-300">
+                                    <div className="grid grid-cols-2 gap-3">
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">Yaw (°)</label>
+                                        <input
+                                          type="number"
+                                          value={editingYaw}
+                                          onChange={(e) => {
+                                            setEditingYaw(e.target.value);
+                                            // Update hotspot immediately for real-time feedback
+                                            const yawValue = parseFloat(e.target.value);
+                                            if (!isNaN(yawValue)) {
+                                              updateHotspotCoordinates(hotspot.id!, yawValue, hotspot.pitch || 0);
+                                            }
+                                          }}
+                                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                          step="0.1"
+                                          min="-180"
+                                          max="180"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-xs font-medium text-gray-700 mb-1">Pitch (°)</label>
+                                        <input
+                                          type="number"
+                                          value={editingPitch}
+                                          onChange={(e) => {
+                                            setEditingPitch(e.target.value);
+                                            // Update hotspot immediately for real-time feedback
+                                            const pitchValue = parseFloat(e.target.value);
+                                            if (!isNaN(pitchValue)) {
+                                              updateHotspotCoordinates(hotspot.id!, hotspot.yaw || 0, pitchValue);
+                                            }
+                                          }}
+                                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                          step="0.1"
+                                          min="-90"
+                                          max="90"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="mt-2 text-xs text-gray-500">
+                                      <div>Horizontal: -180° to 180°</div>
+                                      <div>Vertical: -90° (down) to 90° (up)</div>
+                                    </div>
+                                  </div>
                                 )}
-                              </button>
-                            )}
+                              </div>
+                            );
+                          })}
+                        {hotspots.filter(h => h.scene_id === currentSceneId).length === 0 && (
+                          <div className="text-center py-6">
+                            <div className="text-4xl mb-2">🔥</div>
+                            <p className="text-gray-500 text-sm font-medium">No hotspots yet</p>
+                            <p className="text-gray-400 text-xs mt-1">Add navigation points to connect scenes</p>
                           </div>
-                        );
-                      })}
-                    {overlays.filter(o => o.scene_id === currentSceneId).length === 0 && (
-                      <div className="text-center py-6">
-                        <div className="text-4xl mb-2">✨</div>
-                        <p className="text-gray-500 text-sm font-medium">No overlays yet</p>
-                        <p className="text-gray-400 text-xs mt-1">Add your first overlay to enhance this scene</p>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
+                    </div>
+                  )}
 
-      {/* Scene selector */}
-      {/* <div className="absolute top-4 right-4 z-30">
+                  {/* Overlays List */}
+                  {editPanel === 'overlays' && (
+                    <div>
+                      <h4 className="text-sm font-semibold mb-2 text-gray-900">Current Overlays ({overlays.filter(o => o.scene_id === currentSceneId).length})</h4>
+                      <div className="max-h-32 overflow-y-auto space-y-1">
+                        {overlays
+                          .filter(o => o.scene_id === currentSceneId)
+                          .map(overlay => {
+                            let displayLabel: string = overlay.kind;
+
+                            try {
+                              const payload = JSON.parse(overlay.payload || '{}');
+
+                              if (payload.text) {
+                                displayLabel = payload.text.length > 20
+                                  ? `${payload.text.substring(0, 20)}...`
+                                  : payload.text;
+                              } else if (overlay.kind === 'image' && payload.imageName) {
+                                displayLabel = payload.imageName;
+                              } else if (overlay.kind === 'video' && payload.videoUrl) {
+                                displayLabel = 'Video content';
+                              } else {
+                                displayLabel = `${overlay.kind} overlay`;
+                              }
+                            } catch {
+                              displayLabel = `${overlay.kind} overlay`;
+                            }
+
+                            return (
+                              <div key={overlay.id} className="flex items-center justify-between p-3 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
+                                <span className="truncate flex items-center gap-2">
+                                  <span className="text-lg">
+                                    {overlay.kind === 'text' && '📝'}
+                                    {overlay.kind === 'image' && '🖼️'}
+                                    {overlay.kind === 'video' && '🎥'}
+                                    {overlay.kind === 'badge' && '🏷️'}
+                                    {overlay.kind === 'html' && '🌐'}
+                                    {overlay.kind === 'tooltip' && '💬'}
+                                  </span>
+                                  <span className="font-medium">{displayLabel}</span>
+                                </span>
+                                {overlay?.id && (
+                                  <button
+                                    onClick={() => handleOverlayDeleted(overlay.id ?? '')}
+                                    disabled={deletingOverlayId === overlay.id}
+                                    className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                    title="Delete overlay"
+                                  >
+                                    {deletingOverlayId === overlay.id ? (
+                                      <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                      </svg>
+                                    ) : (
+                                      '✕'
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        {overlays.filter(o => o.scene_id === currentSceneId).length === 0 && (
+                          <div className="text-center py-6">
+                            <div className="text-4xl mb-2">✨</div>
+                            <p className="text-gray-500 text-sm font-medium">No overlays yet</p>
+                            <p className="text-gray-400 text-xs mt-1">Add your first overlay to enhance this scene</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Scene selector */}
+          {/* <div className="absolute top-4 right-4 z-30">
         <div className="bg-white rounded-lg shadow-lg p-3">
           <label className="text-xs font-medium text-gray-600 block mb-1">Current Scene</label>
           <select
@@ -1561,395 +1656,388 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         </div>
       </div> */}
 
-      {/* Top Right Controls - Only show when not in viewer fullscreen */}
-      {!isViewerFullscreen && (
-        <div className="absolute top-4 right-4 z-30 flex flex-col gap-2">
-          {/* Audio & Autoplay Controls */}
-          <div className="bg-white rounded-lg shadow-lg p-2 flex gap-2">
-            {/* Autoplay Control */}
-            <button
-              onClick={toggleAutoplay}
-              className={`p-2 rounded transition-colors flex items-center gap-1 cursor-pointer ${
-                isAutoplay 
-                  ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-              title={isAutoplay ? 'Pause Auto-rotation' : 'Start Auto-rotation'}
-            >
-              {isAutoplay ? '⏸' : '▶'}
-              <span className="text-xs hidden sm:inline">Auto</span>
-            </button>
-
-            {/* Audio Controls - Always show since we have default audio */}
-            {isClient && (
-              <>
+          {/* Top Right Controls - Only show when not in viewer fullscreen */}
+          {!isViewerFullscreen && (
+            <div className="absolute top-4 right-4 z-30 flex flex-col gap-2">
+              {/* Audio & Autoplay Controls */}
+              <div className="bg-white rounded-lg shadow-lg p-2 flex gap-2">
+                {/* Autoplay Control */}
                 <button
-                  onClick={toggleAudio}
-                  disabled={isAudioLoading}
-                  className={`p-2 rounded transition-colors flex items-center ${
-                    isAudioLoading
-                      ? 'bg-blue-100 text-blue-600 cursor-not-allowed'
-                      : isAudioPlaying 
-                      ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer' 
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
-                  }`}
-                  title={
-                    isAudioLoading 
-                      ? 'Loading audio...' 
-                      : isAudioPlaying 
-                      ? 'Pause Background Audio' 
-                      : 'Play Background Audio'
-                  }
+                  onClick={toggleAutoplay}
+                  className={`p-2 rounded transition-colors flex items-center gap-1 cursor-pointer ${isAutoplay
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  title={isAutoplay ? 'Pause Auto-rotation' : 'Start Auto-rotation'}
                 >
-                  {isAudioLoading ? '' : isAudioPlaying ? '⏸' : '🎵'}
-                  <span className="text-xs hidden sm:inline ml-1">
-                    {isAudioLoading ? 'Loading...' : 'Audio'}
-                  </span>
+                  {isAutoplay ? '⏸' : '▶'}
+                  <span className="text-xs hidden sm:inline">Auto</span>
                 </button>
-                
+
+                {/* Audio Controls - Always show since we have default audio */}
+                {isClient && (
+                  <>
+                    <button
+                      onClick={toggleAudio}
+                      disabled={isAudioLoading}
+                      className={`p-2 rounded transition-colors flex items-center ${isAudioLoading
+                        ? 'bg-blue-100 text-blue-600 cursor-not-allowed'
+                        : isAudioPlaying
+                          ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
+                        }`}
+                      title={
+                        isAudioLoading
+                          ? 'Loading audio...'
+                          : isAudioPlaying
+                            ? 'Pause Background Audio'
+                            : 'Play Background Audio'
+                      }
+                    >
+                      {isAudioLoading ? '' : isAudioPlaying ? '⏸' : '🎵'}
+                      <span className="text-xs hidden sm:inline ml-1">
+                        {isAudioLoading ? 'Loading...' : 'Audio'}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowAudioSettings(true);
+                        setNewAudioUrl(tour.background_audio_url || '');
+                      }}
+                      disabled={isAudioLoading}
+                      className={`p-2 rounded transition-colors ${isAudioLoading
+                        ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
+                        }`}
+                      title={isAudioLoading ? 'Loading audio...' : 'Audio Settings'}
+                    >
+                      ⚙️
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Fullscreen Toggle */}
+              <div className="bg-white rounded-lg shadow-lg w-fit ml-auto">
+                <button
+                  onClick={toggleViewerFullscreen}
+                  className="p-2 hover:bg-gray-100 transition-colors rounded cursor-pointer flex items-center justify-center"
+                  title="Enter fullscreen viewer"
+                >
+                  <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Audio Error Display*/}
+          {!isViewerFullscreen && isClient && audioError && (
+            <div className="absolute top-4 right-4 z-40 mt-20">
+              <div className={`text-white px-3 py-2 rounded text-xs max-w-xs ${audioError.includes('successfully') || audioError.includes('extracted') || audioError.includes('✓ Audio ready')
+                ? 'bg-green-600'
+                : audioError.includes('Extracting') || audioError.includes('Loading')
+                  ? 'bg-blue-600'
+                  : 'bg-amber-600'
+                }`}>
+                <div className="font-medium mb-1">
+                  {audioError.includes('successfully') || audioError.includes('extracted') || audioError.includes('✓ Audio ready') ? '✓ Success:' :
+                    audioError.includes('Extracting') || audioError.includes('Loading') ? '⏳ Processing:' :
+                      '⚠️ Audio Issue:'}
+                </div>
+                <div>{audioError}</div>
+                {audioError.includes('sharing') && !audioError.includes('successfully') && !audioError.includes('✓ Audio ready') && (
+                  <div className="mt-2 text-xs opacity-90">
+                    💡 Use audio.com, jumpshare.com, or direct audio URLs
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Error notification */}
+          {error && (
+            <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-40">
+              <div className="bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
+                <span>⚠️</span>
+                <span>{error}</span>
+                <button
+                  onClick={() => setError(null)}
+                  className="ml-2 text-white hover:text-gray-200"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Hotspot creation dialog */}
+          {showHotspotDialog && (
+            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
+              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+                <h3 className="text-lg font-bold mb-4 text-gray-900">Create Hotspot</h3>
+
+                {/* Hotspot Type Selector */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2 text-gray-900">
+                    Hotspot Type
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => setHotspotType('navigation')}
+                      className={`px-3 py-2 rounded border text-sm font-medium transition-colors cursor-pointer ${hotspotType === 'navigation'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                    >
+                      🔄 Navigation
+                    </button>
+                    <button
+                      onClick={() => setHotspotType('info')}
+                      className={`px-3 py-2 rounded border text-sm font-medium transition-colors cursor-pointer ${hotspotType === 'info'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                    >
+                      ℹ️ Info
+                    </button>
+                    <button
+                      onClick={() => setHotspotType('link')}
+                      className={`px-3 py-2 rounded border text-sm font-medium transition-colors cursor-pointer ${hotspotType === 'link'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                        }`}
+                    >
+                      🔗 Link
+                    </button>
+                  </div>
+                </div>
+
+                {/* Dynamic content based on type */}
+                {hotspotType === 'navigation' && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium mb-2 text-gray-900">
+                      Target Scene
+                    </label>
+                    <select
+                      value={selectedTargetScene}
+                      onChange={(e) => setSelectedTargetScene(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 cursor-pointer"
+                    >
+                      <option value="">Select a scene...</option>
+                      {scenes
+                        .filter(s => s.id !== currentSceneId)
+                        .map(scene => (
+                          <option key={scene.id} value={scene.id}>
+                            {scene.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+
+                {hotspotType === 'info' && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium mb-2 text-gray-900">
+                      Information Text
+                    </label>
+                    <textarea
+                      value={infoText}
+                      onChange={(e) => setInfoText(e.target.value)}
+                      placeholder="Enter information to display..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg h-24 resize-none text-gray-900"
+                    />
+                  </div>
+                )}
+
+                {hotspotType === 'link' && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium mb-2 text-gray-900">
+                      External URL
+                    </label>
+                    <input
+                      type="url"
+                      value={linkUrl}
+                      onChange={(e) => setLinkUrl(e.target.value)}
+                      placeholder="https://example.com"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900"
+                    />
+                  </div>
+                )}
+
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
+                  <p className="text-sm text-gray-900 font-medium">
+                    <strong>Position:</strong> Yaw {pendingHotspot?.yaw.toFixed(1)}°, Pitch {pendingHotspot?.pitch.toFixed(1)}°
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={createHotspot}
+                    disabled={
+                      isLoading ||
+                      (hotspotType === 'navigation' && !selectedTargetScene) ||
+                      (hotspotType === 'info' && !infoText.trim()) ||
+                      (hotspotType === 'link' && !linkUrl.trim())
+                    }
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    {isLoading ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Creating...
+                      </>
+                    ) : (
+                      'Create Hotspot'
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowHotspotDialog(false);
+                      setPendingHotspot(null);
+                      setSelectedTargetScene('');
+                      setHotspotType('navigation');
+                      setInfoText('');
+                      setLinkUrl('');
+                    }}
+                    disabled={isLoading}
+                    className="flex-1 px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Audio Settings Dialog */}
+          {showAudioSettings && (
+            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
+              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+                <h3 className="text-lg font-bold mb-4 text-gray-900">Audio Settings</h3>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2 text-gray-900">
+                    Background Audio URL
+                  </label>
+                  <input
+                    type="url"
+                    value={newAudioUrl}
+                    onChange={(e) => setNewAudioUrl(e.target.value)}
+                    placeholder="https://audio.com/your-audio-link or direct audio URL"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <p className="mt-2 text-xs text-gray-600">
+                    💡 Supports audio.com, jumpshare.com, or direct audio file URLs. Leave empty for default background music.
+                  </p>
+                </div>
+
+                {tour.background_audio_url && (
+                  <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
+                    <p className="text-sm text-gray-900 font-medium mb-1">Current Audio:</p>
+                    <p className="text-xs text-gray-600 break-all">{tour.background_audio_url}</p>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleAudioUpdate}
+                    disabled={isUpdatingAudio}
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    {isUpdatingAudio ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Updating...
+                      </>
+                    ) : (
+                      'Update Audio'
+                    )}
+                  </button>
+
+                  {tour.background_audio_url && (
+                    <button
+                      onClick={handleRemoveAudio}
+                      disabled={isUpdatingAudio}
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
+                      title="Remove audio and use default"
+                    >
+                      {isUpdatingAudio ? (
+                        <>
+                          <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Removing...
+                        </>
+                      ) : (
+                        'Remove'
+                      )}
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      setShowAudioSettings(false);
+                      setNewAudioUrl('');
+                      setError(null);
+                    }}
+                    disabled={isUpdatingAudio}
+                    className="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 disabled:opacity-50 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Overlay Creation Dialog */}
+          {showOverlayDialog && pendingOverlay && (
+            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
+              <div className="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto relative">
+                {/* Close Button - Top Right */}
                 <button
                   onClick={() => {
-                    setShowAudioSettings(true);
-                    setNewAudioUrl(tour.background_audio_url || '');
+                    setShowOverlayDialog(false);
+                    setPendingOverlay(null);
                   }}
-                  disabled={isAudioLoading}
-                  className={`p-2 rounded transition-colors ${
-                    isAudioLoading
-                      ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
-                  }`}
-                  title={isAudioLoading ? 'Loading audio...' : 'Audio Settings'}
+                  className="absolute top-4 right-4 z-10 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
+                  title="Close"
                 >
-                  ⚙️
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
-              </>
-            )}
-          </div>
 
-          {/* Fullscreen Toggle */}
-          <div className="bg-white rounded-lg shadow-lg w-fit ml-auto">
-            <button
-              onClick={toggleViewerFullscreen}
-              className="p-2 hover:bg-gray-100 transition-colors rounded cursor-pointer flex items-center justify-center"
-              title="Enter fullscreen viewer"
-            >
-              <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Audio Error Display*/}
-      {!isViewerFullscreen && isClient && audioError && (
-        <div className="absolute top-4 right-4 z-40 mt-20">
-          <div className={`text-white px-3 py-2 rounded text-xs max-w-xs ${
-            audioError.includes('successfully') || audioError.includes('extracted') || audioError.includes('✓ Audio ready')
-              ? 'bg-green-600' 
-              : audioError.includes('Extracting') || audioError.includes('Loading')
-              ? 'bg-blue-600'
-              : 'bg-amber-600'
-          }`}>
-            <div className="font-medium mb-1">
-              {audioError.includes('successfully') || audioError.includes('extracted') || audioError.includes('✓ Audio ready') ? '✓ Success:' :
-               audioError.includes('Extracting') || audioError.includes('Loading') ? '⏳ Processing:' :
-               '⚠️ Audio Issue:'}
-            </div>
-            <div>{audioError}</div>
-            {audioError.includes('sharing') && !audioError.includes('successfully') && !audioError.includes('✓ Audio ready') && (
-              <div className="mt-2 text-xs opacity-90">
-                💡 Use audio.com, jumpshare.com, or direct audio URLs
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Error notification */}
-      {error && (
-        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-40">
-          <div className="bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
-            <span>⚠️</span>
-            <span>{error}</span>
-            <button
-              onClick={() => setError(null)}
-              className="ml-2 text-white hover:text-gray-200"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Hotspot creation dialog */}
-      {showHotspotDialog && (
-        <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-bold mb-4 text-gray-900">Create Hotspot</h3>
-            
-            {/* Hotspot Type Selector */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2 text-gray-900">
-                Hotspot Type
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => setHotspotType('navigation')}
-                  className={`px-3 py-2 rounded border text-sm font-medium transition-colors cursor-pointer ${
-                    hotspotType === 'navigation'
-                      ? 'border-blue-500 bg-blue-50 text-blue-700'
-                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  🔄 Navigation
-                </button>
-                <button
-                  onClick={() => setHotspotType('info')}
-                  className={`px-3 py-2 rounded border text-sm font-medium transition-colors cursor-pointer ${
-                    hotspotType === 'info'
-                      ? 'border-blue-500 bg-blue-50 text-blue-700'
-                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  ℹ️ Info
-                </button>
-                <button
-                  onClick={() => setHotspotType('link')}
-                  className={`px-3 py-2 rounded border text-sm font-medium transition-colors cursor-pointer ${
-                    hotspotType === 'link'
-                      ? 'border-blue-500 bg-blue-50 text-blue-700'
-                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  🔗 Link
-                </button>
+                {/* Modal Content */}
+                <div className="p-6">
+                  <OverlayEditor
+                    sceneId={currentSceneId}
+                    tourId={tour.id}
+                    overlays={overlays.filter(o => o.scene_id === currentSceneId)}
+                    pendingPosition={pendingOverlay}
+                    onOverlayAdded={(overlay) => {
+                      handleOverlayAdded(overlay);
+                      setShowOverlayDialog(false);
+                      setPendingOverlay(null);
+                    }}
+                    onOverlayDeleted={handleOverlayDeleted}
+                    onOverlayUpdated={handleOverlayUpdated}
+                    deletingOverlayId={deletingOverlayId}
+                  />
+                </div>
               </div>
             </div>
-
-            {/* Dynamic content based on type */}
-            {hotspotType === 'navigation' && (
-              <div className="mb-4">
-                <label className="block text-sm font-medium mb-2 text-gray-900">
-                  Target Scene
-                </label>
-                <select
-                  value={selectedTargetScene}
-                  onChange={(e) => setSelectedTargetScene(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 cursor-pointer"
-                >
-                  <option value="">Select a scene...</option>
-                  {scenes
-                    .filter(s => s.id !== currentSceneId)
-                    .map(scene => (
-                      <option key={scene.id} value={scene.id}>
-                        {scene.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            )}
-
-            {hotspotType === 'info' && (
-              <div className="mb-4">
-                <label className="block text-sm font-medium mb-2 text-gray-900">
-                  Information Text
-                </label>
-                <textarea
-                  value={infoText}
-                  onChange={(e) => setInfoText(e.target.value)}
-                  placeholder="Enter information to display..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg h-24 resize-none text-gray-900"
-                />
-              </div>
-            )}
-
-            {hotspotType === 'link' && (
-              <div className="mb-4">
-                <label className="block text-sm font-medium mb-2 text-gray-900">
-                  External URL
-                </label>
-                <input
-                  type="url"
-                  value={linkUrl}
-                  onChange={(e) => setLinkUrl(e.target.value)}
-                  placeholder="https://example.com"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900"
-                />
-              </div>
-            )}
-
-            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
-              <p className="text-sm text-gray-900 font-medium">
-                <strong>Position:</strong> Yaw {pendingHotspot?.yaw.toFixed(1)}°, Pitch {pendingHotspot?.pitch.toFixed(1)}°
-              </p>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={createHotspot}
-                disabled={
-                  isLoading ||
-                  (hotspotType === 'navigation' && !selectedTargetScene) ||
-                  (hotspotType === 'info' && !infoText.trim()) ||
-                  (hotspotType === 'link' && !linkUrl.trim())
-                }
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
-              >
-                {isLoading ? (
-                  <>
-                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Creating...
-                  </>
-                ) : (
-                  'Create Hotspot'
-                )}
-              </button>
-              <button
-                onClick={() => {
-                  setShowHotspotDialog(false);
-                  setPendingHotspot(null);
-                  setSelectedTargetScene('');
-                  setHotspotType('navigation');
-                  setInfoText('');
-                  setLinkUrl('');
-                }}
-                disabled={isLoading}
-                className="flex-1 px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Audio Settings Dialog */}
-      {showAudioSettings && (
-        <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-bold mb-4 text-gray-900">Audio Settings</h3>
-            
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2 text-gray-900">
-                Background Audio URL
-              </label>
-              <input
-                type="url"
-                value={newAudioUrl}
-                onChange={(e) => setNewAudioUrl(e.target.value)}
-                placeholder="https://audio.com/your-audio-link or direct audio URL"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <p className="mt-2 text-xs text-gray-600">
-                💡 Supports audio.com, jumpshare.com, or direct audio file URLs. Leave empty for default background music.
-              </p>
-            </div>
-
-            {tour.background_audio_url && (
-              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
-                <p className="text-sm text-gray-900 font-medium mb-1">Current Audio:</p>
-                <p className="text-xs text-gray-600 break-all">{tour.background_audio_url}</p>
-              </div>
-            )}
-
-            <div className="flex gap-2">
-              <button
-                onClick={handleAudioUpdate}
-                disabled={isUpdatingAudio}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
-              >
-                {isUpdatingAudio ? (
-                  <>
-                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Updating...
-                  </>
-                ) : (
-                  'Update Audio'
-                )}
-              </button>
-              
-              {tour.background_audio_url && (
-                <button
-                  onClick={handleRemoveAudio}
-                  disabled={isUpdatingAudio}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
-                  title="Remove audio and use default"
-                >
-                  {isUpdatingAudio ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Removing...
-                    </>
-                  ) : (
-                    'Remove'
-                  )}
-                </button>
-              )}
-              
-              <button
-                onClick={() => {
-                  setShowAudioSettings(false);
-                  setNewAudioUrl('');
-                  setError(null);
-                }}
-                disabled={isUpdatingAudio}
-                className="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 disabled:opacity-50 cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Overlay Creation Dialog */}
-      {showOverlayDialog && pendingOverlay && (
-        <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
-          <div className="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto relative">
-            {/* Close Button - Top Right */}
-            <button
-              onClick={() => {
-                setShowOverlayDialog(false);
-                setPendingOverlay(null);
-              }}
-              className="absolute top-4 right-4 z-10 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
-              title="Close"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-            
-            {/* Modal Content */}
-            <div className="p-6">
-              <OverlayEditor
-                sceneId={currentSceneId}
-                tourId={tour.id}
-                overlays={overlays.filter(o => o.scene_id === currentSceneId)}
-                pendingPosition={pendingOverlay}
-                onOverlayAdded={(overlay) => {
-                  handleOverlayAdded(overlay);
-                  setShowOverlayDialog(false);
-                  setPendingOverlay(null);
-                }}
-                onOverlayDeleted={handleOverlayDeleted}
-                onOverlayUpdated={handleOverlayUpdated}
-                deletingOverlayId={deletingOverlayId}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+          )}
         </>
       )}
 

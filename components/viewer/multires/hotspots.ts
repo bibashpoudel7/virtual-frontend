@@ -194,7 +194,7 @@ export function createHotspotSprite(hotspot: Hotspot, scenes?: any[]): THREE.Gro
     depthTest: true,
   });
   const iconSprite = new THREE.Sprite(iconMaterial);
-  iconSprite.scale.setScalar(26);
+  iconSprite.scale.setScalar(100);
   iconSprite.renderOrder = 1000;
   iconSprite.frustumCulled = false;
   group.add(iconSprite);
@@ -210,8 +210,8 @@ export function createHotspotSprite(hotspot: Hotspot, scenes?: any[]): THREE.Gro
     depthTest: true,
   });
   const textSprite = new THREE.Sprite(textMaterial);
-  textSprite.scale.set(textTexture.image.width * 0.3, textTexture.image.height * 0.3, 1);
-  textSprite.position.set(0, -20, 0); // Position below the icon
+  textSprite.scale.set(textTexture.image.width * 0.6, textTexture.image.height * 0.6, 1);
+  textSprite.position.set(0, -50, 0); // Position below the icon
   textSprite.renderOrder = 999;
   textSprite.frustumCulled = false;
   group.add(textSprite);

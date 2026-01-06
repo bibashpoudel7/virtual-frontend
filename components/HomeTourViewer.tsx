@@ -152,14 +152,14 @@ const ProgressBar = React.memo(({
   isAutoplay, 
   isTransitioning, 
   onSceneChange,
-  isOverlayModalOpen = false // New prop
+  isOverlayModalOpen = false
 }: {
   scenes: Scene[];
   currentSceneIndex: number;
   isAutoplay: boolean;
   isTransitioning: boolean;
   onSceneChange: (index: number) => void;
-  isOverlayModalOpen?: boolean; // New prop
+  isOverlayModalOpen?: boolean;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number | undefined>(undefined);
@@ -170,9 +170,27 @@ const ProgressBar = React.memo(({
   // Direct DOM manipulation for smooth progress without React re-renders
   useEffect(() => {
     // Reset progress when scene changes
-    if (lastSceneIndexRef.current !== currentSceneIndex) {
+    if (lastSceneIndexRef.current !== currentSceneIndex) {      
+      // Set previous scene to 100% if it exists
+      if (progressBarRef.current && lastSceneIndexRef.current >= 0) {
+        const prevProgressBar = progressBarRef.current.querySelector(`[data-scene-index="${lastSceneIndexRef.current}"] .progress-fill`) as HTMLElement;
+        if (prevProgressBar) {
+          prevProgressBar.style.width = '100%';
+          console.log('Set previous scene', lastSceneIndexRef.current, 'to 100%');
+        }
+      }
+      // Reset current scene progress
       pausedProgressRef.current = 0;
       lastSceneIndexRef.current = currentSceneIndex;
+      
+      // Reset current scene progress bar to 0%
+      if (progressBarRef.current) {
+        const currentProgressBar = progressBarRef.current.querySelector(`[data-scene-index="${currentSceneIndex}"] .progress-fill`) as HTMLElement;
+        if (currentProgressBar) {
+          currentProgressBar.style.width = '0%';
+          console.log('Reset current scene', currentSceneIndex, 'to 0%');
+        }
+      }
     }
 
     if (isTransitioning || scenes.length <= 1) {
@@ -197,12 +215,14 @@ const ProgressBar = React.memo(({
         if (currentProgressBar) {
           currentProgressBar.style.width = `${progress * 100}%`;
         }
-        
+
         if (progress < 1 && isAutoplay && !isOverlayModalOpen) {
           animationRef.current = requestAnimationFrame(updateProgress);
+        } else if (progress >= 1) {
+          console.log('Progress bar completed for scene:', currentSceneIndex);
         }
       };
-      
+
       animationRef.current = requestAnimationFrame(updateProgress);
     } else {
       // When paused, keep the current progress visible
@@ -336,14 +356,17 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const [allOverlays, setAllOverlays] = useState<Overlay[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [showControls, setShowControls] = useState(true);
+  const [showControls, setShowControls] = useState(false);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const [isOverlayModalOpen, setIsOverlayModalOpen] = useState(false);
+  const [showPauseOverlay, setShowPauseOverlay] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const autoplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch tours on component mount
   useEffect(() => {
@@ -422,16 +445,11 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     fetchTours();
   }, []);
 
-  // Removed duplicate autoplay logic - AutoplayController handles scene transitions
-
   const handleSceneChange = useCallback((index: number, immediate: boolean = false) => {
     if (index === currentSceneIndex) return;
     
     // Skip transition check for immediate changes
-    if (!immediate && isTransitioning) return;
-    
-    console.log('Scene change requested:', { from: currentSceneIndex, to: index, immediate });
-    
+    if (!immediate && isTransitioning) return;    
     if (immediate) {
       // Immediate scene change for navigation - no delay
       setCurrentSceneIndex(index);
@@ -439,18 +457,49 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     } else {
       // Normal transition with fade effect
       setIsTransitioning(true);
-      
-      // Faster transition - immediate scene change with quick overlay
-      setTimeout(() => {
-        setCurrentSceneIndex(index);
-      }, 100);
-      
-      // Reset transition state after animation completes
+      setCurrentSceneIndex(index);
+
+      // Reset transition state after a short delay
       setTimeout(() => {
         setIsTransitioning(false);
-      }, 600);
+      }, 300);
     }
   }, [currentSceneIndex, isTransitioning]);
+
+  // Built-in autoplay mechanism (works independently of AutoplayController)
+  useEffect(() => {
+    if (!isAutoplay || isTransitioning || scenes.length <= 1 || isOverlayModalOpen) {
+      if (autoplayTimeoutRef.current) {
+        clearTimeout(autoplayTimeoutRef.current);
+        autoplayTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    // Clear any existing timeout
+    if (autoplayTimeoutRef.current) {
+      clearTimeout(autoplayTimeoutRef.current);
+    }
+
+    // Use 12 seconds to match the progress bar duration
+    const autoplayInterval = 12000; // Fixed 12 seconds to match progress bar
+    
+    console.log('Setting up autoplay timeout for scene:', currentSceneIndex, 'duration:', autoplayInterval);
+    
+    autoplayTimeoutRef.current = setTimeout(() => {
+      const nextIndex = (currentSceneIndex + 1) % scenes.length;
+      console.log('Autoplay: Moving to scene', nextIndex, 'from', currentSceneIndex, 'after', autoplayInterval, 'ms');
+      handleSceneChange(nextIndex);
+    }, autoplayInterval);
+
+    // Cleanup function
+    return () => {
+      if (autoplayTimeoutRef.current) {
+        clearTimeout(autoplayTimeoutRef.current);
+        autoplayTimeoutRef.current = null;
+      }
+    };
+  }, [isAutoplay, currentSceneIndex, scenes.length, isTransitioning, isOverlayModalOpen, handleSceneChange]);
 
   const handlePrevScene = useCallback(() => {
     if (isTransitioning) return;
@@ -464,9 +513,19 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     handleSceneChange(newIndex);
   }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange]);
 
+  const triggerPauseAnimation = useCallback(() => {
+    if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
+    setShowPauseOverlay(true);
+    pauseTimeoutRef.current = setTimeout(() => setShowPauseOverlay(false), 500);
+  }, []);
+
   const toggleAutoplay = useCallback(() => {
-    setIsAutoplay(!isAutoplay);
-  }, [isAutoplay]);
+    const nextState = !isAutoplay;
+    if (!nextState) {
+      triggerPauseAnimation();
+    }
+    setIsAutoplay(nextState);
+  }, [isAutoplay, triggerPauseAnimation]);
 
   const handleViewerSceneChange = useCallback((sceneId: string) => {
     const sceneIndex = scenes.findIndex(s => s.id === sceneId);
@@ -492,15 +551,10 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         }
       }
       
-      console.log('Navigation to scene:', targetSceneId);
-      
       if (targetSceneId) {
         const targetSceneIndex = scenes.findIndex(scene => scene.id === targetSceneId);
-        console.log('Target scene index:', targetSceneIndex, 'from scenes:', scenes.map(s => s.id));
-        
+
         if (targetSceneIndex !== -1) {
-          // Skip transition for navigation-triggered scene changes
-          // since we already did the animation in CubeMapViewer
           handleSceneChange(targetSceneIndex, true);
         } else {
           console.error('Target scene not found:', targetSceneId);
@@ -698,19 +752,21 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     }
 
     if (currentTour?.background_audio_url && currentTour.background_audio_url.trim() !== '') {
-      // Check if it's a sharing service URL that needs extraction
-      const isFileSharing = (currentTour.background_audio_url.includes('jumpshare.com') && currentTour.background_audio_url.includes('/share/')) || 
-                           (currentTour.background_audio_url.includes('audio.com') && currentTour.background_audio_url.includes('/audio/')) || 
-                           (currentTour.background_audio_url.includes('soundcloud.com') && currentTour.background_audio_url.includes('/tracks/')) ||
-                           (currentTour.background_audio_url.includes('dropbox.com') && currentTour.background_audio_url.includes('/s/')) ||
-                           (currentTour.background_audio_url.includes('drive.google.com') && currentTour.background_audio_url.includes('/file/d/'));
+      const audioUrl = currentTour.background_audio_url;
       
+      // Check if it's a sharing service URL that needs extraction
+      const isFileSharing = (audioUrl.includes('jumpshare.com') && audioUrl.includes('/share/')) ||
+        (audioUrl.includes('audio.com') && audioUrl.includes('/audio/')) ||
+        (audioUrl.includes('soundcloud.com') && audioUrl.includes('/tracks/')) ||
+        (audioUrl.includes('dropbox.com') && audioUrl.includes('/s/')) ||
+        (audioUrl.includes('drive.google.com') && audioUrl.includes('/file/d/'));
+
       if (isFileSharing) {
         // Extract audio URL for sharing services
-        extractTourAudio(currentTour.background_audio_url);
+        extractTourAudio(audioUrl);
       } else {
         // Direct audio URL
-        loadTourAudio(currentTour.background_audio_url);
+        loadTourAudio(audioUrl);
       }
     } else {
       // No tour-specific audio, load default audio
@@ -917,40 +973,52 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     >
       {/* Tour Viewer */}
       <div className={`${isFullscreen ? 'h-screen' : 'aspect-video'} relative`}>
-        <CubeMapViewer
-          tour={currentTour}
-          currentScene={currentScene}
-          scenes={scenes}
-          isAutoplay={isAutoplay}
-          onSceneChange={handleViewerSceneChange}
-          onHotspotClick={handleHotspotClick}
-          hotspots={currentSceneHotspots}
-          overlays={currentSceneOverlays}
-          onOverlayModalStateChange={setIsOverlayModalOpen}
-          isOverlayModalOpen={isOverlayModalOpen}
-          isFullscreen={isFullscreen}
-          onAutoplayPause={() => setIsAutoplay(false)}
-          autoRotate={isAutoplay}
-        />
-        
-        {/* Autoplay Controller */}
-        {showControls && currentTour?.autoplay_enabled && (
-          <AutoplayController
+        {currentTour && currentScene && (
+          <CubeMapViewer
             tour={currentTour}
+            currentScene={currentScene}
             scenes={scenes}
-            currentSceneIndex={currentSceneIndex}
-            onSceneChange={handleSceneChange}
-            isAutoplayEnabled={isAutoplay}
-            onAutoplayToggle={setIsAutoplay}
-            isPaused={isOverlayModalOpen}
+            onSceneChange={handleViewerSceneChange}
+            onHotspotClick={handleHotspotClick}
+            hotspots={currentSceneHotspots}
+            overlays={currentSceneOverlays}
+            autoRotate={isAutoplay}
+            onOverlayPause={() => {
+              setIsAutoplay(false);
+              triggerPauseAnimation();
+            }}
           />
         )}
-        
+
+        {/* Transient Pause Icon Overlay */}
+        <div
+          className={`absolute inset-0 flex items-center justify-center pointer-events-none z-40 transition-opacity duration-300 ${showPauseOverlay ? 'opacity-100' : 'opacity-0'}`}
+        >
+          <div className="bg-black/30 backdrop-blur-sm rounded-full p-8 flex items-center justify-center border border-white/20">
+            <div className="flex gap-2">
+              <div className="w-4 h-12 bg-white rounded-sm shadow-xl"></div>
+              <div className="w-4 h-12 bg-white rounded-sm shadow-xl"></div>
+            </div>
+          </div>
+        </div>
+
+        {/* Autoplay Controller - Disabled for now - using built-in autoplay instead */}
+
         {!showControls && (
           <div className="absolute top-4 left-4 z-30">
             <h3 className="text-white text-2xl font-bold mb-2 drop-shadow-lg">
-              {currentTour.name || 'Virtual Tour'}
+              {currentTour?.name || 'Virtual Tour'}
             </h3>
+            <p className="text-white/90 text-sm drop-shadow-lg">
+              {scenes.length} scene{scenes.length !== 1 ? 's' : ''} • Public Tour
+            </p>
+          </div>
+        )}
+
+        {/* 360° Experience Badge - Show when controls are not active */}
+        {!showControls && (
+          <div className="absolute bottom-4 right-4 bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg font-bold shadow-lg z-20">
+            <span className="text-xl">360°</span> Experience
           </div>
         )}
 

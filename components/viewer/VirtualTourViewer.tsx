@@ -576,12 +576,12 @@ export default function VirtualTourViewer({
           >
             <div className="relative group">
               <div className={`
-                w-12 h-12 rounded-full flex items-center justify-center
+                w-16 h-16 rounded-full flex items-center justify-center
                 transition-all duration-200 group-hover:scale-110
                 ${hotspot.kind === 'navigation' ? 'bg-blue-500' : 'bg-green-500'}
                 bg-opacity-80 group-hover:bg-opacity-100
               `}>
-                <span className="text-white text-xl">
+                <span className="text-white text-3xl">
                   {hotspot.kind === 'navigation' && '➤'}
                   {hotspot.kind === 'info' && 'ℹ'}
                   {hotspot.kind === 'image' && '🖼'}
@@ -590,11 +590,52 @@ export default function VirtualTourViewer({
                   {hotspot.kind === 'text' && '📝'}
                 </span>
               </div>
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 
+              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-3 
                               opacity-0 group-hover:opacity-100 transition-opacity
-                              bg-black bg-opacity-75 text-white px-2 py-1 rounded text-sm
-                              whitespace-nowrap pointer-events-none">
-                {hotspot.kind}
+                              bg-black bg-opacity-[0.98] text-white rounded-lg shadow-2xl border border-white/10
+                              pointer-events-none min-w-[200px] overflow-hidden z-30">
+                {/* Tooltip Header */}
+                <div className="flex items-center gap-2.5 px-4 py-2.5">
+                  <div className={`w-6 h-6 rounded flex items-center justify-center shadow-sm ${hotspot.kind === 'navigation' ? 'bg-blue-500' :
+                      hotspot.kind === 'info' ? 'bg-green-500' :
+                        hotspot.kind === 'text' ? 'bg-blue-600' :
+                          hotspot.kind === 'image' ? 'bg-emerald-500' :
+                            hotspot.kind === 'video' ? 'bg-red-500' :
+                              'bg-gray-500'
+                    }`}>
+                    <span className="text-white text-xs">
+                      {hotspot.kind === 'navigation' && '➤'}
+                      {hotspot.kind === 'info' && 'ℹ'}
+                      {hotspot.kind === 'image' && '🖼'}
+                      {hotspot.kind === 'video' && '▶'}
+                      {hotspot.kind === 'link' && '🔗'}
+                      {hotspot.kind === 'text' && '📝'}
+                    </span>
+                  </div>
+                  <span className="font-semibold text-white text-sm">
+                    {hotspot.kind === 'text' ? 'Text' :
+                      hotspot.kind === 'image' ? 'Image' :
+                        hotspot.kind === 'video' ? 'Video' :
+                          hotspot.kind === 'navigation' ? 'Navigation' :
+                            hotspot.kind === 'info' ? 'Information' :
+                              hotspot.kind.charAt(0).toUpperCase() + hotspot.kind.slice(1)}
+                  </span>
+                </div>
+
+                {/* Underline Separator */}
+                <div className="mx-4 border-t border-white/10"></div>
+
+                {/* Tooltip Content */}
+                <div className="px-4 py-3 text-white/90 text-sm leading-relaxed max-w-[250px]">
+                  {(() => {
+                    try {
+                      const payload = JSON.parse(hotspot.payload || '{}');
+                      return payload.label || payload.content || payload.text || hotspot.kind.charAt(0).toUpperCase() + hotspot.kind.slice(1);
+                    } catch (e) {
+                      return hotspot.kind.charAt(0).toUpperCase() + hotspot.kind.slice(1);
+                    }
+                  })()}
+                </div>
               </div>
             </div>
           </div>
@@ -605,23 +646,23 @@ export default function VirtualTourViewer({
       <div className="absolute top-4 left-4 bg-black bg-opacity-50 text-white p-3 rounded pointer-events-none z-10">
         <h3 className="text-lg font-semibold">{currentScene.name}</h3>
         <p className="text-sm opacity-75">{tour.name}</p>
-        
+
         {/* Status Indicators */}
         {isClient && (
-        <div className="flex gap-2 mt-2">
-          {isAutoplay && (
-            <span className="text-xs bg-blue-600 px-2 py-1 rounded flex items-center gap-1">
-              <span className="animate-pulse">●</span>
-              Auto-rotating
-            </span>
-          )}
-          {isAudioPlaying && (
-            <span className="text-xs bg-green-600 px-2 py-1 rounded flex items-center gap-1">
-              <span className="animate-pulse">♪</span>
-              Audio playing
-            </span>
-          )}
-        </div>
+          <div className="flex gap-2 mt-2">
+            {isAutoplay && (
+              <span className="text-xs bg-blue-600 px-2 py-1 rounded flex items-center gap-1">
+                <span className="animate-pulse">●</span>
+                Auto-rotating
+              </span>
+            )}
+            {isAudioPlaying && (
+              <span className="text-xs bg-green-600 px-2 py-1 rounded flex items-center gap-1">
+                <span className="animate-pulse">♪</span>
+                Audio playing
+              </span>
+            )}
+          </div>
         )}
       </div>
 
@@ -632,11 +673,10 @@ export default function VirtualTourViewer({
           {/* Autoplay Control */}
           <button
             onClick={() => setIsAutoplay(!isAutoplay)}
-            className={`px-4 py-2 rounded transition-colors flex items-center gap-2 ${
-              isAutoplay 
-                ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                : 'bg-black bg-opacity-50 text-white hover:bg-opacity-70'
-            }`}
+            className={`px-4 py-2 rounded transition-colors flex items-center gap-2 ${isAutoplay
+              ? 'bg-blue-600 text-white hover:bg-blue-700'
+              : 'bg-black bg-opacity-50 text-white hover:bg-opacity-70'
+              }`}
             title={isAutoplay ? 'Pause Auto-rotation' : 'Start Auto-rotation'}
           >
             {isAutoplay ? (
@@ -684,11 +724,10 @@ export default function VirtualTourViewer({
           <div className="flex gap-2">
             <button
               onClick={toggleAudio}
-              className={`px-4 py-2 rounded transition-colors flex items-center gap-2 ${
-                isAudioPlaying 
-                  ? 'bg-green-600 text-white hover:bg-green-700' 
-                  : 'bg-black bg-opacity-50 text-white hover:bg-opacity-70'
-              }`}
+              className={`px-4 py-2 rounded transition-colors flex items-center gap-2 ${isAudioPlaying
+                ? 'bg-green-600 text-white hover:bg-green-700'
+                : 'bg-black bg-opacity-50 text-white hover:bg-opacity-70'
+                }`}
               title={isAudioPlaying ? 'Pause Background Audio' : 'Play Background Audio'}
             >
               {isAudioPlaying ? (
@@ -703,14 +742,13 @@ export default function VirtualTourViewer({
                 </>
               )}
             </button>
-            
+
             <button
               onClick={toggleAudioMute}
-              className={`px-3 py-2 rounded transition-colors ${
-                isAudioMuted 
-                  ? 'bg-red-600 text-white hover:bg-red-700' 
-                  : 'bg-black bg-opacity-50 text-white hover:bg-opacity-70'
-              }`}
+              className={`px-3 py-2 rounded transition-colors ${isAudioMuted
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'bg-black bg-opacity-50 text-white hover:bg-opacity-70'
+                }`}
               title={isAudioMuted ? 'Unmute Audio' : 'Mute Audio'}
             >
               {isAudioMuted ? '🔇' : '🔊'}
@@ -733,11 +771,10 @@ export default function VirtualTourViewer({
             <button
               key={scene.id}
               onClick={() => onSceneChange?.(scene.id)}
-              className={`px-3 py-2 rounded transition-colors text-sm ${
-                scene.id === currentScene.id
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-black bg-opacity-50 text-white hover:bg-opacity-70'
-              }`}
+              className={`px-3 py-2 rounded transition-colors text-sm ${scene.id === currentScene.id
+                ? 'bg-blue-600 text-white'
+                : 'bg-black bg-opacity-50 text-white hover:bg-opacity-70'
+                }`}
             >
               {scene.name}
             </button>

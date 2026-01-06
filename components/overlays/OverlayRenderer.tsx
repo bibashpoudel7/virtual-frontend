@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { Overlay } from '@/types/tour';
-import { yawPitchToVector } from '../viewer/multires/geometry';
 import { SPHERE_RADIUS } from '../viewer/multires/constants';
 import { useUrlParams } from '@/hooks/useUrlParams';
 
@@ -23,63 +22,88 @@ interface OverlayRendererProps {
   overlayGroup?: THREE.Group | null;
   isFullscreen?: boolean;
   isAutoplay?: boolean;
+  onPause?: () => void;
 }
 
 // Helper function to format URLs
 const formatUrl = (url: string): string => {
   if (!url) return url;
-  
+
   // If URL already has protocol, return as is
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return url;
   }
-  
+
   if (url.startsWith('www.') || url.includes('.')) {
     return `https://${url}`;
-  }    
+  }
   return `https://${url}`;
 };
 
 // Create 3D overlay sprite
 function createOverlaySprite(overlay: Overlay): THREE.Group {
   const group = new THREE.Group();
-  
+
   // Check for invalid coordinates
   if (isNaN(overlay.yaw) || isNaN(overlay.pitch)) {
     overlay.yaw = 0;
     overlay.pitch = 0;
   }
-  
-  // Constrain overlay coordinates
-  const constrainedYaw = THREE.MathUtils.clamp(overlay.yaw, -180, 180);
-  const constrainedPitch = THREE.MathUtils.clamp(overlay.pitch, -80, 80);
-  
-  const position = yawPitchToVector(constrainedYaw, constrainedPitch, SPHERE_RADIUS);
+
+  // Use raw values to match CubeMapViewer hotspot logic
+  // pitch/yaw are in degrees
+  const yawRad = THREE.MathUtils.degToRad(overlay.yaw || 0);
+  const pitchRad = THREE.MathUtils.degToRad(overlay.pitch || 0);
+
+  // Use slightly smaller radius than SPHERE_RADIUS (500) to avoid Z-fighting 
+  // and ensure overlays are visible in front of the sphere texture
+  const renderRadius = 450;
+  const x = renderRadius * Math.cos(pitchRad) * Math.sin(yawRad);
+  const y = renderRadius * Math.sin(pitchRad);
+  const z = renderRadius * Math.cos(pitchRad) * Math.cos(yawRad);
+
+  const position = new THREE.Vector3(x, y, z);
   group.position.copy(position);
   group.userData.overlay = overlay;
   group.visible = true;
   group.frustumCulled = false;
-  
+
   // Create overlay icon based on type
   const iconTexture = createOverlayIconTexture(overlay.kind);
   const iconMaterial = new THREE.SpriteMaterial({
     map: iconTexture,
     transparent: true,
-    depthWrite: false,
-    depthTest: true,
+    depthWrite: false,  // Don't write to depth buffer
+    depthTest: false,   // Don't check depth buffer - ALWAYS render on top
+    alphaTest: 0.05,    // Lower alpha threshold to ensure softer edges show
   });
   const iconSprite = new THREE.Sprite(iconMaterial);
-  iconSprite.scale.setScalar(32);
-  iconSprite.renderOrder = 1001;
+  iconSprite.scale.setScalar(50); // Slightly larger for better visibility
+  iconSprite.renderOrder = 9999; // Very high render order to ensure it's drawn last (on top)
   iconSprite.frustumCulled = false;
   group.add(iconSprite);
-  
+
   return group;
 }
 
-// Create overlay icon texture
+// Helper to draw rounded rect for compatibility
+function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+// Create overlay icon texture with enhanced quality
 function createOverlayIconTexture(kind: string): THREE.Texture {
-  const size = 128;
+  const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -89,8 +113,12 @@ function createOverlayIconTexture(kind: string): THREE.Texture {
     return new THREE.Texture();
   }
 
+  // Enable high-quality rendering
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+
   context.clearRect(0, 0, size, size);
-  
+
   // Get color based on overlay type
   const colors = {
     text: '#3B82F6',
@@ -100,47 +128,63 @@ function createOverlayIconTexture(kind: string): THREE.Texture {
     tooltip: '#8B5CF6',
     html: '#6366F1'
   };
-  
+
   const color = colors[kind as keyof typeof colors] || '#6B7280';
-  
+
   // Draw main circle
   context.beginPath();
-  context.arc(size / 2, size / 2, size * 0.45, 0, 2 * Math.PI);
+  context.arc(size / 2, size / 2, size * 0.42, 0, 2 * Math.PI);
   context.fillStyle = color;
   context.fill();
-  
+
   // Draw white border
   context.beginPath();
-  context.arc(size / 2, size / 2, size * 0.45, 0, 2 * Math.PI);
+  context.arc(size / 2, size / 2, size * 0.42, 0, 2 * Math.PI);
   context.strokeStyle = '#ffffff';
-  context.lineWidth = 6;
+  context.lineWidth = 8;
   context.stroke();
 
   // Draw white icon in center
   context.fillStyle = '#ffffff';
   context.strokeStyle = '#ffffff';
-  context.lineWidth = 3;
-  
+  context.lineWidth = 4;
+
   const centerX = size / 2;
   const centerY = size / 2;
-  const iconSize = size * 0.18;
-  
+  const iconSize = size * 0.16;
+
   if (kind === 'text') {
-    // Chat bubble icon
-    context.beginPath();
-    context.roundRect(centerX - iconSize * 1.2, centerY - iconSize * 0.8, iconSize * 2.4, iconSize * 1.4, 4);
+    // Enhanced chat/message icon with better clarity
+    context.fillStyle = '#ffffff';
+
+    // Draw main chat bubble with rounded corners
+    const bubbleWidth = iconSize * 2.4;
+    const bubbleHeight = iconSize * 1.8;
+    const bubbleX = centerX - bubbleWidth / 2;
+    const bubbleY = centerY - bubbleHeight / 2;
+    const cornerRadius = 6;
+
+    roundedRect(context, bubbleX, bubbleY, bubbleWidth, bubbleHeight, cornerRadius);
     context.fill();
+
     context.beginPath();
-    context.moveTo(centerX - iconSize * 0.6, centerY + iconSize * 0.6);
-    context.lineTo(centerX - iconSize * 0.2, centerY + iconSize * 0.6);
-    context.lineTo(centerX - iconSize * 0.6, centerY + iconSize * 1.0);
+    context.moveTo(bubbleX + bubbleWidth * 0.15, bubbleY + bubbleHeight);
+    context.lineTo(bubbleX + bubbleWidth * 0.35, bubbleY + bubbleHeight);
+    context.lineTo(bubbleX + bubbleWidth * 0.2, bubbleY + bubbleHeight + iconSize * 0.5);
     context.closePath();
     context.fill();
-    
+
+    // Draw enhanced text lines inside bubble with better spacing
     context.fillStyle = color;
-    context.fillRect(centerX - iconSize * 0.8, centerY - iconSize * 0.4, iconSize * 1.6, 2);
-    context.fillRect(centerX - iconSize * 0.8, centerY - iconSize * 0.1, iconSize * 1.2, 2);
-    
+    const lineWidth = bubbleWidth * 0.65;
+    const lineHeight = 3;
+    const startX = centerX - lineWidth / 2;
+    const lineSpacing = iconSize * 0.35;
+
+    context.fillRect(startX, centerY - lineSpacing, lineWidth, lineHeight);
+    context.fillRect(startX, centerY, lineWidth * 0.85, lineHeight);
+    context.fillRect(startX, centerY + lineSpacing, lineWidth * 0.75, lineHeight);
+
   } else if (kind === 'video') {
     // Play button icon
     context.beginPath();
@@ -149,28 +193,28 @@ function createOverlayIconTexture(kind: string): THREE.Texture {
     context.lineTo(centerX + iconSize * 0.8, centerY);
     context.closePath();
     context.fill();
-    
+
   } else if (kind === 'image') {
     // Image icon
     context.strokeStyle = '#ffffff';
     context.lineWidth = 3;
     context.fillStyle = '#ffffff';
-    
-    context.beginPath();
-    context.roundRect(centerX - iconSize * 1.0, centerY - iconSize * 0.8, iconSize * 2.0, iconSize * 1.6, 3);
+
+    // Image container
+    roundedRect(context, centerX - iconSize * 1.0, centerY - iconSize * 0.8, iconSize * 2.0, iconSize * 1.6, 3);
     context.stroke();
-    
+
     context.beginPath();
     context.arc(centerX + iconSize * 0.4, centerY - iconSize * 0.4, iconSize * 0.25, 0, 2 * Math.PI);
     context.fill();
-    
+
     context.beginPath();
     context.moveTo(centerX - iconSize * 0.6, centerY + iconSize * 0.6);
     context.lineTo(centerX - iconSize * 0.2, centerY - iconSize * 0.1);
     context.lineTo(centerX + iconSize * 0.2, centerY + iconSize * 0.6);
     context.closePath();
     context.fill();
-    
+
   } else {
     // Default icon
     context.font = `bold ${iconSize * 2}px Arial`;
@@ -200,7 +244,8 @@ export default function OverlayRenderer({
   scene = null,
   overlayGroup = null,
   isFullscreen = false,
-  isAutoplay = false
+  isAutoplay = false,
+  onPause
 }: OverlayRendererProps) {
   const overlaySpritesRef = useRef<Map<string, THREE.Group>>(new Map());
   const [hoveredOverlay, setHoveredOverlay] = useState<Overlay | null>(null);
@@ -208,25 +253,25 @@ export default function OverlayRenderer({
   const [expandedOverlay, setExpandedOverlay] = useState<Overlay | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
-  
+
   // URL parameter support for direct overlay links
   const { overlayId: urlOverlayId, sceneId: urlSceneId } = useUrlParams();
 
   // Auto-open overlay from URL parameters
   useEffect(() => {
     if (urlOverlayId && urlSceneId && overlays.length > 0) {
-      const targetOverlay = overlays.find(overlay => 
+      const targetOverlay = overlays.find(overlay =>
         overlay.id === urlOverlayId && overlay.scene_id === urlSceneId
       );
-      
+
       if (targetOverlay && !isModalOpen) {
         setExpandedOverlay(targetOverlay);
         setIsModalOpen(true);
-        
+
         // Clear any existing hover states when modal opens
         setHoveredOverlay(null);
         setHoverPosition(null);
-        
+
         // Clear URL parameters after opening
         const url = new URL(window.location.href);
         url.searchParams.delete('overlay');
@@ -247,7 +292,7 @@ export default function OverlayRenderer({
 
     const handleMouseDown = (event: MouseEvent) => {
       if (!isModalOpen) return;
-      
+
       // Track mouse down position to detect dragging
       dragStateRef.current = {
         isDragging: false,
@@ -258,11 +303,11 @@ export default function OverlayRenderer({
 
     const handleMouseMove = (event: MouseEvent) => {
       if (!isModalOpen || !dragStateRef.current) return;
-      
+
       // Check if mouse has moved significantly (indicating a drag)
       const deltaX = Math.abs(event.clientX - dragStateRef.current.startX);
       const deltaY = Math.abs(event.clientY - dragStateRef.current.startY);
-      
+
       if (deltaX > 5 || deltaY > 5) {
         dragStateRef.current.isDragging = true;
       }
@@ -270,21 +315,21 @@ export default function OverlayRenderer({
 
     const handleClickOutside = (event: MouseEvent) => {
       if (!isModalOpen) return;
-      
+
       const target = event.target as HTMLElement;
-      
+
       // Don't close if clicking on the sidebar itself
       if (target.closest('[data-sidebar="true"]')) {
         return;
       }
-      
+
       // Don't close if this click is the result of a drag operation
       if (dragStateRef.current.isDragging) {
         // Reset drag state for next interaction
         dragStateRef.current = { isDragging: false, startX: 0, startY: 0 };
         return;
       }
-      
+
       // Only close on actual clicks (not drag releases)
       setIsModalOpen(false);
       setExpandedOverlay(null);
@@ -304,7 +349,7 @@ export default function OverlayRenderer({
       document.removeEventListener('click', handleClickOutside);
     };
   }, [isModalOpen]);
-  
+
   // Notify parent when modal state changes
   useEffect(() => {
     onModalStateChange?.(isModalOpen);
@@ -316,7 +361,7 @@ export default function OverlayRenderer({
       // Clear any hover states when modal opens
       setHoveredOverlay(null);
       setHoverPosition(null);
-      
+
       // Clear any pending timeouts
       if (hoverTimeoutRef.current) {
         clearTimeout(hoverTimeoutRef.current);
@@ -330,14 +375,14 @@ export default function OverlayRenderer({
     isVideoPlaying: boolean;
     hasStartedPlaying: boolean;
   }>>(new Map());
-  
+
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const modalHoverRef = useRef<boolean>(false);
   const lastHoveredOverlayRef = useRef<string | null>(null);
-  const dragStateRef = useRef<{ isDragging: boolean; startX: number; startY: number }>({ 
-    isDragging: false, 
-    startX: 0, 
-    startY: 0 
+  const dragStateRef = useRef<{ isDragging: boolean; startX: number; startY: number }>({
+    isDragging: false,
+    startX: 0,
+    startY: 0
   });
 
   useEffect(() => {
@@ -360,11 +405,11 @@ export default function OverlayRenderer({
     // Add overlay sprites for current scene
     overlays.forEach((overlay) => {
       if (!overlay.id) return;
-      
+
       const sprite = createOverlaySprite(overlay);
       overlayGroup.add(sprite);
       overlaySpritesRef.current.set(overlay.id, sprite);
-      
+
       // Initialize video state for video overlays
       if (overlay.kind === 'video') {
         setVideoStates(prev => {
@@ -376,7 +421,7 @@ export default function OverlayRenderer({
           return newStates;
         });
       }
-      
+
       // Ensure visibility
       sprite.visible = true;
       sprite.children.forEach(child => {
@@ -385,16 +430,16 @@ export default function OverlayRenderer({
         }
       });
     });
-    
+
     // Ensure the overlay group itself is visible
     overlayGroup.visible = true;
   }, [overlays, scene, overlayGroup]);
 
-  // Scale overlay sprites based on camera FOV
+  // Scale overlay sprites based on camera FOV with enhanced quality
   useEffect(() => {
     if (!overlayGroup) return;
-    
-    const spriteScale = THREE.MathUtils.clamp(38 - (fov - 40) * 0.2, 24, 36);
+
+    const spriteScale = THREE.MathUtils.clamp(56 - (fov - 40) * 0.2, 38, 54); // Slightly larger range
     overlayGroup.children.forEach((child) => {
       if (child instanceof THREE.Group) {
         child.children.forEach((groupChild) => {
@@ -415,21 +460,21 @@ export default function OverlayRenderer({
     if (lastHoveredOverlayRef.current === overlay.id) {
       return;
     }
-    
+
     lastHoveredOverlayRef.current = overlay.id || null;
     setHoveredOverlay(overlay);
     setHoverPosition(position);
-    
+
     // Clear any pending timeout
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
       hoverTimeoutRef.current = null;
     }
-    
+
     // Handle video overlay hover - start video with sound attempt
     if (overlay.kind === 'video' && overlay.id) {
       const currentState = videoStates.get(overlay.id);
-      
+
       if (!currentState?.isVideoPlaying) {
         // Try to create a user interaction context for autoplay with sound
         const simulateUserInteraction = () => {
@@ -439,19 +484,19 @@ export default function OverlayRenderer({
           tempButton.style.left = '-9999px';
           tempButton.style.opacity = '0';
           document.body.appendChild(tempButton);
-          
+
           // Simulate click to establish user interaction
           tempButton.click();
-          
+
           // Clean up
           setTimeout(() => {
             document.body.removeChild(tempButton);
           }, 100);
         };
-        
+
         // Simulate user interaction before starting video
         simulateUserInteraction();
-        
+
         setVideoStates(prev => {
           const newStates = new Map(prev);
           newStates.set(overlay.id!, {
@@ -467,16 +512,16 @@ export default function OverlayRenderer({
   const handleOverlayHoverEnd = (overlay: Overlay) => {
     // Reset the last hovered overlay
     lastHoveredOverlayRef.current = null;
-    
+
     hoverTimeoutRef.current = setTimeout(() => {
       if (!modalHoverRef.current) {
         setHoveredOverlay(null);
         setHoverPosition(null);
-        
+
         // Stop video if it's a video overlay
         if (overlay.kind === 'video' && overlay.id) {
           const currentState = videoStates.get(overlay.id);
-          
+
           // Only update state if video is currently playing
           if (currentState?.isVideoPlaying) {
             setVideoStates(prev => {
@@ -490,12 +535,12 @@ export default function OverlayRenderer({
           }
         }
       }
-    }, 0);
+    }, 300); // Increased timeout to prevent flickering/hover tunnel issues
   };
 
   const handleModalHover = () => {
     modalHoverRef.current = true;
-    
+
     // Clear any pending timeout
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
@@ -505,15 +550,15 @@ export default function OverlayRenderer({
 
   const handleModalHoverEnd = () => {
     modalHoverRef.current = false;
-    
+
     hoverTimeoutRef.current = setTimeout(() => {
       setHoveredOverlay(null);
       setHoverPosition(null);
-      
+
       // Stop video if it's currently playing
       if (hoveredOverlay?.kind === 'video' && hoveredOverlay.id) {
         const currentState = videoStates.get(hoveredOverlay.id);
-        
+
         // Only update state if video is currently playing
         if (currentState?.isVideoPlaying) {
           setVideoStates(prev => {
@@ -526,7 +571,7 @@ export default function OverlayRenderer({
           });
         }
       }
-    }, 0);
+    }, 300);
   };
 
   // Handle mouse events for hover detection with improved throttling
@@ -544,18 +589,18 @@ export default function OverlayRenderer({
     const handleMouseMove = (event: MouseEvent) => {
       // Don't process hover events when autoplay is active (but allow when modal is open)
       if (isAutoplay) return;
-      
+
       const now = Date.now();
-      
+
       // Check if mouse actually moved significantly
-      const mouseMoved = Math.abs(event.clientX - lastMousePosition.x) > MOUSE_MOVE_THRESHOLD || 
-                        Math.abs(event.clientY - lastMousePosition.y) > MOUSE_MOVE_THRESHOLD;
-      
+      const mouseMoved = Math.abs(event.clientX - lastMousePosition.x) > MOUSE_MOVE_THRESHOLD ||
+        Math.abs(event.clientY - lastMousePosition.y) > MOUSE_MOVE_THRESHOLD;
+
       // Throttle hover detection and only process if mouse moved significantly
       if (now - lastHoverTime < HOVER_THROTTLE || !mouseMoved) {
         return;
       }
-      
+
       lastHoverTime = now;
       lastMousePosition = { x: event.clientX, y: event.clientY };
 
@@ -584,7 +629,7 @@ export default function OverlayRenderer({
             if (currentHoveredOverlay) {
               handleOverlayHoverEnd(currentHoveredOverlay);
             }
-            
+
             currentHoveredOverlay = overlay;
             handleOverlayHover(overlay, { x: event.clientX, y: event.clientY });
           }
@@ -604,16 +649,62 @@ export default function OverlayRenderer({
       }
     };
 
+    const handleMouseClick = (event: MouseEvent) => {
+      // Allow clicking even during autoplay, but we should pause it
+      // if (isAutoplay) return; - REPLACED WITH CONDITIONAL PAUSE BELOW
+
+      // Calculate mouse position in normalized device coordinates
+      const rect = (event.target as HTMLElement).getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      // Update the picking ray with the camera and mouse position
+      raycaster.setFromCamera(mouse, camera);
+
+      // Calculate objects intersecting the picking ray
+      const intersects = raycaster.intersectObjects(overlayGroup.children, true);
+
+      if (intersects.length > 0) {
+        // Find the overlay from the intersected object
+        let node: THREE.Object3D | null = intersects[0].object;
+        while (node && !node.userData?.overlay) {
+          node = node.parent;
+        }
+
+        if (node && node.userData?.overlay) {
+          const overlay = node.userData.overlay as Overlay;
+
+          // If we're auto-playing and an overlay is clicked, pause it first
+          if (isAutoplay && onPause) {
+            onPause();
+          }
+
+          // Handle overlay click - open modal for text overlays
+          if (overlay.kind === 'text') {
+            setExpandedOverlay(overlay);
+            setIsModalOpen(true);
+            setHoveredOverlay(null);
+            setHoverPosition(null);
+          }
+
+          // Call the optional click handler
+          onOverlayClick?.(overlay);
+        }
+      }
+    };
+
     // Find the canvas element
     const canvasElement = document.querySelector('canvas');
-    
+
     if (canvasElement) {
       canvasElement.addEventListener('mousemove', handleMouseMove);
       canvasElement.addEventListener('mouseleave', handleMouseLeave);
+      canvasElement.addEventListener('click', handleMouseClick);
 
       return () => {
         canvasElement.removeEventListener('mousemove', handleMouseMove);
         canvasElement.removeEventListener('mouseleave', handleMouseLeave);
+        canvasElement.removeEventListener('click', handleMouseClick);
       };
     }
   }, [scene, camera, overlayGroup, isModalOpen, isAutoplay]);
@@ -626,84 +717,85 @@ export default function OverlayRenderer({
 
     let payload: any = {};
     try {
-      payload = typeof hoveredOverlay.payload === 'string' 
-        ? JSON.parse(hoveredOverlay.payload) 
+      payload = typeof hoveredOverlay.payload === 'string'
+        ? JSON.parse(hoveredOverlay.payload)
         : hoveredOverlay.payload || {};
     } catch {
       payload = {};
     }
 
     // Calculate tooltip position to avoid going off-screen
-    const tooltipWidth = hoveredOverlay.kind === 'text' ? 300 : 400;
-    const tooltipHeight = hoveredOverlay.kind === 'text' ? 150 : 300;
-    const arrowSize = hoveredOverlay.kind === 'text' ? 10 : 8;
-    
+    let tooltipWidth = hoveredOverlay.kind === 'text' ? 280 : 400;
+
+    if ((hoveredOverlay.kind === 'image' || hoveredOverlay.kind === 'video') && payload.width) {
+      const customWidth = parseInt(payload.width, 10);
+      if (!isNaN(customWidth) && customWidth > 0) {
+        tooltipWidth = Math.max(tooltipWidth, customWidth + 32);
+      }
+    }
+
+    const tooltipHeight = hoveredOverlay.kind === 'text' ? 110 : 300;
+    const arrowSize = hoveredOverlay.kind === 'text' ? 12 : 8;
+
     // Get the overlay icon's 3D position and convert to screen coordinates
     let iconScreenPosition = { x: hoverPosition.x, y: hoverPosition.y };
-    
+
     // Try to get more accurate screen position from the 3D overlay sprite
     if (camera && hoveredOverlay.id) {
       const overlaySprite = overlaySpritesRef.current.get(hoveredOverlay.id);
       if (overlaySprite) {
         const vector = overlaySprite.position.clone();
         vector.project(camera);
-        
+
         // Convert to screen coordinates
         const canvas = document.querySelector('canvas');
         if (canvas) {
           const rect = canvas.getBoundingClientRect();
           const screenX = (vector.x * 0.5 + 0.5) * rect.width + rect.left;
           const screenY = (vector.y * -0.5 + 0.5) * rect.height + rect.top;
-          
+
           // Only use projected position if it's reasonable
           const distance = Math.sqrt(
-            Math.pow(screenX - hoverPosition.x, 2) + 
+            Math.pow(screenX - hoverPosition.x, 2) +
             Math.pow(screenY - hoverPosition.y, 2)
           );
-          
+
           if (distance < 100) {
             iconScreenPosition = { x: screenX, y: screenY };
           }
         }
       }
     }
-    
+
     // Calculate tooltip position relative to icon with proper spacing for each type
     let tooltipLeft = iconScreenPosition.x - tooltipWidth / 2;
-    let tooltipTop, arrowDirection;
-    
-    // Different spacing based on overlay type
-    if (hoveredOverlay.kind === 'text') {
-      // Text overlays: very close to icon
-      tooltipTop = iconScreenPosition.y - tooltipHeight - arrowSize - 5;
-      arrowDirection = 'down';
+    // Base anchor point is ABOVE the icon
+    let tooltipAnchorY = iconScreenPosition.y - arrowSize - 10;
+    let arrowDirection = 'down';
+
+    const estimatedHeight = payload.height ? parseInt(payload.height) : (hoveredOverlay.kind === 'text' ? 150 : 350);
+    const spaceAbove = tooltipAnchorY;
+
+    let isFlipped = false;
+
+    // Vertical adjustments - Flip if not enough space above
+    if (spaceAbove < estimatedHeight + 20) {
+      // Show below icon
+      tooltipAnchorY = iconScreenPosition.y + arrowSize + 10;
+      isFlipped = true;
+      arrowDirection = 'up';
     } else {
-      // Image/Video overlays: more space to prevent overlap
-      tooltipTop = iconScreenPosition.y - tooltipHeight - arrowSize - 25;
       arrowDirection = 'down';
     }
-    
-    // Adjust if tooltip would go off screen edges
-    const screenPadding = 20;
-    
+
     // Horizontal adjustments
+    const screenPadding = 20;
     if (tooltipLeft < screenPadding) {
       tooltipLeft = screenPadding;
     } else if (tooltipLeft + tooltipWidth > window.innerWidth - screenPadding) {
       tooltipLeft = window.innerWidth - tooltipWidth - screenPadding;
     }
-    
-    // Vertical adjustments
-    if (tooltipTop < screenPadding) {
-      // Not enough space above, show below icon
-      if (hoveredOverlay.kind === 'text') {
-        tooltipTop = iconScreenPosition.y + 15; 
-      } else {
-        tooltipTop = iconScreenPosition.y + 35; 
-      }
-      arrowDirection = 'up'; 
-    }
-    
+
     // Calculate arrow position relative to icon position
     const arrowLeft = Math.max(
       arrowSize,
@@ -715,248 +807,281 @@ export default function OverlayRenderer({
 
     return (
       <div
-        className="fixed pointer-events-auto z-[400]"
+        className="fixed pointer-events-auto z-[400] overlay-tooltip"
         style={{
           left: tooltipLeft,
-          top: tooltipTop,
+          top: tooltipAnchorY,
+          width: tooltipWidth,
+          maxWidth: '90vw',
+          transform: isFlipped ? 'none' : 'translateY(-100%)'
         }}
         onMouseEnter={handleModalHover}
         onMouseLeave={handleModalHoverEnd}
         data-sidebar="true"
       >
-        <div className="bg-gray-900 text-white rounded-lg shadow-2xl border border-gray-700 overflow-hidden relative" 
-             style={{ 
-               minWidth: hoveredOverlay.kind === 'text' ? '250px' : '320px', 
-               maxWidth: hoveredOverlay.kind === 'text' ? '350px' : '450px' 
-             }}>
-          {/* Header */}
-          <div className="flex items-center justify-between p-4 pb-3 border-b border-gray-700">
-            <h3 className="font-semibold text-lg capitalize flex items-center gap-2">
-              {/* Icon based on overlay type */}
-              {hoveredOverlay.kind === 'text' && (
-                <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-1l-4 4z" />
-                </svg>
-              )}
-              {hoveredOverlay.kind === 'image' && (
-                <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-              )}
-              {hoveredOverlay.kind === 'video' && (
-                <div className="w-5 h-5 bg-red-500 rounded flex items-center justify-center">
-                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M8 5v14l11-7z"/>
-                  </svg>
-                </div>
-              )}
-              {hoveredOverlay.kind === 'image' ? 'Image Gallery' : 
-               hoveredOverlay.kind === 'video' ? 'Video Content' : 
-               hoveredOverlay.kind}
-            </h3>
-          </div>
-          
-          {/* Content */}
-          <div className={hoveredOverlay.kind === 'text' ? 'p-3' : 'p-4'}>
-            {/* Content based on overlay type */}
+        <div
+          className="text-white rounded-lg shadow-2xl relative border overflow-y-auto overflow-x-hidden"
+          style={{
+            backgroundColor: '#0a0a0a',
+            borderColor: '#1f1f1f',
+            width: '100%',
+            maxHeight: '600px'
+          }}
+        >
+          {/* Arrow pointing to the icon */}
+          <div
+            className="absolute w-3 h-3 transform rotate-45 border-l border-t"
+            style={{
+              backgroundColor: '#0a0a0a',
+              borderColor: '#1f1f1f',
+              [arrowDirection === 'up' ? 'top' : 'bottom']: '-6px',
+              left: `${arrowLeft}px`,
+              transform: 'translateX(-50%) rotate(45deg)'
+            }}
+          />
+
+          {/* Header with icon and title - like reference screenshot */}
+          <div className="flex items-center gap-3 px-4 py-3">
+            {/* Enhanced icon based on overlay type */}
             {hoveredOverlay.kind === 'text' && (
-              <div className="text-gray-200 leading-relaxed text-sm">
-                {payload.text || 'No text content available'}
+              <div className="w-6 h-6 bg-blue-500 rounded flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-1l-4 4z" />
+                </svg>
               </div>
             )}
-          
-          {hoveredOverlay.kind === 'image' && (
-            <div>
-              {payload.imageUrl && (
-                <div className="mb-3">
-                  <img
-                    src={payload.imageUrl}
-                    alt={payload.alt || 'Overlay image'}
-                    className="object-cover rounded"
-                    style={{
-                      width: payload.width ? `${payload.width}px` : '100%',
-                      height: payload.height ? `${payload.height}px` : '192px'
-                    }}
-                    onError={(e) => {
-                      e.currentTarget.src = '/placeholder-image.jpg';
-                    }}
-                  />
-                </div>
-              )}
-              {payload.description && (
-                <p className="text-gray-200 text-sm leading-relaxed mb-3">
-                  {payload.description}
-                </p>
-              )}
-              <div className="border-t border-gray-700 pt-3">
-                <button 
-                  className="text-blue-400 hover:text-blue-300 text-sm font-medium border-b border-blue-400 hover:border-blue-300 transition-colors cursor-pointer"
-                  onClick={() => {
-                    // Always ensure modal stays open and replace content
-                    setExpandedOverlay(hoveredOverlay);
-                    setIsModalOpen(true); // Always ensure it's open
-                    setHoveredOverlay(null);
-                    setHoverPosition(null);
-                  }}
-                >
-                  View more
-                </button>
+            {hoveredOverlay.kind === 'image' && (
+              <div className="w-6 h-6 bg-green-500 rounded flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
               </div>
-            </div>
-          )}
-          
-          {hoveredOverlay.kind === 'video' && hoveredOverlay.id && (
-            <div>
-              {/* Video Preview Area */}
-              <div className="mb-3 relative">
-                {payload.videoUrl ? (
-                  <VideoPlayerWithContinuity 
-                    videoSrc={payload.videoUrl} 
-                    videoId={(() => {
-                      // Extract YouTube video ID from various URL formats
-                      let videoId = null;
-                      let videoSrc = payload.videoUrl;
-                      
-                      // Handle different YouTube URL formats
-                      if (videoSrc.includes('youtube.com/watch?v=')) {
-                        videoId = videoSrc.split('v=')[1]?.split('&')[0];
-                      } else if (videoSrc.includes('youtu.be/')) {
-                        videoId = videoSrc.split('youtu.be/')[1]?.split('?')[0];
-                      } else if (videoSrc.includes('youtube.com/embed/')) {
-                        videoId = videoSrc.split('/embed/')[1]?.split('?')[0];
-                      }
-                      
-                      return videoId;
-                    })()} 
-                    overlayId={hoveredOverlay.id!}
-                    payload={payload}
-                    videoStates={videoStates}
-                  />
-                ) : (
-                  <div 
-                    className="bg-gray-800 rounded flex items-center justify-center"
-                    style={{
-                      width: payload.width ? `${payload.width}px` : '100%',
-                      height: payload.height ? `${payload.height}px` : '192px'
-                    }}
-                  >
-                    <div className="text-center">
-                      <svg className="w-12 h-12 text-gray-500 mx-auto mb-2" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M8 5v14l11-7z"/>
-                      </svg>
-                      <p className="text-gray-400 text-sm">No video available</p>
-                    </div>
+            )}
+            {hoveredOverlay.kind === 'video' && (
+              <div className="w-6 h-6 bg-red-500 rounded flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </div>
+            )}
+            <span
+              className="font-semibold text-white"
+              style={{ fontSize: '16px' }}
+            >
+              {hoveredOverlay.kind === 'image' ? 'Image' :
+                hoveredOverlay.kind === 'video' ? 'Video' :
+                  hoveredOverlay.kind === 'text' ? 'Text' :
+                    hoveredOverlay.kind}
+            </span>
+          </div>
+
+          {/* Underline separator - like reference screenshot */}
+          <div
+            className="mx-4"
+            style={{
+              borderTop: '1px solid #374151' // Gray-700 equivalent
+            }}
+          ></div>
+
+          {/* Content with larger text - like reference screenshot */}
+          <div className="px-4 py-4">
+            {/* Enhanced text content display with larger font */}
+            {hoveredOverlay.kind === 'text' && (
+              <div
+                className="overlay-text-content"
+                style={{
+                  color: '#f3f4f6', // Light gray text
+                  fontSize: '18px',  // Larger text size
+                  lineHeight: '1.4',
+                  fontWeight: '500'
+                }}
+              >
+                {payload.content || payload.text || 'Hello'}
+              </div>
+            )}
+
+            {hoveredOverlay.kind === 'image' && (
+              <div>
+                {payload.imageUrl && (
+                  <div className="mb-2">
+                    <img
+                      src={payload.imageUrl}
+                      alt={payload.alt || 'Overlay image'}
+                      className="object-cover rounded w-full"
+                      style={{
+                        height: payload.height ? `${payload.height}px` : 'auto',
+                        maxHeight: payload.height ? 'none' : '180px' // Remove cap if custom height
+                      }}
+                      onError={(e) => {
+                        e.currentTarget.src = '/placeholder-image.jpg';
+                      }}
+                    />
                   </div>
                 )}
-              </div>
-              
-              {/* Video Description */}
-              {payload.description && (
-                <p className="text-gray-200 text-sm leading-relaxed mb-3">
-                  {payload.description}
-                </p>
-              )}
-              
-              {/* Simple autoplay status */}
-              {/* <div className="text-gray-400 text-xs mb-3">
-                {(() => {
-                  const currentVideoState = videoStates.get(hoveredOverlay.id!);
-                  return currentVideoState?.isVideoPlaying ? (
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                      <span>Video is playing</span>
-                    </div>
-                  ) : (
-                    <span>Hover over the video icon to start playback</span>
-                  );
-                })()}
-              </div> */}
-              
-              {/* View More Button */}
-              <div className="border-t border-gray-700 pt-3">
-                <button 
-                  className="text-blue-400 hover:text-blue-300 text-sm font-medium border-b border-blue-400 hover:border-blue-300 transition-colors cursor-pointer"
+                {payload.description && (
+                  <p className="text-gray-300 text-sm leading-relaxed mb-2">
+                    {payload.description}
+                  </p>
+                )}
+                <button
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs font-medium transition-colors cursor-pointer w-full"
                   onClick={() => {
-                    // Always ensure modal stays open and replace content
                     setExpandedOverlay(hoveredOverlay);
-                    setIsModalOpen(true); // Always ensure it's open
+                    setIsModalOpen(true);
                     setHoveredOverlay(null);
                     setHoverPosition(null);
                   }}
                 >
-                  View more
+                  View More
                 </button>
               </div>
-            </div>
-          )}
-          
-          {hoveredOverlay.kind === 'badge' && (
-            <div className="text-center">
-              <div 
-                className="inline-block px-3 py-1 rounded-full text-sm font-bold mb-2"
-                style={{ backgroundColor: payload.color || '#EF4444', color: 'white' }}
-              >
-                {payload.text || 'BADGE'}
+            )}
+
+            {hoveredOverlay.kind === 'video' && hoveredOverlay.id && (
+              <div>
+                {/* Video Preview Area */}
+                <div className="mb-3 relative w-full">
+                  {payload.videoUrl ? (
+                    <div
+                      className="w-full"
+                      style={{
+                        height: payload.height ? `${payload.height}px` : undefined,
+                        aspectRatio: payload.height ? undefined : '16/9'
+                      }}
+                    >
+                      <VideoPlayerWithContinuity
+                        videoSrc={payload.videoUrl}
+                        videoId={(() => {
+                          // Extract YouTube video ID from various URL formats
+                          let videoId = null;
+                          let videoSrc = payload.videoUrl;
+
+                          // Handle different YouTube URL formats
+                          if (videoSrc.includes('youtube.com/watch?v=')) {
+                            videoId = videoSrc.split('v=')[1]?.split('&')[0];
+                          } else if (videoSrc.includes('youtu.be/')) {
+                            videoId = videoSrc.split('youtu.be/')[1]?.split('?')[0];
+                          } else if (videoSrc.includes('youtube.com/embed/')) {
+                            videoId = videoSrc.split('/embed/')[1]?.split('?')[0];
+                          }
+
+                          return videoId;
+                        })()}
+                        overlayId={hoveredOverlay.id!}
+                        payload={payload}
+                        videoStates={videoStates}
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      className="bg-gray-800 rounded flex items-center justify-center w-full"
+                      style={{ height: '192px' }}
+                    >
+                      <div className="text-center">
+                        <svg className="w-12 h-12 text-gray-500 mx-auto mb-2" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                        <p className="text-gray-400 text-sm">No video available</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Video Description */}
+                {payload.description && (
+                  <p className="text-gray-300 text-sm leading-relaxed mb-2">
+                    {payload.description}
+                  </p>
+                )}
+
+                <button
+                  className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs font-medium transition-colors cursor-pointer w-full"
+                  onClick={() => {
+                    setExpandedOverlay(hoveredOverlay);
+                    setIsModalOpen(true);
+                    setHoveredOverlay(null);
+                    setHoverPosition(null);
+                  }}
+                >
+                  View More
+                </button>
               </div>
-            </div>
-          )}
-          
-          {hoveredOverlay.kind === 'tooltip' && (
-            <div className="text-gray-200 text-sm leading-relaxed">
-              {payload.text || 'Tooltip information'}
-            </div>
-          )}
-          
-          {hoveredOverlay.kind === 'html' && (
-            <div>
-              <h4 className="font-semibold text-lg mb-2">Custom Content</h4>
-              <div 
-                className="text-sm leading-relaxed text-gray-200"
-                dangerouslySetInnerHTML={{ __html: payload.html || '<p>Custom HTML content</p>' }}
-              />
-            </div>
-          )}
+            )}
+
+
+            {hoveredOverlay.kind === 'badge' && (
+              <div className="text-center">
+                <div
+                  className="inline-block px-3 py-1 rounded-full text-sm font-bold mb-2"
+                  style={{ backgroundColor: payload.color || '#EF4444', color: 'white' }}
+                >
+                  {payload.text || 'BADGE'}
+                </div>
+              </div>
+            )}
+
+            {hoveredOverlay.kind === 'tooltip' && (
+              <div className="text-gray-200 text-sm leading-relaxed">
+                {payload.text || 'Tooltip information'}
+              </div>
+            )}
+
+            {hoveredOverlay.kind === 'html' && (
+              <div>
+                <h4 className="font-semibold text-lg mb-2">Custom Content</h4>
+                <div
+                  className="text-sm leading-relaxed text-gray-200"
+                  dangerouslySetInnerHTML={{ __html: payload.html || '<p>Custom HTML content</p>' }}
+                />
+              </div>
+            )}
           </div>
         </div>
-        
-        {/* Dynamic Arrow pointing to overlay icon */}
+
+        {/* Enhanced Arrow pointing to overlay icon */}
         {arrowDirection === 'down' ? (
-          <div 
+          <div
             className="absolute top-full"
             style={{
               left: `${arrowLeft}px`,
               transform: 'translateX(-50%)'
             }}
           >
-            <div 
-              className="border-l-transparent border-r-transparent border-t-gray-900"
+            <div
               style={{
                 width: 0,
                 height: 0,
                 borderLeftWidth: `${arrowSize}px`,
                 borderRightWidth: `${arrowSize}px`,
                 borderTopWidth: `${arrowSize}px`,
-                borderStyle: 'solid'
+                borderStyle: 'solid',
+                borderLeftColor: 'transparent',
+                borderRightColor: 'transparent',
+                borderTopColor: '#0a0a0a', // Match tooltip background
+                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'
               }}
             ></div>
           </div>
         ) : (
-          <div 
+          <div
             className="absolute bottom-full"
             style={{
               left: `${arrowLeft}px`,
               transform: 'translateX(-50%)'
             }}
           >
-            <div 
-              className="border-l-transparent border-r-transparent border-b-gray-900"
+            <div
               style={{
                 width: 0,
                 height: 0,
                 borderLeftWidth: `${arrowSize}px`,
                 borderRightWidth: `${arrowSize}px`,
                 borderBottomWidth: `${arrowSize}px`,
-                borderStyle: 'solid'
+                borderStyle: 'solid',
+                borderLeftColor: 'transparent',
+                borderRightColor: 'transparent',
+                borderBottomColor: '#0a0a0a',
+                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'
               }}
             ></div>
           </div>
@@ -971,8 +1096,8 @@ export default function OverlayRenderer({
 
     let payload: any = {};
     try {
-      payload = typeof expandedOverlay.payload === 'string' 
-        ? JSON.parse(expandedOverlay.payload) 
+      payload = typeof expandedOverlay.payload === 'string'
+        ? JSON.parse(expandedOverlay.payload)
         : expandedOverlay.payload || {};
     } catch {
       payload = {};
@@ -985,7 +1110,7 @@ export default function OverlayRenderer({
         const url = new URL(currentUrl);
         url.searchParams.set('overlay', expandedOverlay.id || '');
         url.searchParams.set('scene', expandedOverlay.scene_id);
-        
+
         await navigator.clipboard.writeText(url.toString());
         setCopySuccess(true);
         setTimeout(() => setCopySuccess(false), 2000);
@@ -1000,7 +1125,7 @@ export default function OverlayRenderer({
       return (
         <>
           {/* Right Sidebar - positioned absolutely, doesn't interfere with canvas */}
-          <div 
+          <div
             className="fixed top-0 right-0 w-96 h-full bg-white shadow-2xl overflow-y-auto z-[500] pointer-events-auto"
             data-sidebar="true"
           >
@@ -1031,7 +1156,7 @@ export default function OverlayRenderer({
       return (
         <>
           {/* Floating overlay panel - positioned fixed to viewport, not blocking main content */}
-          <div 
+          <div
             className="fixed bottom-4 right-4 w-96 max-w-[calc(100vw-2rem)] bg-white shadow-2xl border border-gray-200 rounded-lg z-[500] pointer-events-auto max-h-[70vh] overflow-y-auto"
             data-sidebar="true"
           >
@@ -1074,7 +1199,7 @@ export default function OverlayRenderer({
               </div>
               <span className="text-lg font-medium text-gray-700">Image</span>
             </div>
-            
+
             <img
               src={payload.imageUrl}
               alt={payload.alt || 'Overlay image'}
@@ -1093,17 +1218,17 @@ export default function OverlayRenderer({
             <div className="flex items-center gap-3 mb-3">
               <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
                 <svg className="w-5 h-5 text-red-600" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z"/>
+                  <path d="M8 5v14l11-7z" />
                 </svg>
               </div>
               <span className="text-lg font-medium text-gray-700">Video</span>
             </div>
-            
+
             {(() => {
               // Extract YouTube video ID from various URL formats
               let videoId = null;
               let videoSrc = payload.videoUrl;
-              
+
               if (videoSrc.includes('youtube.com/watch?v=')) {
                 videoId = videoSrc.split('v=')[1]?.split('&')[0];
               } else if (videoSrc.includes('youtu.be/')) {
@@ -1131,12 +1256,12 @@ export default function OverlayRenderer({
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-gray-900 flex-1 pr-4 leading-tight">
             {payload.title || (
-              expandedOverlay.kind === 'image' ? 'Image Gallery' : 
-              expandedOverlay.kind === 'video' ? 'Video Content' : 
-              'Information'
+              expandedOverlay.kind === 'image' ? 'Image Gallery' :
+                expandedOverlay.kind === 'video' ? 'Video Content' :
+                  'Information'
             )}
           </h2>
-          
+
           {/* Share icon with hover tooltip and click feedback */}
           <div className="relative flex-shrink-0">
             <button
@@ -1148,14 +1273,14 @@ export default function OverlayRenderer({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
               </svg>
             </button>
-            
+
             {/* Hover tooltip */}
             <div className="absolute bottom-full right-0 mb-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
               <div className="bg-gray-800 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
                 Copy Link
               </div>
             </div>
-            
+
             {/* Success message - positioned below the icon to avoid overlap */}
             {copySuccess && (
               <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-1">
@@ -1168,7 +1293,7 @@ export default function OverlayRenderer({
         </div>
 
         {/* Text content display */}
-        {expandedOverlay.kind === 'text' && payload.text && (
+        {expandedOverlay.kind === 'text' && (payload.content || payload.text) && (
           <div className="mb-6">
             {/* Text header with icon and text */}
             <div className="flex items-center gap-3 mb-3">
@@ -1179,10 +1304,10 @@ export default function OverlayRenderer({
               </div>
               <span className="text-lg font-medium text-gray-700">Text</span>
             </div>
-            
+
             <div className="p-4 bg-gray-50 rounded-lg">
-              <p className="text-gray-800 leading-relaxed">
-                {payload.text}
+              <p className="text-gray-800 leading-relaxed text-lg font-medium">
+                {payload.content || payload.text}
               </p>
             </div>
           </div>
@@ -1191,7 +1316,7 @@ export default function OverlayRenderer({
         {/* Description - NOW directly below title */}
         {payload.description && (
           <div className="mb-6">
-            <p className="text-gray-700 leading-relaxed">
+            <p className="text-gray-700 leading-relaxed text-lg font-medium">
               {payload.description}
             </p>
           </div>
@@ -1210,7 +1335,7 @@ export default function OverlayRenderer({
               }}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg transition-colors font-medium cursor-pointer"
             >
-              View Original
+              {expandedOverlay.kind === 'image' ? 'View Link' : 'View Original'}
             </button>
           )}
         </div>
@@ -1231,7 +1356,7 @@ export default function OverlayRenderer({
     <>
       {/* Render hover tooltip */}
       {renderHoverTooltip()}
-      
+
       {/* Render expanded modal */}
       {renderExpandedModal()}
     </>
@@ -1247,9 +1372,9 @@ interface VideoPlayerProps {
   videoStates: Map<string, any>;
 }
 
-const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({ 
-  videoSrc, 
-  videoId, 
+const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
+  videoSrc,
+  videoId,
   overlayId,
   payload,
   videoStates
@@ -1275,7 +1400,7 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
       testVideo.style.left = '-9999px';
       testVideo.style.width = '1px';
       testVideo.style.height = '1px';
-      
+
       // Test if autoplay with sound is possible
       const testAutoplay = async () => {
         try {
@@ -1294,21 +1419,21 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
           }
         }
       };
-      
+
       testAutoplay();
-      
+
       // Try to trigger autoplay via postMessage after a short delay
       const timeoutId = setTimeout(() => {
         if (iframeRef.current) {
           try {
             // Try to play with sound first
             iframeRef.current.contentWindow?.postMessage(
-              '{"event":"command","func":"playVideo","args":""}', 
+              '{"event":"command","func":"playVideo","args":""}',
               '*'
             );
             if (!autoplayFailed) {
               iframeRef.current.contentWindow?.postMessage(
-                '{"event":"command","func":"unMute","args":""}', 
+                '{"event":"command","func":"unMute","args":""}',
                 '*'
               );
             }
@@ -1319,7 +1444,7 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
           }
         }
       }, 800);
-      
+
       return () => clearTimeout(timeoutId);
     }
   }, [isPlaying, videoId, hasUserInteracted, autoplayFailed]);
@@ -1329,7 +1454,7 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
     setIsMuted(false);
     setHasUserInteracted(true);
     setAutoplayFailed(false);
-    
+
     // Force iframe reload with unmuted parameters
     setLoadAttempt(prev => prev + 1);
   };
@@ -1337,20 +1462,20 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
   const handleIframeError = () => {
     setUseDirectVideo(true);
   };
-    
+
   // Early returns must come AFTER all hooks are declared
   if (!isPlaying) {
     return (
-      <div 
+      <div
         className="bg-gray-800 rounded flex items-center justify-center"
         style={{
-          width: payload.width ? `${payload.width}px` : '100%',
-          height: payload.height ? `${payload.height}px` : '192px'
+          width: '100%',
+          height: '100%'
         }}
       >
         <div className="text-center">
           <svg className="w-12 h-12 text-gray-500 mx-auto mb-2" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M8 5v14l11-7z"/>
+            <path d="M8 5v14l11-7z" />
           </svg>
           <p className="text-gray-400 text-sm">Hover over video icon to play</p>
         </div>
@@ -1360,11 +1485,11 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
 
   if (!videoId) {
     return (
-      <div 
+      <div
         className="bg-red-900 rounded flex items-center justify-center"
         style={{
-          width: payload.width ? `${payload.width}px` : '100%',
-          height: payload.height ? `${payload.height}px` : '192px'
+          width: '100%',
+          height: '100%'
         }}
       >
         <div className="text-center">
@@ -1379,11 +1504,11 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
   const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=${(isMuted || autoplayFailed) ? 1 : 0}&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&loop=0&fs=1&cc_load_policy=0&iv_load_policy=3&autohide=1&start=0&html5=1&wmode=opaque&vq=hd720&t=0s`;
 
   return (
-    <div 
+    <div
       className="rounded overflow-hidden bg-black relative"
       style={{
-        width: payload.width ? `${payload.width}px` : '100%',
-        height: payload.height ? `${payload.height}px` : '192px'
+        width: '100%',
+        height: '100%'
       }}
     >
       {!useDirectVideo ? (
@@ -1405,7 +1530,7 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
       ) : (
         // Fallback: Show thumbnail with direct YouTube link
         <div className="w-full h-full relative">
-          <img 
+          <img
             src={`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`}
             alt="Video thumbnail"
             className="w-full h-full object-cover"
@@ -1419,14 +1544,14 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
               className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition-colors shadow-lg"
             >
               <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M8 5v14l11-7z"/>
+                <path d="M8 5v14l11-7z" />
               </svg>
               Play Video
             </button>
           </div>
         </div>
       )}
-      
+
       {/* Unmute button overlay - only show if autoplay failed or muted */}
       {!useDirectVideo && (isMuted || autoplayFailed) && !hasUserInteracted && (
         <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
@@ -1435,7 +1560,7 @@ const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
             className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-lg"
           >
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
             </svg>
             {autoplayFailed ? 'Click for sound' : 'Click to unmute'}
           </button>
