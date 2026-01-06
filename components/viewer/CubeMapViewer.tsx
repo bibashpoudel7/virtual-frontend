@@ -6,6 +6,8 @@ import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { CubeFace, CubeMapManifest } from '@/lib/cubemap-types';
 import OverlayRenderer from '../overlays/OverlayRenderer';
 
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+
 interface CubeMapViewerProps {
   tour: Tour;
   currentScene: Scene;
@@ -344,7 +346,7 @@ export default function CubeMapViewer({
         }
 
         // Load single tile
-        const tileUrl = `https://test.thenimto.com/scenes/${currentScene.id}/tiles/${face}_l${level}_0_0.jpg`;
+        const tileUrl = `${R2_PUBLIC_URL}/scenes/${currentScene.id}/tiles/${face}_l${level}_0_0.jpg`;
 
         loader.load(
           tileUrl,
@@ -415,7 +417,7 @@ export default function CubeMapViewer({
       // Load all tiles for this face
       for (let y = 0; y < tilesPerSide; y++) {
         for (let x = 0; x < tilesPerSide; x++) {
-          const tileUrl = `https://test.thenimto.com/scenes/${currentScene.id}/tiles/${face}_l${level}_${x}_${y}.jpg`;
+          const tileUrl = `${R2_PUBLIC_URL}/scenes/${currentScene.id}/tiles/${face}_l${level}_${x}_${y}.jpg`;
 
           const img = new Image();
           img.crossOrigin = 'anonymous';
@@ -526,7 +528,7 @@ export default function CubeMapViewer({
     let loadedCount = 0;
     faceOrder.forEach(face => {
       // Build URL for this face at level 0, tile 0,0
-      const tileUrl = `https://test.thenimto.com/scenes/${currentScene.id}/tiles/${face}_l${level}_0_0.jpg`;
+      const tileUrl = `${R2_PUBLIC_URL}/scenes/${currentScene.id}/tiles/${face}_l${level}_0_0.jpg`;
 
       const texture = loader.load(
         tileUrl,

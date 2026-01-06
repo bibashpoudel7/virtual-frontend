@@ -3,6 +3,8 @@
  * Uses presigned URLs for secure direct uploads
  */
 
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+
 interface UploadProgress {
   loaded: number;
   total: number;
@@ -121,8 +123,7 @@ class StorageUploader {
    * Get public URL for uploaded file
    */
   getPublicUrl(key: string): string {
-    const publicUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
-    return `${publicUrl}/${key}`;
+    return `${R2_PUBLIC_URL}/${key}`;
   }
 }
 

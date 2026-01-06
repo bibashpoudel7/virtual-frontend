@@ -7,6 +7,8 @@
 import sharp from 'sharp';
 import { CubeFace, CubeTile, CubeMapManifest } from './cubemap-types';
 
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+
 /**
  * Convert cube face coordinates to equirectangular coordinates
  * Using standard cube map to equirectangular mapping
@@ -277,7 +279,7 @@ export async function generateCubeMapTiles(
     tileSize: baseTileSize, // Keep for backward compatibility
     levels,
     faces: Object.values(CubeFace),
-    preview: `https://test.thenimto.com/scenes/${sceneId}/tiles/preview.jpg`
+    preview: `${R2_PUBLIC_URL}/scenes/${sceneId}/tiles/preview.jpg`
   };
   
   // Debug logging

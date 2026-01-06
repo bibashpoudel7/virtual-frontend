@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
+
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
 import CubeMapViewer from '@/components/viewer/CubeMapViewer';
 import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, X, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy } from 'lucide-react';
 
@@ -273,8 +275,8 @@ const ProgressBar = React.memo(({
                             const img = e.target as HTMLImageElement;
                             if (!img.dataset.fallbackTried) {
                               img.dataset.fallbackTried = 'true';
-                              const fallbackUrl = scene.src_original_url?.replace(/\.(jpg|jpeg|png)$/i, '_thumb.$1') || 
-                                                 `https://test.thenimto.com/scenes/${scene.id}/preview.jpg`;
+                              const fallbackUrl = scene.src_original_url?.replace(/\.(jpg|jpeg|png)$/i, '_thumb.$1') ||
+                                `${R2_PUBLIC_URL}/scenes/${scene.id}/preview.jpg`;
                               img.src = fallbackUrl;
                             } else {
                               img.style.display = 'none';

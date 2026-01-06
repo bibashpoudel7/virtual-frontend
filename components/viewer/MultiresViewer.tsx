@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import * as THREE from 'three';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import OverlayRenderer from '../overlays/OverlayRenderer';
+
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
 import { calculateVisibleTiles, getAppropriateLevel } from '@/lib/multires-utils';
 import {
   MAX_CONCURRENT_TILE_LOADS,
@@ -109,7 +111,7 @@ function usePreviewLoader(
     const previewCandidates = [
       manifest?.preview,
       activeScene.src_original_url,
-      `https://test.thenimto.com/scenes/${activeScene.id}/tiles/preview.jpg`,
+      `${R2_PUBLIC_URL}/scenes/${activeScene.id}/tiles/preview.jpg`,
     ].filter(Boolean) as string[];
 
     if (!previewCandidates.length) {

@@ -1,11 +1,13 @@
 import sharp from 'sharp';
 
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+
 export interface TileInfo {
   level: number;
   row: number;
   col: number;
   key: string;
-  buffer: Buffer;
+  buffer?: Buffer;
   url?: string;
 }
 
@@ -161,9 +163,9 @@ export async function generateOptimizedPanoramaTiles(
       row: t.row,
       col: t.col,
       key: t.key,
-      url: `https://test.thenimto.com/scenes/${sceneId}/tiles/${t.key}`
+      url: `${R2_PUBLIC_URL}/scenes/${sceneId}/tiles/${t.key}`
     })),
-    preview: `https://test.thenimto.com/scenes/${sceneId}/tiles/preview.jpg`,
+    preview: `${R2_PUBLIC_URL}/scenes/${sceneId}/tiles/preview.jpg`,
     format: 'jpg'
   };
   

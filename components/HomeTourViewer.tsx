@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
+
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
 import { tourService } from '@/services/tourService';
 import CubeMapViewer from './viewer/CubeMapViewer';
 import AutoplayController from './viewer/AutoplayController';
@@ -298,8 +300,8 @@ const ProgressBar = React.memo(({
                             const img = e.target as HTMLImageElement;
                             if (!img.dataset.fallbackTried) {
                               img.dataset.fallbackTried = 'true';
-                              const fallbackUrl = scene.src_original_url?.replace(/\.(jpg|jpeg|png)$/i, '_thumb.$1') || 
-                                                 `https://test.thenimto.com/scenes/${scene.id}/preview.jpg`;
+                              const fallbackUrl = scene.src_original_url?.replace(/\.(jpg|jpeg|png)$/i, '_thumb.$1') ||
+                                `${R2_PUBLIC_URL}/scenes/${scene.id}/preview.jpg`;
                               img.src = fallbackUrl;
                             } else {
                               img.style.display = 'none';
@@ -482,13 +484,9 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     }
 
     // Use 12 seconds to match the progress bar duration
-    const autoplayInterval = 12000; // Fixed 12 seconds to match progress bar
-    
-    console.log('Setting up autoplay timeout for scene:', currentSceneIndex, 'duration:', autoplayInterval);
-    
+    const autoplayInterval = 12000; // Fixed 12 seconds to match progress bar    
     autoplayTimeoutRef.current = setTimeout(() => {
       const nextIndex = (currentSceneIndex + 1) % scenes.length;
-      console.log('Autoplay: Moving to scene', nextIndex, 'from', currentSceneIndex, 'after', autoplayInterval, 'ms');
       handleSceneChange(nextIndex);
     }, autoplayInterval);
 
@@ -535,8 +533,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   }, [scenes, currentSceneIndex]);
 
   const handleHotspotClick = useCallback((hotspot: Hotspot) => {
-    console.log('Hotspot clicked:', hotspot);
-    
+
     if (hotspot.kind === 'navigation') {
       // Handle navigation hotspots - check both target_scene_id and payload.targetSceneId
       let targetSceneId = hotspot.target_scene_id;

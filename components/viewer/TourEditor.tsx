@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import CubeMapViewer from './CubeMapViewer';
 import OverlayEditor from '../overlays/OverlayEditor';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
+
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
 import { HotspotsAPI } from '@/lib/api/hotspots';
 import { tourService } from '@/services/tourService';
 
@@ -145,8 +147,8 @@ const ProgressBar = ({
                             const img = e.target as HTMLImageElement;
                             if (!img.dataset.fallbackTried) {
                               img.dataset.fallbackTried = 'true';
-                              const fallbackUrl = scene.src_original_url?.replace(/\.(jpg|jpeg|png)$/i, '_thumb.$1') || 
-                                                 `https://test.thenimto.com/scenes/${scene.id}/preview.jpg`;
+                              const fallbackUrl = scene.src_original_url?.replace(/\.(jpg|jpeg|png)$/i, '_thumb.$1') ||
+                                `${R2_PUBLIC_URL}/scenes/${scene.id}/preview.jpg`;
                               img.src = fallbackUrl;
                             } else {
                               img.style.display = 'none';
@@ -691,7 +693,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           faceOrder.forEach(face => {
             const img = new Image();
             img.crossOrigin = 'anonymous';
-            img.src = `https://test.thenimto.com/scenes/${sceneId}/tiles/${face}_l0_0_0.jpg`;
+            img.src = `${R2_PUBLIC_URL}/scenes/${sceneId}/tiles/${face}_l0_0_0.jpg`;
           });
 
           setPreloadedScenes((prev: Set<string>) => new Set(prev).add(sceneId));
