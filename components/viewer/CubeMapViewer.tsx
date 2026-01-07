@@ -1056,8 +1056,8 @@ export default function CubeMapViewer({
 
       if (!controls.isUserInteracting) return;
 
-      // Detect if user is dragging (movement > 5px threshold)
-      const dragThreshold = 5;
+      // Detect if user is dragging (movement > 10px threshold)
+      const dragThreshold = 10;
       const deltaX = Math.abs(event.clientX - controls.onPointerDownX);
       const deltaY = Math.abs(event.clientY - controls.onPointerDownY);
 
@@ -1073,16 +1073,28 @@ export default function CubeMapViewer({
       const controls = controlsRef.current;
       const wasDragging = controls.isDragging;
 
+      console.log('[CubeMapViewer] Click detected:', {
+        wasDragging,
+        isAutoRotatingRef: isAutoRotatingRef.current,
+        autoRotateRef: autoRotateRef.current,
+        hasOnOverlayPause: !!onOverlayPause,
+        isPlaybackMode
+      });
+
       controls.isUserInteracting = false;
       controls.isDragging = false;
 
       // Handle interactions (clicks)
       if (!wasDragging) {
-        // If autoplay is active, ANY click should pause it immediately
-        if ((isAutoRotatingRef.current || autoRotateRef.current) && onOverlayPause) {
+        // If autoplay OR playback is active, ANY click should pause it immediately
+        const isAnyPlaybackActive = isAutoRotatingRef.current || autoRotateRef.current || isPlaybackMode;
+        if (isAnyPlaybackActive && onOverlayPause) {
+          console.log('[CubeMapViewer] PAUSING - calling onOverlayPause');
           onOverlayPause();
           // We still continue to process the click (e.g. to navigate or show info), 
           // but the pause happens first/simultaneously.
+        } else {
+          console.log('[CubeMapViewer] NOT PAUSING - conditions not met');
         }
 
         let clickedOnTarget = false;
@@ -1107,9 +1119,11 @@ export default function CubeMapViewer({
             }
           }
 
-          // 2. Smart Proximity Check (if no direct hit and not playback mode)
+          // 2. Smart Proximity Check (if no direct hit and not in playback/autoplay mode)
           // If we clicked on the background (wall/floor) but close to a navigation hotspot, go there!
-          if (!clickedOnTarget && !isPlaybackMode && hotspots.length > 0) {
+          // BUT: Disable this during autoplay/playback - we want clicks to pause, not navigate
+          const isAutoplayActive = isAutoRotatingRef.current || autoRotateRef.current;
+          if (!clickedOnTarget && !isPlaybackMode && !isAutoplayActive && hotspots.length > 0) {
             let bestAngle = Math.PI; // Max possible angle
             const proximityThreshold = 25 * (Math.PI / 180); // 25 degrees threshold
 
