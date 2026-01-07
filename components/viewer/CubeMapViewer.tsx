@@ -22,6 +22,9 @@ interface CubeMapViewerProps {
   autoRotate?: boolean;
   highlightedHotspotId?: string | null;
   onOverlayPause?: () => void;
+  onCameraChange?: (yaw: number, pitch: number, fov: number) => void;
+  forcedCameraPosition?: { yaw: number; pitch: number; fov: number } | null;
+  isPlaybackMode?: boolean;
 }
 
 
@@ -39,6 +42,9 @@ export default function CubeMapViewer({
   autoRotate = false,
   highlightedHotspotId = null,
   onOverlayPause,
+  onCameraChange,
+  forcedCameraPosition = null,
+  isPlaybackMode = false,
 }: CubeMapViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -79,6 +85,7 @@ export default function CubeMapViewer({
     lat: 0,
     phi: 0,
     theta: 0,
+    isDragging: false, // Track if user is dragging vs clicking
   });
 
   const isAutoRotatingRef = useRef(isAutoRotating);
@@ -93,6 +100,17 @@ export default function CubeMapViewer({
     autoRotateRef.current = autoRotate;
   }, [autoRotate]);
 
+  // Apply forced camera position (for Play Tour playback)
+  useEffect(() => {
+    if (forcedCameraPosition && cameraRef.current) {
+      const controls = controlsRef.current;
+      controls.lon = forcedCameraPosition.yaw;
+      controls.lat = forcedCameraPosition.pitch;
+      cameraRef.current.fov = forcedCameraPosition.fov;
+      cameraRef.current.updateProjectionMatrix();
+    }
+  }, [forcedCameraPosition]);
+
   // Parse manifest from scene
   useEffect(() => {
     if (currentScene.tiles_manifest) {
@@ -102,7 +120,7 @@ export default function CubeMapViewer({
           : currentScene.tiles_manifest;
 
         if (parsed.type === 'cubemap') {
-          console.log('Parsed manifest:', JSON.stringify(parsed, null, 2));
+
           // Clear texture cache when switching scenes
           if (loadedTexturesRef.current.size > 0) {
             loadedTexturesRef.current.forEach(texture => texture.dispose());
@@ -115,7 +133,22 @@ export default function CubeMapViewer({
         console.error('Failed to parse cube map manifest:', error);
       }
     }
-  }, [currentScene]);
+
+    // Reset camera to scene defaults (only if not in playback mode AND no forced camera position)
+    if (!isPlaybackMode && !forcedCameraPosition) {
+      const controls = controlsRef.current;
+      controls.lon = currentScene.yaw || 0;
+      controls.lat = currentScene.pitch || 0;
+      controls.targetRotationX = 0; // Reset momentum
+      controls.targetRotationY = 0;
+
+      if (cameraRef.current) {
+        // Reset FOV if defined, or default to 60 (or tour default if we had access, otherwise 60)
+        cameraRef.current.fov = currentScene.fov || 60;
+        cameraRef.current.updateProjectionMatrix();
+      }
+    }
+  }, [currentScene, isPlaybackMode]);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -186,7 +219,8 @@ export default function CubeMapViewer({
 
       // Auto-rotation controlled by state or scene settings
       // Use refs to access latest values without re-triggering effect
-      if ((autoRotateRef.current || isAutoRotatingRef.current) && !controls.isUserInteracting) {
+      // Skip auto-rotate during playback mode
+      if (!isPlaybackMode && (autoRotateRef.current || isAutoRotatingRef.current) && !controls.isUserInteracting) {
         const rotateSpeed = 0.5;
         controls.lon += rotateSpeed * 0.2; // Apply rotation speed (increased for visibility)
       }
@@ -260,6 +294,17 @@ export default function CubeMapViewer({
       // Removed manual overlay scaling logic
 
       rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+      // Report camera changes to parent if needed
+      if (onCameraChange) {
+        // Use lon (yaw) and lat (pitch) which are already in degrees
+        // Normalize lon to -180 to 180 range like TourEditor does
+        let normalizedLon = controls.lon % 360;
+        if (normalizedLon > 180) normalizedLon -= 360;
+        if (normalizedLon < -180) normalizedLon += 360;
+
+        onCameraChange(normalizedLon, controls.lat, cameraRef.current.fov);
+      }
     };
 
     animate();
@@ -300,26 +345,14 @@ export default function CubeMapViewer({
     const currentManifest = manifest;
     if (!currentManifest || !sceneRef.current || !currentManifest.levels[level]) return;
 
-    console.log(`Loading cube map level ${level}`);
+    // optimization: During playback, stick to lower levels (max level 1) to prevent lag
+    if (isPlaybackMode && level > 1) {
+      return;
+    }
+
     const levelInfo = currentManifest.levels[level];
     const tilesPerSide = levelInfo.tiles;
     const faceSize = levelInfo.size;
-
-    // Debug: Check if tilesPerSide is being calculated correctly
-    const actualTileSize = levelInfo.tileSize || currentManifest.tileSize || 512;
-    const calculatedTiles = Math.ceil(faceSize / actualTileSize);
-    console.log(`Level ${level} tile calculation: faceSize=${faceSize}, tileSize=${actualTileSize}, tilesPerSide=${tilesPerSide}, calculated=${calculatedTiles}`);
-    if (calculatedTiles !== tilesPerSide) {
-      console.error(`CRITICAL: Tiles mismatch! Manifest says tiles=${tilesPerSide}, but calculated ${calculatedTiles} from size ${faceSize} / tileSize ${actualTileSize}`);
-      console.error('Using manifest value, but this may cause 404 errors');
-    }
-
-    console.log(`Level ${level} info:`, {
-      tilesPerSide,
-      faceSize,
-      tileSize: levelInfo.tileSize || manifest.tileSize || 512,
-      fullLevelInfo: levelInfo
-    });
 
     const faceOrder = [
       CubeFace.RIGHT,
@@ -372,8 +405,6 @@ export default function CubeMapViewer({
                 oldMap.dispose();
               }
             }
-
-            console.log(`Loaded ${face} at level ${level} (single tile)`);
           },
           undefined,
           (error) => {
@@ -461,7 +492,7 @@ export default function CubeMapViewer({
                 }
               }
 
-              console.log(`Composited ${face} at level ${level} (${tilesPerSide}x${tilesPerSide} tiles, ${faceSize}x${faceSize}px)`);
+
             }
           };
 
@@ -490,7 +521,7 @@ export default function CubeMapViewer({
         }
       }
     });
-  }, [manifest, currentScene.id]);
+  }, [manifest, currentScene.id, isPlaybackMode]);
 
   // Load cube map tiles
   useEffect(() => {
@@ -558,20 +589,20 @@ export default function CubeMapViewer({
             if (manifest && manifest.levels && manifest.levels.length > 1) {
               // Load level 1 immediately for better default quality
               setTimeout(() => {
-                console.log('Auto-loading level 1 for better quality');
+
                 loadCubeMapLevel(1);
                 setCurrentLevel(1);
 
                 // Pre-load level 2 after level 1 is loaded
                 if (manifest.levels.length > 2) {
                   setTimeout(() => {
-                    console.log('Pre-loading level 2 in background');
+
                     loadCubeMapLevel(2);
 
                     // Pre-load level 3 for maximum quality
                     if (manifest.levels.length > 3) {
                       setTimeout(() => {
-                        console.log('Pre-loading level 3 for maximum quality');
+
                         loadCubeMapLevel(3);
                       }, 1500);
                     }
@@ -914,195 +945,13 @@ export default function CubeMapViewer({
     const onPointerDown = (event: PointerEvent) => {
       event.preventDefault();
 
+      // Disable user interaction during playback mode
+      if (isPlaybackMode) return;
+
       const controls = controlsRef.current;
 
-      // Check for hotspot/overlay clicks first (before pausing autoplay)
-      let isHotspotClick = false;
-      if (hotspots.length > 0 || overlays.length > 0) {
-        const rect = container.getBoundingClientRect();
-        mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-        if (cameraRef.current && sceneRef.current) {
-          raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-
-          // Check hotspots to see if we're clicking on one
-          if (hotspotsRef.current) {
-            const hotspotIntersects = raycasterRef.current.intersectObjects(
-              hotspotsRef.current.children,
-              true
-            );
-            isHotspotClick = hotspotIntersects.length > 0;
-          }
-        }
-      }
-
-      // Only pause autoplay if we're NOT clicking on a hotspot (i.e., this is a drag operation)
-      if ((isAutoRotatingRef.current || autoRotateRef.current) && onOverlayPause && !isHotspotClick) {
-        onOverlayPause();
-      }
-
-      // Check for hotspot/overlay clicks (now works in both edit and view modes)
-      if (hotspots.length > 0 || overlays.length > 0) {
-        const rect = container.getBoundingClientRect();
-        mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-        if (cameraRef.current && sceneRef.current) {
-          raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-
-          // Check overlays first (they're in front)
-          // Overlay click handling is managed by OverlayRenderer
-
-          // Check hotspots
-          if (hotspotsRef.current) {
-            const hotspotIntersects = raycasterRef.current.intersectObjects(
-              hotspotsRef.current.children,
-              true
-            );
-
-            if (hotspotIntersects.length > 0) {
-              const clickedObject = hotspotIntersects[0].object as THREE.Sprite;
-              const hotspot = clickedObject.userData.hotspot;
-
-              // Handle navigation - move close to hotspot then load new scene
-              if (hotspot && hotspot.kind === 'navigation') {
-                // Set transitioning state
-                setIsTransitioning(true);
-                setLoadingProgress(0);
-
-                // Don't trigger scene change yet - wait until after animation
-                console.log('Navigation hotspot clicked, will load after animation:', hotspot);
-
-                // Store initial camera state
-                const startFov = cameraRef.current!.fov;
-                const startScale = cubeRef.current?.scale.x || 1;
-                const startLon = controls.lon;
-                const startLat = controls.lat;
-
-                // Calculate direction to hotspot - align camera with hotspot position
-                const hotspotYaw = (hotspot.yaw || 0); // In degrees
-                const hotspotPitch = (hotspot.pitch || 0); // In degrees
-
-                // Convert hotspot position to 3D coordinates (same as hotspot rendering)
-                const yawRad = hotspotYaw * Math.PI / 180;
-                const pitchRad = hotspotPitch * Math.PI / 180;
-                const distance = 45; // Same as hotspot distance
-                const hx = distance * Math.cos(pitchRad) * Math.sin(yawRad);
-                const hy = distance * Math.sin(pitchRad);
-                const hz = distance * Math.cos(pitchRad) * Math.cos(yawRad);
-
-                // Calculate camera angles to look at this 3D position
-                // Using atan2 to get the correct angle
-                let targetLon = Math.atan2(hx, hz) * 180 / Math.PI;
-                const targetLat = Math.atan2(hy, Math.sqrt(hx * hx + hz * hz)) * 180 / Math.PI;
-
-                // Limit the rotation to maximum 30 degrees in any direction
-                const maxRotation = 30;
-                let lonDiff = targetLon - startLon;
-
-                // Normalize angle difference to [-180, 180]
-                while (lonDiff > 180) lonDiff -= 360;
-                while (lonDiff < -180) lonDiff += 360;
-
-                // Clamp rotation to max 30 degrees
-                if (Math.abs(lonDiff) > maxRotation) {
-                  lonDiff = lonDiff > 0 ? maxRotation : -maxRotation;
-                }
-                targetLon = startLon + lonDiff;
-
-                // Animation settings - smooth movement toward hotspot (1.5 seconds as requested)
-                const moveDuration = 1500; // 1.5 seconds for smooth transition
-                const startTime = Date.now();
-
-                // Disable user interaction during animation (but keep autoplay active)
-                controls.isUserInteracting = true;
-                isNavigatingRef.current = true; // Mark as navigating
-
-                const animateToHotspot = () => {
-                  const elapsed = Date.now() - startTime;
-                  const progress = Math.min(elapsed / moveDuration, 1);
-
-                  // Very smooth easing - ease in and out
-                  const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
-                  const easedProgress = easeInOutSine(progress);
-
-                  // Slightly turn toward the hotspot (limited rotation)
-                  controls.lon = startLon + (targetLon - startLon) * easedProgress;
-                  controls.lat = startLat + (targetLat - startLat) * easedProgress * 0.5; // Even less vertical rotation
-
-                  // Strong zoom to get very close to hotspot
-                  const targetFov = 20; // Slightly less aggressive zoom
-                  if (cameraRef.current) {
-                    cameraRef.current.fov = startFov + (targetFov - startFov) * easedProgress;
-                    cameraRef.current.updateProjectionMatrix();
-                  }
-
-                  // Move very close to the hotspot
-                  if (cubeRef.current) {
-                    const targetScale = startScale * 0.6; // Move closer to hotspot
-                    const scale = startScale + (targetScale - startScale) * easedProgress;
-                    cubeRef.current.scale.set(scale, scale, scale);
-                  }
-
-                  // Don't fade - keep old scene visible
-                  // Remove opacity changes to prevent any darkening
-
-                  // Update loading progress for UI
-                  setLoadingProgress(Math.floor(progress * 100));
-
-                  if (progress < 1) {
-                    requestAnimationFrame(animateToHotspot);
-                  } else {
-                    // Movement complete - NOW trigger scene change
-                    console.log('Animation complete, triggering scene change:', hotspot);
-
-                    // Trigger the scene change after animation
-                    if (onHotspotClick) {
-                      onHotspotClick(hotspot);
-                    }
-
-                    // Mark navigation complete
-                    isNavigatingRef.current = false;
-
-                    // Reset camera and controls for new scene
-                    if (cameraRef.current) {
-                      cameraRef.current.fov = 60;
-                      cameraRef.current.updateProjectionMatrix();
-                    }
-                    if (cubeRef.current) {
-                      cubeRef.current.scale.set(1, 1, 1);
-                    }
-
-                    // Reset controls to neutral position for new scene
-                    controls.lon = 0;
-                    controls.lat = 0;
-                    controls.isUserInteracting = false;
-
-                    // Reset transitioning state
-                    setTimeout(() => {
-                      setIsTransitioning(false);
-                      setLoadingProgress(0);
-                    }, 200);
-                  }
-                };
-
-                animateToHotspot();
-                return;
-              }
-
-              // Handle other hotspot types (info, link)
-              if (hotspot && onHotspotClick) {
-                onHotspotClick(hotspot);
-                return;
-              }
-            }
-          }
-
-          // Check overlays
-          // Overlay interaction is handled by OverlayRenderer
-        }
-      }
+      // Reset drag flag
+      controls.isDragging = false;
 
       // Edit mode: create hotspot with Shift + Click (matching your editor controls)
       if (isEditMode && event.shiftKey) {
@@ -1207,16 +1056,215 @@ export default function CubeMapViewer({
 
       if (!controls.isUserInteracting) return;
 
+      // Detect if user is dragging (movement > 5px threshold)
+      const dragThreshold = 5;
+      const deltaX = Math.abs(event.clientX - controls.onPointerDownX);
+      const deltaY = Math.abs(event.clientY - controls.onPointerDownY);
+
+      if (deltaX > dragThreshold || deltaY > dragThreshold) {
+        controls.isDragging = true;
+      }
+
       controls.lon = (controls.onPointerDownX - event.clientX) * 0.15 + controls.onPointerDownLon;
       controls.lat = (event.clientY - controls.onPointerDownY) * 0.15 + controls.onPointerDownLat;
     };
 
-    const onPointerUp = () => {
-      controlsRef.current.isUserInteracting = false;
+    const onPointerUp = (event: PointerEvent) => {
+      const controls = controlsRef.current;
+      const wasDragging = controls.isDragging;
+
+      controls.isUserInteracting = false;
+      controls.isDragging = false;
+
+      // Handle interactions (clicks)
+      if (!wasDragging) {
+        // If autoplay is active, ANY click should pause it immediately
+        if ((isAutoRotatingRef.current || autoRotateRef.current) && onOverlayPause) {
+          onOverlayPause();
+          // We still continue to process the click (e.g. to navigate or show info), 
+          // but the pause happens first/simultaneously.
+        }
+
+        let clickedOnTarget = false;
+        let targetHotspot: Hotspot | null = null;
+        const rect = container.getBoundingClientRect();
+        mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        if (cameraRef.current && sceneRef.current) {
+          raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
+
+          // 1. Direct hit check
+          if (hotspotsRef.current) {
+            const hotspotIntersects = raycasterRef.current.intersectObjects(hotspotsRef.current.children, true);
+            if (hotspotIntersects.length > 0) {
+              const clickedObject = hotspotIntersects[0].object as THREE.Sprite;
+              // Check if it's a hotspot (has userData) or part of one
+              if (clickedObject.userData && clickedObject.userData.hotspot) {
+                targetHotspot = clickedObject.userData.hotspot;
+                clickedOnTarget = true;
+              }
+            }
+          }
+
+          // 2. Smart Proximity Check (if no direct hit and not playback mode)
+          // If we clicked on the background (wall/floor) but close to a navigation hotspot, go there!
+          if (!clickedOnTarget && !isPlaybackMode && hotspots.length > 0) {
+            let bestAngle = Math.PI; // Max possible angle
+            const proximityThreshold = 25 * (Math.PI / 180); // 25 degrees threshold
+
+            // Get current ray direction
+            const ray = raycasterRef.current.ray;
+
+            hotspots.forEach(hotspot => {
+              if (hotspot.kind !== 'navigation') return;
+
+              // Calculate 3D position of hotspot
+              const yawRad = (hotspot.yaw || 0) * Math.PI / 180;
+              const pitchRad = (hotspot.pitch || 0) * Math.PI / 180;
+              const distance = 45;
+              const hx = distance * Math.cos(pitchRad) * Math.sin(yawRad);
+              const hy = distance * Math.sin(pitchRad);
+              const hz = distance * Math.cos(pitchRad) * Math.cos(yawRad);
+
+              const hotspotVec = new THREE.Vector3(hx, hy, hz).normalize();
+              const angle = ray.direction.angleTo(hotspotVec);
+
+              if (angle < proximityThreshold && angle < bestAngle) {
+                bestAngle = angle;
+                targetHotspot = hotspot;
+              }
+            });
+
+            if (targetHotspot) {
+              clickedOnTarget = true;
+            }
+          }
+        }
+
+        // 3. Action Logic
+        if (targetHotspot) {
+          // Handle Navigation Hotspot (Smooth Animation)
+          if (targetHotspot.kind === 'navigation') {
+            const hotspot = targetHotspot;
+
+            // Trigger Animation
+            setIsTransitioning(true);
+            setLoadingProgress(0);
+
+            // Store initial camera state
+            const startFov = cameraRef.current!.fov;
+            const startScale = cubeRef.current?.scale.x || 1;
+            const startLon = controls.lon;
+            const startLat = controls.lat;
+
+            // Calculate target direction
+            const yawRad = (hotspot.yaw || 0) * Math.PI / 180;
+            const pitchRad = (hotspot.pitch || 0) * Math.PI / 180;
+            const distance = 45;
+            const hx = distance * Math.cos(pitchRad) * Math.sin(yawRad);
+            const hy = distance * Math.sin(pitchRad);
+            const hz = distance * Math.cos(pitchRad) * Math.cos(yawRad);
+
+            let targetLon = Math.atan2(hx, hz) * 180 / Math.PI;
+            const targetLat = Math.atan2(hy, Math.sqrt(hx * hx + hz * hz)) * 180 / Math.PI;
+
+            // Limit rotation to avoid dizzying spins
+            const maxRotation = 30;
+            let lonDiff = targetLon - startLon;
+            while (lonDiff > 180) lonDiff -= 360;
+            while (lonDiff < -180) lonDiff += 360;
+
+            if (Math.abs(lonDiff) > maxRotation) {
+              lonDiff = lonDiff > 0 ? maxRotation : -maxRotation;
+            }
+            targetLon = startLon + lonDiff;
+
+            // Animation params
+            const moveDuration = 1500;
+            const startTime = Date.now();
+            controls.isUserInteracting = true;
+            isNavigatingRef.current = true;
+
+            // Determine final targets based on direction
+            let finalTargetLon = targetLon;
+            let finalTargetLat = targetLat;
+            let finalTargetFov = 20; // ZOOM IN effect
+
+            const direction = hotspot.transition_direction || 'forward';
+
+            if (direction === 'left') { finalTargetLon = startLon - 30; finalTargetFov = startFov; }
+            else if (direction === 'right') { finalTargetLon = startLon + 30; finalTargetFov = startFov; }
+            else if (direction === 'up') { finalTargetLat = startLat + 20; finalTargetFov = startFov; }
+            else if (direction === 'down') { finalTargetLat = startLat - 20; finalTargetFov = startFov; }
+            else if (direction === 'backward') { finalTargetLon = startLon + 180; finalTargetFov = 100; } // Zoom out for backward
+
+            const animateToHotspot = () => {
+              const elapsed = Date.now() - startTime;
+              const progress = Math.min(elapsed / moveDuration, 1);
+              const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
+              const easedProgress = easeInOutSine(progress);
+
+              // Update View
+              controls.lon = startLon + (finalTargetLon - startLon) * easedProgress;
+              controls.lat = startLat + (finalTargetLat - startLat) * easedProgress;
+
+              if (cameraRef.current) {
+                cameraRef.current.fov = startFov + (finalTargetFov - startFov) * easedProgress;
+                cameraRef.current.updateProjectionMatrix();
+              }
+
+              if (cubeRef.current && direction === 'forward') {
+                // Scale cube down to simulate moving closer
+                const targetScale = startScale * 0.6;
+                const scale = startScale + (targetScale - startScale) * easedProgress;
+                cubeRef.current.scale.set(scale, scale, scale);
+              }
+
+              setLoadingProgress(Math.floor(progress * 100));
+
+              if (progress < 1) {
+                requestAnimationFrame(animateToHotspot);
+              } else {
+                // Animation Done - Fire Event
+                if (onHotspotClick) onHotspotClick(hotspot);
+
+                // Reset
+                isNavigatingRef.current = false;
+                if (cameraRef.current) {
+                  cameraRef.current.fov = 60;
+                  cameraRef.current.updateProjectionMatrix();
+                }
+                if (cubeRef.current) cubeRef.current.scale.set(1, 1, 1);
+                controls.lon = 0;
+                controls.lat = 0;
+                controls.isUserInteracting = false;
+                setIsTransitioning(false);
+              }
+            };
+
+            animateToHotspot();
+
+          } else {
+            // Handle other hotspots (Info, Link) directly
+            if (onHotspotClick) onHotspotClick(targetHotspot);
+          }
+        }
+        else {
+          // No target found - Toggle Pause (if autoplaying)
+          if ((isAutoRotatingRef.current || autoRotateRef.current) && onOverlayPause) {
+            onOverlayPause();
+          }
+        }
+      }
     };
 
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
+
+      // Disable zoom during playback
+      if (isPlaybackMode) return;
+
       if (!cameraRef.current) return;
 
       const fov = cameraRef.current.fov + event.deltaY * 0.05;
@@ -1243,17 +1291,17 @@ export default function CubeMapViewer({
         // Only change level if we're upgrading quality or significantly zooming out
         if (targetLevel > currentLevel) {
           // Upgrade quality
-          console.log(`Upgrading to level ${targetLevel} (FOV: ${cameraRef.current.fov.toFixed(1)})`);
+
           loadCubeMapLevel(targetLevel);
           setCurrentLevel(targetLevel);
         } else if (targetLevel < currentLevel && cameraRef.current.fov > 75) {
           // Only downgrade when significantly zoomed out to save memory
-          console.log(`Downgrading to level ${targetLevel} for wide view (FOV: ${cameraRef.current.fov.toFixed(1)})`);
+
           loadCubeMapLevel(targetLevel);
           setCurrentLevel(targetLevel);
         } else if (targetLevel === currentLevel) {
           // Already at correct level
-          console.log(`Already at level ${currentLevel} (FOV: ${cameraRef.current.fov.toFixed(1)})`);
+
         }
       }
     };
@@ -1261,7 +1309,7 @@ export default function CubeMapViewer({
     container.addEventListener('pointerdown', onPointerDown);
     container.addEventListener('pointermove', onPointerMove);
     container.addEventListener('pointerup', onPointerUp);
-    container.addEventListener('wheel', onWheel);
+    container.addEventListener('wheel', onWheel, { passive: false });
 
     return () => {
       container.removeEventListener('pointerdown', onPointerDown);
@@ -1288,7 +1336,7 @@ export default function CubeMapViewer({
 
       <div
         ref={containerRef}
-        className={`w-full h-full transition-opacity duration-300 opacity-100 ${isEditMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
+        className={`w-full h-full touch-action-none transition-opacity duration-300 opacity-100 ${isEditMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
         style={isEditMode ? { border: '2px dashed rgba(76, 175, 80, 0.5)' } : {}}
       />
 
@@ -1303,7 +1351,7 @@ export default function CubeMapViewer({
       )}
 
       {/* Auto-rotate toggle button */}
-      <button
+      {/* <button
         onClick={() => setIsAutoRotating(!isAutoRotating)}
         className={`absolute bottom-4 right-4 z-20 px-3 py-2 rounded-lg backdrop-blur-sm transition-all ${isAutoRotating
           ? 'bg-blue-600/80 text-white hover:bg-blue-700/80'
@@ -1329,7 +1377,7 @@ export default function CubeMapViewer({
             {isAutoRotating ? 'Auto-rotating' : 'Auto-rotate'}
           </span>
         </div>
-      </button>
+      </button> */}
 
       {isLoading && !isNavigatingRef.current && !autoRotate && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
@@ -1372,9 +1420,9 @@ export default function CubeMapViewer({
           scene={sceneRef.current}
           overlayGroup={overlaysRef.current}
           isEditMode={isEditMode}
-          isAutoplay={isAutoRotating || autoRotate}
+          isAutoplay={isAutoRotating || autoRotate || isPlaybackMode}
           onPause={onOverlayPause}
-          onOverlayClick={(overlay) => console.log('Overlay clicked:', overlay.id)}
+          onOverlayClick={(overlay) => void 0}
         />
       )}
     </div>

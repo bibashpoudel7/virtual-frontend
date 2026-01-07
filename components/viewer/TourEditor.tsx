@@ -1,9 +1,10 @@
 'use client';
 // frontend/components/viewer/TourEditor.tsx
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import CubeMapViewer from './CubeMapViewer';
 import OverlayEditor from '../overlays/OverlayEditor';
-import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
+import { Tour, Scene, Hotspot, Overlay, PlayTour } from '@/types/tour';
+import PlayTourEditor from '../tours/PlayTourEditor';
 
 const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
 import { HotspotsAPI } from '@/lib/api/hotspots';
@@ -15,25 +16,25 @@ function debounce<T extends (...args: any[]) => any>(
   wait: number
 ): ((...args: Parameters<T>) => void) & { cancel: () => void } {
   let timeout: NodeJS.Timeout;
-  
+
   const debounced = (...args: Parameters<T>) => {
     clearTimeout(timeout);
     timeout = setTimeout(() => func(...args), wait);
   };
-  
+
   debounced.cancel = () => {
     clearTimeout(timeout);
   };
-  
+
   return debounced;
 }
 
 // Progress bar component for fullscreen mode
-const ProgressBar = ({ 
-  scenes, 
-  currentSceneIndex, 
-  isAutoplay, 
-  isTransitioning, 
+const ProgressBar = ({
+  scenes,
+  currentSceneIndex,
+  isAutoplay,
+  isTransitioning,
   onSceneChange,
   isOverlayModalOpen = false
 }: {
@@ -62,25 +63,25 @@ const ProgressBar = ({
 
     if (isAutoplay && !isOverlayModalOpen) {
       startTimeRef.current = Date.now() - (pausedProgressRef.current * 12000);
-      
+
       const updateProgress = () => {
         if (!progressBarRef.current || isTransitioning) return;
-        
+
         const elapsed = Date.now() - startTimeRef.current;
         const progress = Math.min(1, elapsed / 12000);
-        
+
         pausedProgressRef.current = progress;
-        
+
         const currentProgressBar = progressBarRef.current.querySelector(`[data-scene-index="${currentSceneIndex}"] .progress-fill`) as HTMLElement;
         if (currentProgressBar) {
           currentProgressBar.style.width = `${progress * 100}%`;
         }
-        
+
         if (progress < 1 && isAutoplay && !isOverlayModalOpen) {
           animationRef.current = requestAnimationFrame(updateProgress);
         }
       };
-      
+
       animationRef.current = requestAnimationFrame(updateProgress);
     } else {
       if (progressBarRef.current) {
@@ -90,7 +91,7 @@ const ProgressBar = ({
         }
       }
     }
-    
+
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
@@ -106,7 +107,7 @@ const ProgressBar = ({
         {scenes.map((scene, index) => {
           const isCompleted = index < currentSceneIndex;
           const isCurrent = index === currentSceneIndex;
-          
+
           return (
             <div
               key={scene.id}
@@ -114,19 +115,18 @@ const ProgressBar = ({
               data-scene-index={index}
             >
               <div className="w-full h-1 bg-white/40 rounded-full overflow-hidden">
-                <div 
-                  className={`progress-fill h-full rounded-full ${
-                    isCompleted || isCurrent 
-                      ? 'bg-red-500' 
-                      : 'bg-white/40'
-                  }`}
-                  style={{ 
+                <div
+                  className={`progress-fill h-full rounded-full ${isCompleted || isCurrent
+                    ? 'bg-red-500'
+                    : 'bg-white/40'
+                    }`}
+                  style={{
                     width: isCompleted ? '100%' : '0%',
                     backgroundColor: isCompleted || isCurrent ? '#ef4444' : undefined
                   }}
                 />
               </div>
-              
+
               <button
                 onClick={() => onSceneChange(index)}
                 disabled={isTransitioning}
@@ -134,13 +134,13 @@ const ProgressBar = ({
                 title={scene.name || `Scene ${index + 1}`}
               >
                 <div className="absolute inset-0 top-2 bottom-2 bg-red-400/30 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-                
+
                 <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-300 delay-150 pointer-events-none z-50">
                   <div className="bg-black/90 backdrop-blur-sm rounded-lg overflow-hidden shadow-xl border border-white/20">
                     <div className="w-32 h-20 bg-gray-800 relative overflow-hidden">
                       {scene.src_original_url ? (
-                        <img 
-                          src={scene.src_original_url} 
+                        <img
+                          src={scene.src_original_url}
                           alt={scene.name || `Scene ${index + 1}`}
                           className="w-full h-full object-cover"
                           onError={(e) => {
@@ -158,7 +158,7 @@ const ProgressBar = ({
                           }}
                         />
                       ) : null}
-                      <div 
+                      <div
                         className="w-full h-full flex items-center justify-center text-white/60 text-xs"
                         style={{ display: scene.src_original_url ? 'none' : 'flex' }}
                       >
@@ -207,11 +207,13 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const [pendingHotspot, setPendingHotspot] = useState<{ yaw: number; pitch: number } | null>(null);
   const [pendingOverlay, setPendingOverlay] = useState<{ yaw: number; pitch: number } | null>(null);
   const [selectedTargetScene, setSelectedTargetScene] = useState<string>('');
+  const [transitionDirection, setTransitionDirection] = useState<string>('forward'); // Add default direction
   const [isLoading, setIsLoading] = useState(false);
   const [deletingHotspotId, setDeletingHotspotId] = useState<string | null>(null);
   const [deletingOverlayId, setDeletingOverlayId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [editPanel, setEditPanel] = useState<'hotspots' | 'overlays' | null>('hotspots');
+  const [editPanel, setEditPanel] = useState<'hotspots' | 'overlays' | 'playTours' | null>('hotspots');
+  const [currentCamera, setCurrentCamera] = useState({ yaw: 0, pitch: 0, fov: 75 });
   const [hotspotType, setHotspotType] = useState<'navigation' | 'info' | 'link'>('navigation');
   const [infoText, setInfoText] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
@@ -225,22 +227,48 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   // Audio controls state
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [isAutoplay, setIsAutoplay] = useState(tour.autoplay_enabled || false);
   const [isClient, setIsClient] = useState(false);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
-  
+
   // Audio management state
   const [showAudioSettings, setShowAudioSettings] = useState(false);
   const [newAudioUrl, setNewAudioUrl] = useState('');
   const [isUpdatingAudio, setIsUpdatingAudio] = useState(false);
-  
+
   // Hotspot editing state
   const [editingHotspot, setEditingHotspot] = useState<string | null>(null);
   const [editingPitch, setEditingPitch] = useState<string>('');
   const [editingYaw, setEditingYaw] = useState<string>('');
+
+  // Play Tour state
+  const [playTours, setPlayTours] = useState<PlayTour[]>([]);
+  const [selectedPlayTourId, setSelectedPlayTourId] = useState<string | null>(null);
+  const [currentPlayTourSceneIndex, setCurrentPlayTourSceneIndex] = useState(0);
+  const [isPlayingTour, setIsPlayingTour] = useState(false);
+
+  const playTourDisplayScenes = useMemo(() => {
+    if (!selectedPlayTourId) return null;
+    const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+    if (!selectedTour || !selectedTour.play_tour_scenes) return null;
+
+    return selectedTour.play_tour_scenes.map((ps: any, idx: number) => {
+      const scene = scenes.find(s => s.id === ps.scene_id);
+      // Construct a compatible scene object for the ProgressBar
+      if (!scene) return null;
+
+      return {
+        ...scene,
+        id: `${ps.id}-${idx}`, // Unique ID for the progress bar key
+        originalId: scene.id,
+        name: scene.name || 'Tour Step',
+      };
+    }).filter(Boolean) as (Scene & { originalId: string })[];
+  }, [selectedPlayTourId, playTours, scenes]);
 
   const currentScene = scenes.find(s => s.id === currentSceneId) || scenes[0];
 
@@ -252,16 +280,26 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     }
   }, [currentSceneId, scenes, currentSceneIndex]);
 
+  // Memoize filtered hotspots and overlays to prevent re-renders in CubeMapViewer
+  // causing performance issues during playback animation
+  const currentSceneHotspots = useMemo(() =>
+    hotspots.filter(h => h.scene_id === currentSceneId),
+    [hotspots, currentSceneId]);
+
+  const currentSceneOverlays = useMemo(() =>
+    overlays.filter(o => o.scene_id === currentSceneId),
+    [overlays, currentSceneId]);
+
   // Load hotspots and overlays for all scenes in the tour
   useEffect(() => {
     const loadAllHotspotsAndOverlays = async () => {
       if (!tour.id) return;
-      
+
       try {
         // Load all hotspots for the entire tour
         const allTourHotspots = await HotspotsAPI.getTourHotspots(tour.id);
         setHotspots(allTourHotspots);
-        
+
         // Load overlays for all scenes
         const allOverlays: Overlay[] = [];
         for (const scene of scenes) {
@@ -273,7 +311,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           }
         }
         setOverlays(allOverlays);
-        
+
         setError(null);
       } catch (err) {
         console.error('Failed to load hotspots and overlays:', err);
@@ -285,6 +323,147 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
     loadAllHotspotsAndOverlays();
   }, [tour.id, scenes]); // Depend on scenes array to reload when scenes change
+
+  // Load Play Tours for this tour
+  useEffect(() => {
+    const loadPlayTours = async () => {
+      if (!tour.id) return;
+
+      try {
+        const tours = await tourService.listPlayTours(tour.id);
+        setPlayTours(tours);
+        // Auto-select the first play tour if available
+        if (tours && tours.length > 0) {
+          setSelectedPlayTourId(tours[0].id);
+        }
+      } catch (err) {
+        console.error('Failed to load play tours:', err);
+      }
+    };
+
+    loadPlayTours();
+  }, [tour.id]);
+
+  // Play Tour playback logic
+  useEffect(() => {
+    if (!isPlayingTour || !selectedPlayTourId) {
+      return;
+    }
+
+    const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+    if (!selectedTour || !selectedTour.play_tour_scenes || selectedTour.play_tour_scenes.length === 0) {
+      console.error('[Play Tour] No scenes in selected Play Tour');
+      setIsPlayingTour(false);
+      return;
+    }
+
+    let currentSceneIdx = 0;
+    let animationFrameId: number | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isCleanedUp = false;
+
+    const playNextScene = () => {
+      if (isCleanedUp || currentSceneIdx >= selectedTour.play_tour_scenes.length) {
+        // Tour complete
+        setIsPlayingTour(false);
+        return;
+      }
+
+      const playTourScene = selectedTour.play_tour_scenes[currentSceneIdx];
+      const sceneId = playTourScene.scene_id;
+
+      // Change to the scene
+      setCurrentSceneId(sceneId);
+      const sceneIndex = scenes.findIndex(s => s.id === sceneId);
+      if (sceneIndex !== -1) {
+        setCurrentSceneIndex(sceneIndex);
+      }
+
+      // Wait for scene to load, then animate camera
+      setTimeout(() => {
+        if (isCleanedUp) return;
+
+        const startTime = Date.now();
+        const moveDuration = playTourScene.move_duration || 5000;
+        const waitDuration = playTourScene.wait_duration || 1000;
+
+        // Easing function for smooth animation
+        const easeInOutCubic = (t: number) => {
+          return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        };
+
+        const animateCamera = () => {
+          if (isCleanedUp) return;
+
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(elapsed / moveDuration, 1);
+          const easedProgress = easeInOutCubic(progress);
+
+          // Calculate curve offset based on transition direction
+          // This creates a smooth arc that peaks at 50% progress and returns to 0 at 100%
+          const direction = playTourScene.transition_direction || 'forward';
+          let yawOffset = 0;
+          let pitchOffset = 0;
+          let fovOffset = 0;
+
+          if (direction !== 'forward') {
+            // Use sine wave for smooth curve: peaks at middle, returns to 0 at end
+            const curveProgress = Math.sin(progress * Math.PI);
+
+            if (direction === 'left') {
+              yawOffset = -30 * curveProgress; // Arc 30° to the left
+            } else if (direction === 'right') {
+              yawOffset = 30 * curveProgress; // Arc 30° to the right
+            } else if (direction === 'up') {
+              pitchOffset = 20 * curveProgress; // Arc 20° upward
+            } else if (direction === 'down') {
+              pitchOffset = -20 * curveProgress; // Arc 20° downward
+            } else if (direction === 'backward') {
+              // Zoom out in the middle, then back in
+              fovOffset = 40 * curveProgress; // Increase FOV by up to 40°
+              yawOffset = 180 * curveProgress; // Also rotate 180° for backward effect
+            }
+          }
+
+          // Interpolate camera position with offsets
+          const currentYaw = playTourScene.start_yaw + (playTourScene.end_yaw - playTourScene.start_yaw) * easedProgress + yawOffset;
+          const currentPitch = playTourScene.start_pitch + (playTourScene.end_pitch - playTourScene.start_pitch) * easedProgress + pitchOffset;
+          const currentFov = playTourScene.start_fov + (playTourScene.end_fov - playTourScene.start_fov) * easedProgress + fovOffset;
+
+          // Update camera state
+          setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
+
+          if (progress < 1) {
+            animationFrameId = requestAnimationFrame(animateCamera);
+          } else {
+            // Animation complete, wait then move to next scene
+            timeoutId = setTimeout(() => {
+              if (!isCleanedUp) {
+                currentSceneIdx++;
+                playNextScene();
+              }
+            }, waitDuration);
+          }
+        };
+
+        animateCamera();
+      }, 500); // Wait 500ms for scene to load
+    };
+
+    // Start playback
+    playNextScene();
+
+    // Cleanup function
+    return () => {
+      isCleanedUp = true;
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [isPlayingTour, selectedPlayTourId, playTours, scenes]);
 
   const handleSceneChange = useCallback((sceneId: string) => {
     if (sceneId === currentSceneId) return; // Don't transition to the same scene
@@ -298,11 +477,22 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       setCurrentSceneIndex(newIndex);
     }
 
+    // Sync Play Tour progress bar if expected scene is in the current tour
+    if (selectedPlayTourId) {
+      const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+      if (selectedTour && selectedTour.play_tour_scenes) {
+        const matchingIndex = selectedTour.play_tour_scenes.findIndex((ps: any) => ps.scene_id === sceneId);
+        if (matchingIndex !== -1) {
+          setCurrentPlayTourSceneIndex(matchingIndex);
+        }
+      }
+    }
+
     // Reset transition state after scene has time to load
     setTimeout(() => {
       setIsTransitioning(false);
     }, 1500);
-  }, [currentSceneId, scenes]);
+  }, [currentSceneId, scenes, selectedPlayTourId, playTours]);
 
   const handleOverlayPause = useCallback(() => {
     setIsAutoplay(false);
@@ -342,7 +532,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       try {
         const payload = JSON.parse(hotspot.payload || '{}');
         const infoText = payload.infoText || payload.text || 'No information available';
-        
+
         // Escape HTML to prevent XSS
         const escapeHtml = (text: string) => {
           const div = document.createElement('div');
@@ -352,14 +542,15 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
         // Pause autoplay when modal opens
         const wasAutoplayActive = isAutoplay;
-        if (isAutoplay) {
-          handleOverlayPause();
-        }
+        const wasPlayingTourActive = isPlayingTour;
+
+        if (isAutoplay) setIsAutoplay(false);
+        if (isPlayingTour) setIsPlayingTour(false);
         setIsInfoModalOpen(true);
 
         // Create and show info modal
         const modal = document.createElement('div');
-        modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+        modal.className = 'absolute inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4';
         modal.innerHTML = `
           <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
             <div class="flex items-center justify-between p-6 border-b border-gray-200">
@@ -375,25 +566,34 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
             </div>
           </div>
         `;
-        
+
         // Add click handlers
         const closeModal = () => {
-          document.body.removeChild(modal);
+          if (containerRef.current && containerRef.current.contains(modal)) {
+            containerRef.current.removeChild(modal);
+          }
           setIsInfoModalOpen(false);
           // Resume autoplay when modal closes
           if (wasAutoplayActive) {
             setIsAutoplay(true);
           }
+          if (wasPlayingTourActive) {
+            setIsPlayingTour(true);
+          }
         };
-        
+
         modal.addEventListener('click', (e) => {
           if (e.target === modal) closeModal();
         });
-        
+
         modal.querySelector('.info-modal-close')?.addEventListener('click', closeModal);
-        
-        document.body.appendChild(modal);
-        
+
+        if (containerRef.current) {
+          containerRef.current.appendChild(modal);
+        } else {
+          document.body.appendChild(modal);
+        }
+
       } catch (error) {
         console.error('Error parsing info hotspot payload:', error);
         alert('Information not available');
@@ -403,7 +603,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       try {
         const payload = JSON.parse(hotspot.payload || '{}');
         const url = payload.url || payload.externalUrl;
-        
+
         if (url) {
           // Ensure URL has protocol
           const fullUrl = url.startsWith('http') ? url : `https://${url}`;
@@ -416,7 +616,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         alert('Link not available');
       }
     }
-  }, [handleSceneChange, isAutoplay]);
+  }, [handleSceneChange, isAutoplay, isPlayingTour, setIsPlayingTour, setIsInfoModalOpen, containerRef]);
 
   const handleHotspotCreate = useCallback((yaw: number, pitch: number) => {
     if (editPanel === 'hotspots') {
@@ -430,7 +630,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
   const createHotspot = useCallback(async () => {
     if (!pendingHotspot) return;
-    
+
     // Validate required fields based on hotspot type
     if (hotspotType === 'navigation' && !selectedTargetScene) return;
     if (hotspotType === 'info' && !infoText.trim()) return;
@@ -446,9 +646,10 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         scene_id: currentSceneId,
         payload
       };
-      
+
       if (hotspotType === 'navigation') {
         hotspotData.target_scene_id = selectedTargetScene;
+        hotspotData.transition_direction = transitionDirection; // Add direction to data
         const targetScene = scenes.find(s => s.id === selectedTargetScene);
         payload = {
           label: `Go to ${targetScene?.name || 'Scene'}`,
@@ -464,8 +665,8 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         };
       } else if (hotspotType === 'info') {
         payload = {
-          label: infoText.trim().length > 20 
-            ? `${infoText.trim().substring(0, 20)}...` 
+          label: infoText.trim().length > 20
+            ? `${infoText.trim().substring(0, 20)}...`
             : infoText.trim(),
           infoText: infoText.trim()
         };
@@ -482,18 +683,18 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           url: linkUrl.trim()
         };
       }
-      
+
       // Update payload in hotspotData
       hotspotData.payload = payload;
       const newHotspot = await HotspotsAPI.createHotspot(tour.id, hotspotData);
       const updatedHotspots = [...hotspots, newHotspot];
       setHotspots(updatedHotspots);
-      
+
       // Force a re-render by triggering a small state change
       setTimeout(() => {
         setHotspots(prev => [...prev]);
       }, 100);
-      
+
       // Clear form and close dialog
       setShowHotspotDialog(false);
       setPendingHotspot(null);
@@ -508,25 +709,25 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     } finally {
       setIsLoading(false);
     }
-  // Cleanup debounced calls on unmount
-  useEffect(() => {
-    return () => {
-      // Cancel any pending debounced API calls when component unmounts
-      debouncedUpdateHotspotAPI.cancel();
-    };
-  }, [debouncedUpdateHotspotAPI]);
+    // Cleanup debounced calls on unmount
+    useEffect(() => {
+      return () => {
+        // Cancel any pending debounced API calls when component unmounts
+        debouncedUpdateHotspotAPI.cancel();
+      };
+    }, [debouncedUpdateHotspotAPI]);
 
   }, [pendingHotspot, selectedTargetScene, infoText, linkUrl, hotspotType, tour.id, currentSceneId, hotspots]);
 
   // Immediate visual update function (no API call)
   const updateHotspotVisually = useCallback((updatedHotspot: Hotspot) => {
     if (!updatedHotspot.id) return;
-    
+
     // Update local state immediately for visual feedback
-    setHotspots(prevHotspots => 
-      prevHotspots.map(h => 
-        h.id === updatedHotspot.id 
-          ? { ...h, yaw: updatedHotspot.yaw, pitch: updatedHotspot.pitch } 
+    setHotspots(prevHotspots =>
+      prevHotspots.map(h =>
+        h.id === updatedHotspot.id
+          ? { ...h, yaw: updatedHotspot.yaw, pitch: updatedHotspot.pitch }
           : h
       )
     );
@@ -535,11 +736,11 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   // API update function (called after debounce)
   const updateHotspotAPI = useCallback(async (updatedHotspot: Hotspot) => {
     if (!updatedHotspot.id) return;
-    
+
     try {
       // Add to pending saves
       setPendingSaves(prev => new Set(prev).add(updatedHotspot.id!));
-      
+
       // Send the full hotspot data with updated position
       const updateData = {
         id: updatedHotspot.id,
@@ -551,19 +752,19 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         pitch: updatedHotspot.pitch,
         payload: updatedHotspot.payload
       };
-      
+
       await HotspotsAPI.updateHotspot(
         tour.id,
         currentSceneId,
         updatedHotspot.id,
         updateData as any
       );
-      
+
       setError(null);
     } catch (err) {
       console.error('Failed to update hotspot:', err);
       setError('Failed to update hotspot position');
-      
+
     } finally {
       // Remove from pending saves
       setPendingSaves(prev => {
@@ -584,30 +785,30 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const updateHotspot = useCallback((updatedHotspot: Hotspot) => {
     // Immediate visual update for smooth dragging
     updateHotspotVisually(updatedHotspot);
-    
+
     // Debounced API update (only called after user stops dragging for 1 second)
     debouncedUpdateHotspotAPI(updatedHotspot);
   }, [updateHotspotVisually, debouncedUpdateHotspotAPI]);
-  
+
   // Function to update hotspot coordinates from manual input
   const updateHotspotCoordinates = useCallback((hotspotId: string, yaw: number, pitch: number) => {
     const hotspot = hotspots.find(h => h.id === hotspotId);
     if (!hotspot) return;
-    
+
     // Create updated hotspot with new coordinates
     const updatedHotspot = {
       ...hotspot,
       yaw: yaw,
       pitch: pitch
     };
-    
+
     // Use the existing updateHotspot function for real-time updates
     updateHotspot(updatedHotspot);
   }, [hotspots, updateHotspot]);
 
   const deleteHotspot = useCallback(async (hotspotId: string) => {
     if (!hotspotId) return;
-    
+
     try {
       setDeletingHotspotId(hotspotId);
       await HotspotsAPI.deleteHotspot(tour.id, currentSceneId, hotspotId);
@@ -642,7 +843,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
   const handleOverlayUpdated = useCallback(async (overlay: Overlay) => {
     if (!overlay.id) return;
-    
+
     try {
       const updated = await tourService.updateOverlay(currentSceneId, overlay.id, overlay);
       setOverlays(prev => prev.map(o => o.id === overlay.id ? updated : o));
@@ -757,12 +958,12 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   // Initialize background audio
   useEffect(() => {
     if (!isClient) return;
-    
+
     setIsAudioLoading(true);
-    
-    let audioUrl = tour.background_audio_url || 
-                   (tour as any).backgroundAudioUrl;
-    
+
+    let audioUrl = tour.background_audio_url ||
+      (tour as any).backgroundAudioUrl;
+
     if (audioUrl) {
       // Try to extract direct audio URL from sharing services
       extractAndLoadAudio(audioUrl);
@@ -785,20 +986,20 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const extractAndLoadAudio = async (originalUrl: string) => {
     try {
       // Check if it's a sharing service URL (be more specific about sharing services)
-      const isFileSharing = (originalUrl.includes('jumpshare.com') && originalUrl.includes('/share/')) || 
-                           (originalUrl.includes('audio.com') && originalUrl.includes('/audio/')) || 
-                           (originalUrl.includes('soundcloud.com') && originalUrl.includes('/tracks/')) ||
-                           (originalUrl.includes('dropbox.com') && originalUrl.includes('/s/')) ||
-                           (originalUrl.includes('drive.google.com') && originalUrl.includes('/file/d/'));
-      
+      const isFileSharing = (originalUrl.includes('jumpshare.com') && originalUrl.includes('/share/')) ||
+        (originalUrl.includes('audio.com') && originalUrl.includes('/audio/')) ||
+        (originalUrl.includes('soundcloud.com') && originalUrl.includes('/tracks/')) ||
+        (originalUrl.includes('dropbox.com') && originalUrl.includes('/s/')) ||
+        (originalUrl.includes('drive.google.com') && originalUrl.includes('/file/d/'));
+
       // If it's a sharing service, try extraction
       if (isFileSharing) {
         setAudioError('Loading audio...');
-        
+
         try {
           const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(originalUrl)}`);
           const result = await response.json();
-          
+
           if (result.success && result.audioUrl) {
             // Don't show a message here, let loadAudioElement handle it
             loadAudioElement(result.audioUrl, true);
@@ -824,20 +1025,20 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const loadDefaultAudio = async () => {
     // Default background audio when no audio is provided
     const defaultAudioUrl = 'https://audio.com/saransh-pachhai/audio/niya-a-bloom-vlog-no-copyright-music';
-    
+
     setAudioError('No audio URL found. Loading default background music...');
-    
+
     try {
       // Extract direct audio URL from audio.com for default audio
       const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(defaultAudioUrl)}`);
       const result = await response.json();
-      
+
       if (result.success && result.audioUrl) {
         const audio = new Audio(result.audioUrl);
         audio.loop = true;
         audio.volume = 0.3; // Lower volume for default audio
         audio.crossOrigin = 'anonymous';
-        
+
         audio.addEventListener('canplay', () => {
           setIsAudioLoading(false); // Default audio is ready
           setAudioError('Playing default background music. Enter your own audio URL for a custom experience.');
@@ -846,27 +1047,27 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
             setAudioError(null);
           }, 4000);
         });
-        
+
         audio.addEventListener('error', (e) => {
           setIsAudioLoading(false); // Stop loading on error
           console.error('[TourEditor] Default audio loading error:', e);
           setAudioError('Default audio failed to load. Please enter your own audio URL.');
         });
-        
+
         audio.addEventListener('play', () => {
           setIsAudioPlaying(true);
         });
-        
+
         audio.addEventListener('pause', () => {
           setIsAudioPlaying(false);
         });
-        
+
         audioRef.current = audio;
       } else {
         setIsAudioLoading(false); // Stop loading on failure
         setAudioError('Default audio extraction failed. Please enter your own audio URL.');
       }
-      
+
     } catch (error) {
       setIsAudioLoading(false); // Stop loading on error
       console.error('[TourEditor] Default audio extraction error:', error);
@@ -879,10 +1080,10 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     audio.loop = true;
     audio.volume = 0.5;
     audio.crossOrigin = 'anonymous';
-    
+
     audio.addEventListener('canplay', () => {
       setIsAudioLoading(false); // Audio is ready, stop loading
-      
+
       if (isFromSharingService) {
         // For sharing services, show a brief success message then hide it
         setAudioError('✓ Audio ready');
@@ -895,27 +1096,27 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         setAudioError(null);
       }
     });
-    
+
     audio.addEventListener('error', (e) => {
       setIsAudioLoading(false); // Stop loading on error
-      
+
       const errorMsg = audio.error?.message || 'Unknown error';
-      
+
       if (isFromSharingService) {
         setAudioError('Extracted audio failed to load. Please use direct audio URLs or sharing service URLs.');
       } else {
         setAudioError(`Audio failed to load: ${errorMsg}. Please use direct audio file URLs or sharing service URLs.`);
       }
     });
-    
+
     audio.addEventListener('play', () => {
       setIsAudioPlaying(true);
     });
-    
+
     audio.addEventListener('pause', () => {
       setIsAudioPlaying(false);
     });
-    
+
     audioRef.current = audio;
   };
 
@@ -923,12 +1124,12 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const toggleAudio = async () => {
     if (!audioRef.current) {
       // Try to create audio if it doesn't exist
-      let audioUrl = tour.background_audio_url || 
-                     (tour as any).backgroundAudioUrl;
-      
+      let audioUrl = tour.background_audio_url ||
+        (tour as any).backgroundAudioUrl;
+
       if (audioUrl) {
         setAudioError('Loading audio...');
-        
+
         // Use the extraction system
         await extractAndLoadAudio(audioUrl);
       } else {
@@ -936,7 +1137,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         return; // Don't load default audio automatically
       }
     }
-    
+
     if (audioRef.current) {
       if (isAudioPlaying) {
         audioRef.current.pause();
@@ -951,7 +1152,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
   const toggleAudioMute = () => {
     if (!audioRef.current) return;
-    
+
     audioRef.current.muted = !audioRef.current.muted;
     setIsAudioMuted(audioRef.current.muted);
   };
@@ -975,10 +1176,10 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
     try {
       const updatedTour = await tourService.updateTourAudio(tour.id, newAudioUrl.trim(), tour);
-      
+
       // Update local tour object
       tour.background_audio_url = updatedTour.background_audio_url;
-      
+
       // Notify parent component
       if (onTourUpdate) {
         onTourUpdate(updatedTour);
@@ -1001,7 +1202,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       setShowAudioSettings(false);
       setNewAudioUrl('');
       setAudioError('Audio updated successfully!');
-      
+
       // Auto-hide success message
       setTimeout(() => {
         setAudioError(null);
@@ -1020,10 +1221,10 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
     try {
       const updatedTour = await tourService.updateTourAudio(tour.id, '', tour);
-      
+
       // Update local tour object
       tour.background_audio_url = undefined;
-      
+
       // Notify parent component
       if (onTourUpdate) {
         onTourUpdate(updatedTour);
@@ -1040,7 +1241,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       setNewAudioUrl('');
       setAudioError('Audio removed.');
       setIsAudioLoading(false);
-      
+
       // Auto-hide message
       setTimeout(() => {
         setAudioError(null);
@@ -1054,69 +1255,114 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   };
 
   return (
-    <div className="absolute inset-0">
+    <div className="absolute inset-0" ref={containerRef}>
       {/* Fullscreen Viewer Mode */}
       {isViewerFullscreen ? (
         <div className="fixed inset-0 z-50 bg-black">
-          {/* Minimal Audio Controls for Fullscreen */}
-          {isClient && (
-            <div className="absolute top-4 left-4 z-60">
-              <div className="bg-black bg-opacity-50 rounded-lg p-2 flex gap-2">
+          {/* Full Integrated Controls for Fullscreen */}
+          <div className="absolute top-4 right-4 z-60">
+            <div className="bg-white rounded-lg shadow-lg p-2">
+              <div className="flex items-center gap-2">
+                {/* Play Tour Selection */}
+                {playTours.length > 0 && (
+                  <>
+                    <select
+                      value={selectedPlayTourId || ''}
+                      onChange={(e) => setSelectedPlayTourId(e.target.value || null)}
+                      className="px-3 py-2 bg-gray-50 text-gray-900 rounded border border-gray-200 text-sm font-medium cursor-pointer"
+                    >
+                      <option value="">Select Play Tour...</option>
+                      {playTours.map(playTour => (
+                        <option key={playTour.id} value={playTour.id}>
+                          🎬 {playTour.name}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedPlayTourId && (
+                      <button
+                        onClick={() => setIsPlayingTour(!isPlayingTour)}
+                        className={`px-3 py-2 rounded text-sm font-medium transition-colors cursor-pointer ${isPlayingTour
+                          ? 'bg-red-600 text-white hover:bg-red-700'
+                          : 'bg-green-600 text-white hover:bg-green-700'
+                          }`}
+                        title={isPlayingTour ? 'Stop Play Tour' : 'Start Play Tour'}
+                      >
+                        {isPlayingTour ? '⏹ Stop' : '▶ Play'}
+                      </button>
+                    )}
+                  </>
+                )}
+
                 {/* Autoplay Control */}
                 <button
                   onClick={toggleAutoplay}
-                  className={`p-2 rounded transition-colors flex items-center justify-center cursor-pointer ${
-                    isAutoplay 
-                      ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                      : 'bg-white bg-opacity-20 text-white hover:bg-opacity-30'
-                  }`}
+                  className={`p-2 rounded transition-colors flex items-center gap-1 cursor-pointer ${isAutoplay
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
                   title={isAutoplay ? 'Pause Auto-rotation' : 'Start Auto-rotation'}
                 >
-                  <span className="text-sm font-bold">
-                    {isAutoplay ? '⏸️' : '▶️'}
-                  </span>
+                  {isAutoplay ? '⏸' : '▶'}
+                  <span className="text-xs hidden sm:inline">Auto</span>
                 </button>
 
-                {/* Audio Control */}
+                {/* Audio Controls */}
+                {isClient && (
+                  <>
+                    <button
+                      onClick={toggleAudio}
+                      disabled={isAudioLoading}
+                      className={`p-2 rounded transition-colors flex items-center ${isAudioLoading
+                        ? 'bg-blue-100 text-blue-600 cursor-not-allowed'
+                        : isAudioPlaying
+                          ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
+                        }`}
+                      title={
+                        isAudioLoading
+                          ? 'Loading audio...'
+                          : isAudioPlaying
+                            ? 'Pause Background Audio'
+                            : 'Play Background Audio'
+                      }
+                    >
+                      {isAudioLoading ? '' : isAudioPlaying ? '⏸' : '🎵'}
+                      <span className="text-xs hidden sm:inline ml-1">
+                        {isAudioLoading ? 'Loading...' : 'Audio'}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowAudioSettings(true);
+                        setNewAudioUrl(tour.background_audio_url || '');
+                      }}
+                      disabled={isAudioLoading}
+                      className={`p-2 rounded transition-colors ${isAudioLoading
+                        ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
+                        }`}
+                      title="Audio Settings"
+                    >
+                      ⚙️
+                    </button>
+                  </>
+                )}
+
+                {/* Exit Fullscreen Toggle */}
                 <button
-                  onClick={toggleAudio}
-                  disabled={isAudioLoading}
-                  className={`p-2 rounded transition-colors flex items-center justify-center ${
-                    isAudioLoading
-                      ? 'bg-white bg-opacity-10 text-white cursor-not-allowed'
-                      : isAudioPlaying 
-                      ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer' 
-                      : 'bg-white bg-opacity-20 text-white hover:bg-opacity-30 cursor-pointer'
-                  }`}
-                  title={
-                    isAudioLoading 
-                      ? 'Loading audio...' 
-                      : isAudioPlaying 
-                      ? 'Pause Background Audio' 
-                      : 'Play Background Audio'
-                  }
+                  onClick={toggleViewerFullscreen}
+                  className="p-2 hover:bg-gray-100 transition-colors rounded cursor-pointer flex items-center justify-center"
+                  title="Exit fullscreen (ESC)"
                 >
-                  <span className="text-sm">
-                    {isAudioLoading ? '⏳' : isAudioPlaying ? '⏸️' : '🎵'}
-                  </span>
+                  <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
               </div>
             </div>
-          )}
-
-          {/* Exit Fullscreen Button */}
-          <div className="absolute top-4 right-4 z-60">
-            <button
-              onClick={toggleViewerFullscreen}
-              className="bg-black bg-opacity-50 text-white p-3 rounded-lg hover:bg-opacity-70 transition-colors cursor-pointer"
-              title="Exit fullscreen (ESC)"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
           </div>
-          
+
           {/* Clean Viewer */}
           <div className="w-full h-full relative">
             <CubeMapViewer
@@ -1128,11 +1374,14 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               isEditMode={false} // Disable edit mode in fullscreen
               onHotspotCreate={handleHotspotCreate}
               onHotspotUpdate={updateHotspot}
-              hotspots={hotspots.filter(h => h.scene_id === currentSceneId)}
-              overlays={overlays.filter(o => o.scene_id === currentSceneId)}
+              hotspots={currentSceneHotspots}
+              overlays={currentSceneOverlays}
               autoRotate={isAutoplay}
               highlightedHotspotId={editingHotspot}
               onOverlayPause={handleOverlayPause}
+              onCameraChange={(yaw, pitch, fov) => setCurrentCamera({ yaw, pitch, fov })}
+              forcedCameraPosition={isPlayingTour ? currentCamera : null}
+              isPlaybackMode={isPlayingTour}
             />
 
             {/* Pause Animation Overlay */}
@@ -1148,11 +1397,22 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
             {/* Progress Bar - Only show in fullscreen mode */}
             <ProgressBar
-              scenes={scenes}
-              currentSceneIndex={currentSceneIndex}
-              isAutoplay={isAutoplay}
+              scenes={playTourDisplayScenes || scenes}
+              currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
+              isAutoplay={isAutoplay || (!!selectedPlayTourId && isPlayingTour)}
               isTransitioning={isTransitioning}
-              onSceneChange={handleSceneChangeByIndex}
+              onSceneChange={(index) => {
+                if (selectedPlayTourId && playTourDisplayScenes) {
+                  // Navigate within play tour
+                  const targetStep = playTourDisplayScenes[index];
+                  if (targetStep && targetStep.originalId) {
+                    handleSceneChange(targetStep.originalId);
+                    setCurrentPlayTourSceneIndex(index);
+                  }
+                } else {
+                  handleSceneChangeByIndex(index);
+                }
+              }}
               isOverlayModalOpen={showOverlayDialog || showHotspotDialog || isInfoModalOpen}
             />
           </div>
@@ -1170,11 +1430,14 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               isEditMode={isEditMode}
               onHotspotCreate={handleHotspotCreate}
               onHotspotUpdate={updateHotspot}
-              hotspots={hotspots.filter(h => h.scene_id === currentSceneId)}
-              overlays={overlays.filter(o => o.scene_id === currentSceneId)}
+              hotspots={currentSceneHotspots}
+              overlays={currentSceneOverlays}
               autoRotate={isAutoplay}
               highlightedHotspotId={editingHotspot}
               onOverlayPause={handleOverlayPause}
+              onCameraChange={(yaw, pitch, fov) => setCurrentCamera({ yaw, pitch, fov })}
+              forcedCameraPosition={isPlayingTour ? currentCamera : null}
+              isPlaybackMode={isPlayingTour}
             />
 
             {/* Pause Animation Overlay */}
@@ -1378,6 +1641,15 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                         }`}
                     >
                       ✨ Overlays
+                    </button>
+                    <button
+                      onClick={() => setEditPanel('playTours')}
+                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${editPanel === 'playTours'
+                        ? 'bg-purple-600 text-white border-purple-600 shadow-md'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700'
+                        }`}
+                    >
+                      🎬 Play Tours
                     </button>
                   </div>
 
@@ -1635,6 +1907,28 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                       </div>
                     </div>
                   )}
+
+                  {/* Play Tours Editor */}
+                  {editPanel === 'playTours' && (
+                    <div className="fixed top-0 left-0 bottom-0 z-50 animate-in slide-in-from-left duration-300">
+                      <div className="flex bg-white h-full relative">
+                        <PlayTourEditor
+                          tourId={tour.id}
+                          scenes={scenes}
+                          currentYaw={currentCamera.yaw}
+                          currentPitch={currentCamera.pitch}
+                          currentFov={currentCamera.fov}
+                        />
+                        <button
+                          onClick={() => setEditPanel('hotspots')}
+                          className="absolute -right-10 top-4 bg-white p-2 rounded-r-lg shadow-lg text-gray-900 border border-l-0 border-gray-200 hover:bg-gray-50 cursor-pointer z-50 font-bold"
+                          title="Close Play Tour Editor"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -1660,77 +1954,108 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
           {/* Top Right Controls - Only show when not in viewer fullscreen */}
           {!isViewerFullscreen && (
-            <div className="absolute top-4 right-4 z-30 flex flex-col gap-2">
-              {/* Audio & Autoplay Controls */}
-              <div className="bg-white rounded-lg shadow-lg p-2 flex gap-2">
-                {/* Autoplay Control */}
-                <button
-                  onClick={toggleAutoplay}
-                  className={`p-2 rounded transition-colors flex items-center gap-1 cursor-pointer ${isAutoplay
-                    ? 'bg-blue-600 text-white hover:bg-blue-700'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  title={isAutoplay ? 'Pause Auto-rotation' : 'Start Auto-rotation'}
-                >
-                  {isAutoplay ? '⏸' : '▶'}
-                  <span className="text-xs hidden sm:inline">Auto</span>
-                </button>
+            <div className="absolute top-4 right-4 z-30">
+              {/* Consolidated Controls Container */}
+              <div className="bg-white rounded-lg shadow-lg p-2">
+                <div className="flex items-center gap-2">
+                  {/* Play Tour Selection */}
+                  {playTours.length > 0 && (
+                    <>
+                      <select
+                        value={selectedPlayTourId || ''}
+                        onChange={(e) => setSelectedPlayTourId(e.target.value || null)}
+                        className="px-3 py-2 bg-gray-50 text-gray-900 rounded border border-gray-200 text-sm font-medium cursor-pointer"
+                      >
+                        <option value="">Select Play Tour...</option>
+                        {playTours.map(playTour => (
+                          <option key={playTour.id} value={playTour.id}>
+                            🎬 {playTour.name}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedPlayTourId && (
+                        <button
+                          onClick={() => setIsPlayingTour(!isPlayingTour)}
+                          className={`px-3 py-2 rounded text-sm font-medium transition-colors cursor-pointer ${isPlayingTour
+                            ? 'bg-red-600 text-white hover:bg-red-700'
+                            : 'bg-green-600 text-white hover:bg-green-700'
+                            }`}
+                          title={isPlayingTour ? 'Stop Play Tour' : 'Start Play Tour'}
+                        >
+                          {isPlayingTour ? '⏹ Stop' : '▶ Play'}
+                        </button>
+                      )}
+                    </>
+                  )}
 
-                {/* Audio Controls - Always show since we have default audio */}
-                {isClient && (
-                  <>
-                    <button
-                      onClick={toggleAudio}
-                      disabled={isAudioLoading}
-                      className={`p-2 rounded transition-colors flex items-center ${isAudioLoading
-                        ? 'bg-blue-100 text-blue-600 cursor-not-allowed'
-                        : isAudioPlaying
-                          ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
-                        }`}
-                      title={
-                        isAudioLoading
-                          ? 'Loading audio...'
+                  {/* Audio & Autoplay Controls */}
+                  {/* Autoplay Control */}
+                  <button
+                    onClick={toggleAutoplay}
+                    className={`p-2 rounded transition-colors flex items-center gap-1 cursor-pointer ${isAutoplay
+                      ? 'bg-blue-600 text-white hover:bg-blue-700'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    title={isAutoplay ? 'Pause Auto-rotation' : 'Start Auto-rotation'}
+                  >
+                    {isAutoplay ? '⏸' : '▶'}
+                    <span className="text-xs hidden sm:inline">Auto</span>
+                  </button>
+
+                  {/* Audio Controls - Always show since we have default audio */}
+                  {isClient && (
+                    <>
+                      <button
+                        onClick={toggleAudio}
+                        disabled={isAudioLoading}
+                        className={`p-2 rounded transition-colors flex items-center ${isAudioLoading
+                          ? 'bg-blue-100 text-blue-600 cursor-not-allowed'
                           : isAudioPlaying
-                            ? 'Pause Background Audio'
-                            : 'Play Background Audio'
-                      }
-                    >
-                      {isAudioLoading ? '' : isAudioPlaying ? '⏸' : '🎵'}
-                      <span className="text-xs hidden sm:inline ml-1">
-                        {isAudioLoading ? 'Loading...' : 'Audio'}
-                      </span>
-                    </button>
+                            ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
+                          }`}
+                        title={
+                          isAudioLoading
+                            ? 'Loading audio...'
+                            : isAudioPlaying
+                              ? 'Pause Background Audio'
+                              : 'Play Background Audio'
+                        }
+                      >
+                        {isAudioLoading ? '' : isAudioPlaying ? '⏸' : '🎵'}
+                        <span className="text-xs hidden sm:inline ml-1">
+                          {isAudioLoading ? 'Loading...' : 'Audio'}
+                        </span>
+                      </button>
 
-                    <button
-                      onClick={() => {
-                        setShowAudioSettings(true);
-                        setNewAudioUrl(tour.background_audio_url || '');
-                      }}
-                      disabled={isAudioLoading}
-                      className={`p-2 rounded transition-colors ${isAudioLoading
-                        ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
-                        }`}
-                      title={isAudioLoading ? 'Loading audio...' : 'Audio Settings'}
-                    >
-                      ⚙️
-                    </button>
-                  </>
-                )}
-              </div>
+                      <button
+                        onClick={() => {
+                          setShowAudioSettings(true);
+                          setNewAudioUrl(tour.background_audio_url || '');
+                        }}
+                        disabled={isAudioLoading}
+                        className={`p-2 rounded transition-colors ${isAudioLoading
+                          ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
+                          }`}
+                        title={isAudioLoading ? 'Loading audio...' : 'Audio Settings'}
+                      >
+                        ⚙️
+                      </button>
+                    </>
+                  )}
 
-              {/* Fullscreen Toggle */}
-              <div className="bg-white rounded-lg shadow-lg w-fit ml-auto">
-                <button
-                  onClick={toggleViewerFullscreen}
-                  className="p-2 hover:bg-gray-100 transition-colors rounded cursor-pointer flex items-center justify-center"
-                  title="Enter fullscreen viewer"
-                >
-                  <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                  </svg>
-                </button>
+                  {/* Fullscreen Toggle */}
+                  <button
+                    onClick={toggleViewerFullscreen}
+                    className="p-2 hover:bg-gray-100 transition-colors rounded cursor-pointer flex items-center justify-center"
+                    title="Enter fullscreen viewer"
+                  >
+                    <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -1819,25 +2144,54 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
                 {/* Dynamic content based on type */}
                 {hotspotType === 'navigation' && (
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium mb-2 text-gray-900">
-                      Target Scene
-                    </label>
-                    <select
-                      value={selectedTargetScene}
-                      onChange={(e) => setSelectedTargetScene(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 cursor-pointer"
-                    >
-                      <option value="">Select a scene...</option>
-                      {scenes
-                        .filter(s => s.id !== currentSceneId)
-                        .map(scene => (
-                          <option key={scene.id} value={scene.id}>
-                            {scene.name}
-                          </option>
+                  <>
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium mb-2 text-gray-900">
+                        Target Scene
+                      </label>
+                      <select
+                        value={selectedTargetScene}
+                        onChange={(e) => setSelectedTargetScene(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 cursor-pointer"
+                      >
+                        <option value="">Select a scene...</option>
+                        {scenes
+                          .filter(s => s.id !== currentSceneId)
+                          .map(scene => (
+                            <option key={scene.id} value={scene.id}>
+                              {scene.name}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {/* Transition Direction Selector */}
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium mb-2 text-gray-900">
+                        Transition Direction
+                      </label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {['forward', 'backward', 'left', 'right', 'up', 'down'].map((dir) => (
+                          <button
+                            key={dir}
+                            onClick={() => setTransitionDirection(dir)}
+                            className={`px-2 py-2 rounded border text-xs font-medium capitalize transition-colors cursor-pointer ${transitionDirection === dir
+                              ? 'border-blue-500 bg-blue-50 text-blue-700'
+                              : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                              }`}
+                          >
+                            {dir === 'forward' && '⬆️'}
+                            {dir === 'backward' && '⬇️'}
+                            {dir === 'left' && '⬅️'}
+                            {dir === 'right' && '➡️'}
+                            {dir === 'up' && '↗️'}
+                            {dir === 'down' && '↙️'}
+                            {' ' + dir}
+                          </button>
                         ))}
-                    </select>
-                  </div>
+                      </div>
+                    </div>
+                  </>
                 )}
 
                 {hotspotType === 'info' && (

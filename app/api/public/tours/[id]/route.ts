@@ -8,7 +8,7 @@ export async function GET(
     const { id } = await params;
     const tourId = id;
     const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
-    
+
     // Fetch tour details using public endpoint
     const tourResponse = await fetch(`${backendUrl}tours/${tourId}/public`, {
       method: 'GET',
@@ -39,6 +39,19 @@ export async function GET(
       scenes = await scenesResponse.json();
     }
 
+    // Fetch play tours for this tour
+    const playToursResponse = await fetch(`${backendUrl}tours/${tourId}/play-tours/public`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    let playTours = [];
+    if (playToursResponse.ok) {
+      playTours = await playToursResponse.json();
+    }
+
     // Fetch hotspots and overlays for each scene using public endpoint
     const scenesWithHotspotsAndOverlays = await Promise.all(
       scenes.map(async (scene: any) => {
@@ -53,12 +66,12 @@ export async function GET(
               },
             }
           );
-          
+
           let hotspots = [];
           if (hotspotsResponse.ok) {
             hotspots = await hotspotsResponse.json();
           }
-          
+
           // Fetch overlays
           const overlaysResponse = await fetch(
             `${backendUrl}scenes/${scene.id}/overlays/public`,
@@ -69,12 +82,12 @@ export async function GET(
               },
             }
           );
-          
+
           let overlays = [];
           if (overlaysResponse.ok) {
             overlays = await overlaysResponse.json();
           }
-          
+
           return {
             ...scene,
             hotspots,
@@ -93,7 +106,8 @@ export async function GET(
 
     return NextResponse.json({
       tour,
-      scenes: scenesWithHotspotsAndOverlays
+      scenes: scenesWithHotspotsAndOverlays,
+      playTours
     });
   } catch (error) {
     console.error('Error fetching tour details:', error);

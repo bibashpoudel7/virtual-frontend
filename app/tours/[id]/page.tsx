@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 
@@ -9,11 +9,11 @@ import CubeMapViewer from '@/components/viewer/CubeMapViewer';
 import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, X, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy } from 'lucide-react';
 
 // Share Modal Component
-const ShareModal = React.memo(({ 
-  isOpen, 
-  onClose, 
-  tourName, 
-  tourUrl 
+const ShareModal = React.memo(({
+  isOpen,
+  onClose,
+  tourName,
+  tourUrl
 }: {
   isOpen: boolean;
   onClose: () => void;
@@ -43,11 +43,11 @@ const ShareModal = React.memo(({
   if (!isOpen) return null;
 
   return (
-    <div 
+    <div
       className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
       onClick={onClose}
     >
-      <div 
+      <div
         className="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
@@ -124,11 +124,10 @@ const ShareModal = React.memo(({
               />
               <button
                 onClick={handleCopy}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors cursor-pointer ${
-                  copied 
-                    ? 'bg-green-100 text-green-700' 
-                    : 'bg-gray-900 text-white hover:bg-gray-800'
-                }`}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors cursor-pointer ${copied
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-gray-900 text-white hover:bg-gray-800'
+                  }`}
               >
                 {copied ? 'Copied!' : 'COPY'}
               </button>
@@ -143,20 +142,22 @@ const ShareModal = React.memo(({
 ShareModal.displayName = 'ShareModal';
 
 // Completely isolated progress bar that doesn't cause React re-renders
-const ProgressBar = React.memo(({ 
-  scenes, 
-  currentSceneIndex, 
-  isAutoplay, 
-  isTransitioning, 
+const ProgressBar = React.memo(({
+  scenes,
+  currentSceneIndex,
+  isAutoplay,
+  isTransitioning,
   onSceneChange,
-  isOverlayModalOpen = false
+  isOverlayModalOpen = false,
+  segmentDuration = 12000 // Default 12s
 }: {
-  scenes: Scene[];
+  scenes: any[];
   currentSceneIndex: number;
   isAutoplay: boolean;
   isTransitioning: boolean;
   onSceneChange: (index: number) => void;
   isOverlayModalOpen?: boolean;
+  segmentDuration?: number;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number | undefined>(undefined);
@@ -178,28 +179,28 @@ const ProgressBar = React.memo(({
 
     if (isAutoplay && !isOverlayModalOpen) {
       // Resume from paused progress or start fresh
-      startTimeRef.current = Date.now() - (pausedProgressRef.current * 12000);
-      
+      startTimeRef.current = Date.now() - (pausedProgressRef.current * segmentDuration);
+
       const updateProgress = () => {
         if (!progressBarRef.current || isTransitioning) return;
-        
+
         const elapsed = Date.now() - startTimeRef.current;
-        const progress = Math.min(1, elapsed / 12000); // 12 second duration
-        
+        const progress = Math.min(1, elapsed / segmentDuration);
+
         // Store current progress for potential pause
         pausedProgressRef.current = progress;
-        
+
         // Find the current scene's progress bar and update it directly
         const currentProgressBar = progressBarRef.current.querySelector(`[data-scene-index="${currentSceneIndex}"] .progress-fill`) as HTMLElement;
         if (currentProgressBar) {
           currentProgressBar.style.width = `${progress * 100}%`;
         }
-        
+
         if (progress < 1 && isAutoplay && !isOverlayModalOpen) {
           animationRef.current = requestAnimationFrame(updateProgress);
         }
       };
-      
+
       animationRef.current = requestAnimationFrame(updateProgress);
     } else {
       // When paused, keep the current progress visible
@@ -210,13 +211,13 @@ const ProgressBar = React.memo(({
         }
       }
     }
-    
+
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen]);
+  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen, segmentDuration]);
 
   if (scenes.length <= 1) return null;
 
@@ -227,7 +228,7 @@ const ProgressBar = React.memo(({
         {scenes.map((scene, index) => {
           const isCompleted = index < currentSceneIndex;
           const isCurrent = index === currentSceneIndex;
-          
+
           return (
             <div
               key={scene.id}
@@ -237,19 +238,18 @@ const ProgressBar = React.memo(({
               {/* Background segment */}
               <div className="w-full h-1 bg-white/40 rounded-full overflow-hidden">
                 {/* Progress fill */}
-                <div 
-                  className={`progress-fill h-full rounded-full tour-progress-segment ${
-                    isCompleted || isCurrent 
-                      ? 'bg-red-500' 
-                      : 'bg-white/40'
-                  }`}
-                  style={{ 
+                <div
+                  className={`progress-fill h-full rounded-full tour-progress-segment ${isCompleted || isCurrent
+                    ? 'bg-red-500'
+                    : 'bg-white/40'
+                    }`}
+                  style={{
                     width: isCompleted ? '100%' : '0%',
                     backgroundColor: isCompleted || isCurrent ? '#ef4444' : undefined
                   }}
                 />
               </div>
-              
+
               {/* Hover area */}
               <button
                 onClick={() => onSceneChange(index)}
@@ -259,15 +259,15 @@ const ProgressBar = React.memo(({
               >
                 {/* Hover effect overlay */}
                 <div className="absolute inset-0 top-2 bottom-2 bg-red-400/30 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-                
+
                 {/* Scene preview tooltip with image on hover */}
                 <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-300 delay-150 pointer-events-none z-50">
                   <div className="bg-black/90 backdrop-blur-sm rounded-lg overflow-hidden shadow-xl border border-white/20">
                     {/* Scene preview image */}
                     <div className="w-32 h-20 bg-gray-800 relative overflow-hidden">
                       {scene.src_original_url ? (
-                        <img 
-                          src={scene.src_original_url} 
+                        <img
+                          src={scene.src_original_url}
                           alt={scene.name || `Scene ${index + 1}`}
                           className="w-full h-full object-cover scene-preview-image"
                           onError={(e) => {
@@ -287,7 +287,7 @@ const ProgressBar = React.memo(({
                         />
                       ) : null}
                       {/* Fallback placeholder */}
-                      <div 
+                      <div
                         className="w-full h-full flex items-center justify-center text-white/60 text-xs"
                         style={{ display: scene.src_original_url ? 'none' : 'flex' }}
                       >
@@ -341,6 +341,13 @@ export default function PublicTourViewer() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [isOverlayModalOpen, setIsOverlayModalOpen] = useState(false);
   const [showPauseOverlay, setShowPauseOverlay] = useState(false);
+
+  // Play Tour state
+  const [playTours, setPlayTours] = useState<any[]>([]);
+  const [isPlayingTour, setIsPlayingTour] = useState(false);
+  const [selectedPlayTourId, setSelectedPlayTourId] = useState<string | null>(null);
+  const [currentPlayTourSceneIndex, setCurrentPlayTourSceneIndex] = useState(0);
+  const [currentCamera, setCurrentCamera] = useState<{ yaw: number; pitch: number; fov: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -371,6 +378,7 @@ export default function PublicTourViewer() {
       }
 
       const data = await response.json();
+      console.log('[PublicTourViewer] Fetched data:', data);
       setTour(data.tour);
       setScenes(data.scenes || []);
 
@@ -378,7 +386,7 @@ export default function PublicTourViewer() {
       if (data.scenes && data.scenes.length > 0) {
         const allHotspots: Hotspot[] = [];
         const allOverlays: Overlay[] = [];
-        
+
         data.scenes.forEach((scene: any) => {
           if (scene.hotspots && scene.hotspots.length > 0) {
             allHotspots.push(...scene.hotspots);
@@ -387,9 +395,14 @@ export default function PublicTourViewer() {
             allOverlays.push(...scene.overlays);
           }
         });
-        
+
         setAllHotspots(allHotspots);
         setAllOverlays(allOverlays);
+      }
+
+      setPlayTours(data.playTours || []);
+      if (data.playTours && data.playTours.length > 0) {
+        setSelectedPlayTourId(data.playTours[0].id);
       }
 
       setLoading(false);
@@ -400,10 +413,33 @@ export default function PublicTourViewer() {
     }
   };
 
+  const triggerPauseAnimation = useCallback(() => {
+    if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
+    setShowPauseOverlay(true);
+    pauseTimeoutRef.current = setTimeout(() => setShowPauseOverlay(false), 500);
+  }, []);
+
   const handleSceneChange = useCallback((index: number) => {
     if (index === currentSceneIndex || isTransitioning) return;
 
+    // Interrupt any active playback when changing scenes manually
+    setIsPlayingTour(false);
+    setIsAutoplay(false);
+    setCurrentCamera(null); // Reset forced camera control
+
     setIsTransitioning(true);
+
+    // Sync Play Tour progress bar if expected scene is in the current tour
+    if (selectedPlayTourId) {
+      const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+      if (selectedTour && selectedTour.play_tour_scenes) {
+        const nextSceneId = scenes[index]?.id;
+        const matchingIndex = selectedTour.play_tour_scenes.findIndex((ps: any) => ps.scene_id === nextSceneId);
+        if (matchingIndex !== -1) {
+          setCurrentPlayTourSceneIndex(matchingIndex);
+        }
+      }
+    }
 
     // Faster transition - immediate scene change with quick overlay
     setTimeout(() => {
@@ -414,11 +450,168 @@ export default function PublicTourViewer() {
     setTimeout(() => {
       setIsTransitioning(false);
     }, 600);
-  }, [currentSceneIndex, isTransitioning, scenes]);
+  }, [currentSceneIndex, isTransitioning, scenes, selectedPlayTourId, playTours]);
 
-  // Auto-advance scenes when autoplay is enabled
+  // Play Tour playback logic
   useEffect(() => {
-    if (!isAutoplay || scenes.length <= 1 || isTransitioning || isOverlayModalOpen) {
+    if (!isPlayingTour || !selectedPlayTourId) return;
+
+    const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+    if (!selectedTour || !selectedTour.play_tour_scenes || selectedTour.play_tour_scenes.length === 0) {
+      setIsPlayingTour(false);
+      return;
+    }
+
+    if (currentPlayTourSceneIndex >= selectedTour.play_tour_scenes.length) {
+      setIsPlayingTour(false);
+      return;
+    }
+
+    const pScene = selectedTour.play_tour_scenes[currentPlayTourSceneIndex];
+    const sceneId = pScene.scene_id;
+    let animationFrameId: number | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isCleanedUp = false;
+
+    // Change to the scene
+    const sceneIndex = scenes.findIndex(s => s.id === sceneId);
+    if (sceneIndex !== -1 && sceneIndex !== currentSceneIndex) {
+      setCurrentSceneIndex(sceneIndex);
+    }
+
+    // Wait for scene to load, then animate camera
+    timeoutId = setTimeout(() => {
+      if (isCleanedUp) return;
+
+      const startTime = Date.now();
+      const moveDuration = pScene.move_duration || 5000;
+      const waitDuration = pScene.wait_duration || 1000;
+
+      const easeInOutCubic = (t: number) => {
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      };
+
+      const animateCamera = () => {
+        if (isCleanedUp) return;
+
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / moveDuration, 1);
+        const easedProgress = easeInOutCubic(progress);
+
+        // Calculate curve offset based on transition direction
+        // This creates a smooth arc that peaks at 50% progress and returns to 0 at 100%
+        const direction = pScene.transition_direction || 'forward';
+        let yawOffset = 0;
+        let pitchOffset = 0;
+        let fovOffset = 0;
+
+        if (direction !== 'forward') {
+          // Use sine wave for smooth curve: peaks at middle, returns to 0 at end
+          const curveProgress = Math.sin(progress * Math.PI);
+
+          if (direction === 'left') {
+            yawOffset = -30 * curveProgress; // Arc 30° to the left
+          } else if (direction === 'right') {
+            yawOffset = 30 * curveProgress; // Arc 30° to the right
+          } else if (direction === 'up') {
+            pitchOffset = 20 * curveProgress; // Arc 20° upward
+          } else if (direction === 'down') {
+            pitchOffset = -20 * curveProgress; // Arc 20° downward
+          } else if (direction === 'backward') {
+            // Zoom out in the middle, then back in
+            fovOffset = 40 * curveProgress; // Increase FOV by up to 40°
+            yawOffset = 180 * curveProgress; // Also rotate 180° for backward effect
+          }
+        }
+
+        const currentYaw = pScene.start_yaw + (pScene.end_yaw - pScene.start_yaw) * easedProgress + yawOffset;
+        const currentPitch = pScene.start_pitch + (pScene.end_pitch - pScene.start_pitch) * easedProgress + pitchOffset;
+        const currentFov = pScene.start_fov + (pScene.end_fov - pScene.start_fov) * easedProgress + fovOffset;
+
+        setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
+
+        if (progress < 1) {
+          animationFrameId = requestAnimationFrame(animateCamera);
+        } else {
+          // Animation complete, wait then move to next scene
+          timeoutId = setTimeout(() => {
+            if (!isCleanedUp) {
+              setCurrentPlayTourSceneIndex(prev => prev + 1);
+            }
+          }, waitDuration);
+        }
+      };
+
+      animateCamera();
+    }, 500);
+
+    return () => {
+      isCleanedUp = true;
+      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+      if (timeoutId !== null) clearTimeout(timeoutId);
+    };
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex]);
+
+  // Modified Autoplay Toggle to prioritize Play Tour
+  const toggleAutoplay = useCallback(() => {
+    if (playTours.length > 0) {
+      const nextState = !isPlayingTour;
+      if (!nextState) {
+        triggerPauseAnimation();
+        // Keep current camera position when pausing (don't reset)
+      } else {
+        setIsAutoplay(false); // Disable normal sequential autoplay
+
+        const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+        if (selectedTour && selectedTour.play_tour_scenes) {
+          // Smart Resume: Check if current scene is part of the tour
+          const currentSceneId = scenes[currentSceneIndex]?.id;
+          const matchingSceneIndex = selectedTour.play_tour_scenes.findIndex(
+            (ps: any) => ps.scene_id === currentSceneId
+          );
+
+          if (matchingSceneIndex !== -1) {
+            // Resume from current location
+            setCurrentPlayTourSceneIndex(matchingSceneIndex);
+          } else {
+            // If current scene is not in the tour, start from the beginning
+            setCurrentPlayTourSceneIndex(0);
+          }
+        }
+      }
+      setIsPlayingTour(nextState);
+    } else {
+      const nextState = !isAutoplay;
+      if (!nextState) triggerPauseAnimation();
+      setIsAutoplay(nextState);
+    }
+  }, [isPlayingTour, isAutoplay, playTours, triggerPauseAnimation, currentSceneIndex, scenes, selectedPlayTourId, currentPlayTourSceneIndex]);
+
+  const playTourDisplayScenes = useMemo(() => {
+    if (!selectedPlayTourId) return null;
+    const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+    if (!selectedTour || !selectedTour.play_tour_scenes) return null;
+
+    return selectedTour.play_tour_scenes.map((ps: any, idx: number) => {
+      const baseScene = scenes.find(s => s.id === ps.scene_id);
+      return {
+        ...baseScene,
+        id: `${ps.id}-${idx}`, // Unique ID for progress segments
+        move_duration: ps.move_duration,
+        wait_duration: ps.wait_duration
+      };
+    });
+  }, [isPlayingTour, selectedPlayTourId, playTours, scenes]);
+
+  const currentPlayTourScene = useMemo(() => {
+    if (!selectedPlayTourId) return null;
+    const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+    return selectedTour?.play_tour_scenes?.[currentPlayTourSceneIndex] || null;
+  }, [isPlayingTour, selectedPlayTourId, playTours, currentPlayTourSceneIndex]);
+
+  // Auto-advance scenes when standard autoplay is enabled
+  useEffect(() => {
+    if (!isAutoplay || isPlayingTour || scenes.length <= 1 || isTransitioning || isOverlayModalOpen) {
       if (autoplayTimeoutRef.current) {
         clearTimeout(autoplayTimeoutRef.current);
         autoplayTimeoutRef.current = null;
@@ -460,20 +653,6 @@ export default function PublicTourViewer() {
     handleSceneChange(newIndex);
   }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange]);
 
-  const triggerPauseAnimation = useCallback(() => {
-    if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
-    setShowPauseOverlay(true);
-    pauseTimeoutRef.current = setTimeout(() => setShowPauseOverlay(false), 500);
-  }, []);
-
-  const toggleAutoplay = useCallback(() => {
-    const nextState = !isAutoplay;
-    if (!nextState) {
-      triggerPauseAnimation();
-    }
-    setIsAutoplay(nextState);
-  }, [isAutoplay, triggerPauseAnimation]);
-
   const handleViewerSceneChange = useCallback((sceneId: string) => {
     const sceneIndex = scenes.findIndex(s => s.id === sceneId);
     if (sceneIndex !== -1 && sceneIndex !== currentSceneIndex) {
@@ -485,7 +664,7 @@ export default function PublicTourViewer() {
     if (hotspot.kind === 'navigation') {
       // Handle navigation hotspots - check both target_scene_id and payload.targetSceneId
       let targetSceneId = hotspot.target_scene_id;
-      
+
       // If no direct target_scene_id, check payload
       if (!targetSceneId && hotspot.payload) {
         try {
@@ -495,7 +674,7 @@ export default function PublicTourViewer() {
           console.error('Error parsing navigation hotspot payload:', error);
         }
       }
-      
+
       if (targetSceneId) {
         const targetSceneIndex = scenes.findIndex(scene => scene.id === targetSceneId);
         if (targetSceneIndex !== -1) {
@@ -513,16 +692,18 @@ export default function PublicTourViewer() {
           div.textContent = text;
           return div.innerHTML;
         };
-        
+
         // Pause autoplay when modal opens
         const wasAutoplayActive = isAutoplay;
-        if (isAutoplay) {
-          setIsAutoplay(false);
-        }
-        
+        const wasPlayingTourActive = isPlayingTour;
+
+        if (isAutoplay) setIsAutoplay(false);
+        if (isPlayingTour) setIsPlayingTour(false);
+        setIsOverlayModalOpen(true);
+
         // Create and show info modal
         const modal = document.createElement('div');
-        modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+        modal.className = 'absolute inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4';
         modal.innerHTML = `
           <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
             <div class="flex items-center justify-between p-6 border-b border-gray-200">
@@ -538,24 +719,34 @@ export default function PublicTourViewer() {
             </div>
           </div>
         `;
-        
+
         // Add click handlers
         const closeModal = () => {
-          document.body.removeChild(modal);
+          if (containerRef.current && containerRef.current.contains(modal)) {
+            containerRef.current.removeChild(modal);
+          }
+          setIsOverlayModalOpen(false);
           // Resume autoplay when modal closes
           if (wasAutoplayActive) {
             setIsAutoplay(true);
           }
+          if (wasPlayingTourActive) {
+            setIsPlayingTour(true);
+          }
         };
-        
+
         modal.addEventListener('click', (e) => {
           if (e.target === modal) closeModal();
         });
-        
+
         modal.querySelector('.info-modal-close')?.addEventListener('click', closeModal);
-        
-        document.body.appendChild(modal);
-        
+
+        if (containerRef.current) {
+          containerRef.current.appendChild(modal);
+        } else {
+          document.body.appendChild(modal);
+        }
+
       } catch (error) {
         console.error('Error parsing info hotspot payload:', error);
         alert('Information not available');
@@ -565,7 +756,7 @@ export default function PublicTourViewer() {
       try {
         const payload = JSON.parse(hotspot.payload || '{}');
         const url = payload.url || payload.externalUrl;
-        
+
         if (url) {
           // Ensure URL has protocol
           const fullUrl = url.startsWith('http') ? url : `https://${url}`;
@@ -578,12 +769,16 @@ export default function PublicTourViewer() {
         alert('Link not available');
       }
     }
-  }, [scenes, handleSceneChange, isAutoplay, setIsAutoplay]);
+  }, [scenes, handleSceneChange, isAutoplay, setIsAutoplay, isPlayingTour, setIsPlayingTour, setIsOverlayModalOpen]);
 
   const handleCenterPlayClick = useCallback(() => {
     setShowControls(true);
-    setIsAutoplay(true);
-  }, []);
+    if (playTours.length > 0) {
+      setIsPlayingTour(true);
+    } else {
+      setIsAutoplay(true);
+    }
+  }, [playTours]);
 
   // Effect to log scene changes and hotspot data
   useEffect(() => {
@@ -601,7 +796,7 @@ export default function PublicTourViewer() {
         if (containerRef.current.requestFullscreen) {
           await containerRef.current.requestFullscreen();
         } else {
-          const element = containerRef.current as HTMLElement & { 
+          const element = containerRef.current as HTMLElement & {
             webkitRequestFullscreen?: () => Promise<void>;
             msRequestFullscreen?: () => Promise<void>;
           };
@@ -615,7 +810,7 @@ export default function PublicTourViewer() {
         if (document.exitFullscreen) {
           await document.exitFullscreen();
         } else {
-          const doc = document as Document & { 
+          const doc = document as Document & {
             webkitExitFullscreen?: () => Promise<void>;
             msExitFullscreen?: () => Promise<void>;
           };
@@ -639,7 +834,7 @@ export default function PublicTourViewer() {
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isTransitioning) return;
-      
+
       switch (event.key) {
         case 'ArrowLeft':
           event.preventDefault();
@@ -691,14 +886,14 @@ export default function PublicTourViewer() {
 
     if (tour?.background_audio_url && tour.background_audio_url.trim() !== '') {
       console.log('Loading tour-specific audio:', tour.background_audio_url);
-      
+
       // Check if it's a sharing service URL that needs extraction
-      const isFileSharing = (tour.background_audio_url.includes('jumpshare.com') && tour.background_audio_url.includes('/share/')) || 
-                           (tour.background_audio_url.includes('audio.com') && tour.background_audio_url.includes('/audio/')) || 
-                           (tour.background_audio_url.includes('soundcloud.com') && tour.background_audio_url.includes('/tracks/')) ||
-                           (tour.background_audio_url.includes('dropbox.com') && tour.background_audio_url.includes('/s/')) ||
-                           (tour.background_audio_url.includes('drive.google.com') && tour.background_audio_url.includes('/file/d/'));
-      
+      const isFileSharing = (tour.background_audio_url.includes('jumpshare.com') && tour.background_audio_url.includes('/share/')) ||
+        (tour.background_audio_url.includes('audio.com') && tour.background_audio_url.includes('/audio/')) ||
+        (tour.background_audio_url.includes('soundcloud.com') && tour.background_audio_url.includes('/tracks/')) ||
+        (tour.background_audio_url.includes('dropbox.com') && tour.background_audio_url.includes('/s/')) ||
+        (tour.background_audio_url.includes('drive.google.com') && tour.background_audio_url.includes('/file/d/'));
+
       if (isFileSharing) {
         // Extract audio URL for sharing services
         extractTourAudio(tour.background_audio_url);
@@ -710,7 +905,7 @@ export default function PublicTourViewer() {
       // No tour-specific audio, load default audio
       loadDefaultAudio();
     }
-    
+
     // Cleanup function
     return () => {
       if (audioRef.current) {
@@ -726,7 +921,7 @@ export default function PublicTourViewer() {
       console.log('Extracting tour audio from sharing service:', audioUrl);
       const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(audioUrl)}`);
       const result = await response.json();
-      
+
       if (result.success && result.audioUrl) {
         console.log('Tour audio extraction successful');
         loadTourAudio(result.audioUrl);
@@ -748,20 +943,20 @@ export default function PublicTourViewer() {
     audio.volume = 0.5; // Set default volume to 50%
     audio.muted = true; // Start muted
     audio.crossOrigin = 'anonymous';
-    
+
     audio.addEventListener('canplay', () => {
       console.log('Tour background audio loaded successfully');
       setAudioError(null);
     });
-    
+
     audio.addEventListener('error', (e) => {
       console.error('Tour background audio error:', e);
       setAudioError('Failed to load tour background audio');
     });
-    
+
     audio.addEventListener('play', () => setIsAudioPlaying(true));
     audio.addEventListener('pause', () => setIsAudioPlaying(false));
-    
+
     audioRef.current = audio;
     setIsAudioMuted(true);
     setIsAudioPlaying(false);
@@ -770,13 +965,13 @@ export default function PublicTourViewer() {
   // Load default audio with extraction (same as TourEditor)
   const loadDefaultAudio = async () => {
     const defaultAudioUrl = 'https://audio.com/saransh-pachhai/audio/niya-a-bloom-vlog-no-copyright-music';
-    
+
     try {
       console.log('Loading default audio from audio.com...');
       // Extract direct audio URL from audio.com for default audio
       const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(defaultAudioUrl)}`);
       const result = await response.json();
-      
+
       if (result.success && result.audioUrl) {
         console.log('Default audio extraction successful');
         const audio = new Audio(result.audioUrl);
@@ -784,18 +979,18 @@ export default function PublicTourViewer() {
         audio.volume = 0.3; // Lower volume for default audio
         audio.muted = true;
         audio.crossOrigin = 'anonymous';
-        
+
         audio.addEventListener('canplay', () => {
           console.log('Default background audio loaded successfully');
         });
-        
+
         audio.addEventListener('error', (e) => {
           console.log('Default audio playback error, using visual-only toggle');
         });
-        
+
         audio.addEventListener('play', () => setIsAudioPlaying(true));
         audio.addEventListener('pause', () => setIsAudioPlaying(false));
-        
+
         audioRef.current = audio;
         setIsAudioMuted(true);
         setIsAudioPlaying(false);
@@ -814,7 +1009,7 @@ export default function PublicTourViewer() {
   // Audio control functions - Single toggle button (works even without audio)
   const toggleAudio = useCallback(() => {
     console.log('Audio toggle clicked', { isAudioPlaying, isAudioMuted, audioRef: !!audioRef.current });
-    
+
     if (audioRef.current) {
       // If we have actual audio
       if (isAudioPlaying && !isAudioMuted) {
@@ -896,7 +1091,7 @@ export default function PublicTourViewer() {
   const currentSceneOverlays = allOverlays.filter(overlay => overlay.scene_id === currentScene?.id);
 
   return (
-    <div 
+    <div
       ref={containerRef}
       className={`min-h-screen bg-black ${isFullscreen ? 'fixed inset-0 z-50' : ''}`}
     >
@@ -911,8 +1106,15 @@ export default function PublicTourViewer() {
           hotspots={currentSceneHotspots}
           overlays={currentSceneOverlays}
           autoRotate={isAutoplay}
+          forcedCameraPosition={currentCamera}
+          isPlaybackMode={isPlayingTour}
           onOverlayPause={() => {
-            setIsAutoplay(false);
+            if (isPlayingTour) {
+              setIsPlayingTour(false);
+              // Keep current camera position when pausing
+            } else {
+              setIsAutoplay(false);
+            }
             triggerPauseAnimation();
           }}
         />
@@ -935,8 +1137,11 @@ export default function PublicTourViewer() {
             <h3 className="text-white text-2xl font-bold mb-2 drop-shadow-lg">
               {tour.name || 'Virtual Tour'}
             </h3>
-            <p className="text-white/90 text-sm drop-shadow-lg">
+            {/* <p className="text-white/90 text-sm drop-shadow-lg">
               {scenes.length} scene{scenes.length !== 1 ? 's' : ''} • Public Tour
+            </p> */}
+            <p className="text-white/90 text-sm drop-shadow-lg">
+              Public Tour
             </p>
           </div>
         )}
@@ -963,20 +1168,19 @@ export default function PublicTourViewer() {
             >
               <Share2 className="w-5 h-5" />
             </button>
-            
+
             {/* Audio Control - Single toggle button */}
             <button
               onClick={toggleAudio}
-              className={`backdrop-blur-sm text-white p-2 rounded-full transition-colors cursor-pointer ${
-                isAudioPlaying 
-                  ? 'bg-green-600 hover:bg-green-700' 
-                  : 'bg-black/50 hover:bg-black/70'
-              }`}
+              className={`backdrop-blur-sm text-white p-2 rounded-full transition-colors cursor-pointer ${isAudioPlaying
+                ? 'bg-green-600 hover:bg-green-700'
+                : 'bg-black/50 hover:bg-black/70'
+                }`}
               title={isAudioPlaying ? 'Mute Audio' : 'Play Audio'}
             >
               {isAudioPlaying ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
             </button>
-            
+
             {/* Fullscreen Button */}
             <button
               onClick={toggleFullscreen}
@@ -1015,7 +1219,7 @@ export default function PublicTourViewer() {
                 {/* Navigation Controls */}
                 {scenes.length > 1 && (
                   <div className="flex items-center bg-white/95 backdrop-blur-sm rounded-full px-1 py-1 shadow-lg border border-white/20">
-                    <button 
+                    <button
                       onClick={handlePrevScene}
                       disabled={isTransitioning}
                       className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer group"
@@ -1030,11 +1234,11 @@ export default function PublicTourViewer() {
                         <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
                       </div>
                     </button>
-                    <button 
+                    <button
                       onClick={toggleAutoplay}
                       className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 cursor-pointer group"
                     >
-                      {isAutoplay ? (
+                      {isPlayingTour || isAutoplay ? (
                         <div className="w-4 h-4 flex items-center justify-center">
                           <div className="w-1 h-3 bg-red-500 rounded-sm mr-0.5 group-hover:bg-red-600 transition-colors"></div>
                           <div className="w-1 h-3 bg-red-500 rounded-sm group-hover:bg-red-600 transition-colors"></div>
@@ -1045,13 +1249,13 @@ export default function PublicTourViewer() {
                       {/* Play/Pause Tooltip */}
                       <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none">
                         <div className="bg-black/80 backdrop-blur-sm text-white text-sm px-3 py-2 rounded-lg whitespace-nowrap">
-                          {isAutoplay ? 'Pause' : 'Play'}
+                          {isPlayingTour ? 'Stop Play Tour' : isAutoplay ? 'Pause' : 'Play'}
                         </div>
                         {/* Arrow pointing down */}
                         <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
                       </div>
                     </button>
-                    <button 
+                    <button
                       onClick={handleNextScene}
                       disabled={isTransitioning}
                       className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer group"
@@ -1072,12 +1276,25 @@ export default function PublicTourViewer() {
             </div>
 
             <ProgressBar
-              scenes={scenes}
-              currentSceneIndex={currentSceneIndex}
-              isAutoplay={isAutoplay}
+              scenes={selectedPlayTourId && playTourDisplayScenes ? playTourDisplayScenes : scenes}
+              currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
+              isAutoplay={isAutoplay || isPlayingTour}
               isTransitioning={isTransitioning}
-              onSceneChange={handleSceneChange}
+              onSceneChange={selectedPlayTourId ? (idx) => {
+                setCurrentPlayTourSceneIndex(idx);
+                if (!isPlayingTour) {
+                  const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+                  const pScene = selectedTour?.play_tour_scenes?.[idx];
+                  if (pScene) {
+                    const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
+                    if (sceneIdx !== -1) setCurrentSceneIndex(sceneIdx);
+                  }
+                }
+              } : handleSceneChange}
               isOverlayModalOpen={isOverlayModalOpen}
+              segmentDuration={selectedPlayTourId && currentPlayTourScene
+                ? (currentPlayTourScene.move_duration + (currentPlayTourScene.wait_duration || 0))
+                : (tour?.auto_change_interval || 12000)}
             />
           </>
         )}

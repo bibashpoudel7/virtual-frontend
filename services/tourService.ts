@@ -1,14 +1,16 @@
-import { 
-  Tour, 
-  Scene, 
+import {
+  Tour,
+  Scene,
   Hotspot,
-  Overlay, 
-  GetUploadURLResponse, 
-  ProcessCubemapRequest, 
+  Overlay,
+  GetUploadURLResponse,
+  ProcessCubemapRequest,
   ProcessCubemapResponse,
   CreateHotspotRequest,
   Property,
-  PropertiesResponse
+  PropertiesResponse,
+  PlayTour,
+  PlayTourScene
 } from '@/types/tour';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -24,7 +26,7 @@ class TourService {
   private async fetchWithAuth(url: string, options?: RequestInit) {
     const token = localStorage.getItem('accessToken');
     const userData = localStorage.getItem('user_data');
-    
+
     let role = '';
     if (userData) {
       try {
@@ -35,7 +37,7 @@ class TourService {
         console.error('Error parsing user data:', error);
       }
     }
-    
+
     const headers = {
       'Content-Type': 'application/json',
       ...(token && { Authorization: `Bearer ${token}` }),
@@ -51,7 +53,7 @@ class TourService {
     // Handle 401 errors (token expired)
     if (response.status === 401) {
       console.log('Token expired in tour service - logging out user');
-      
+
       if (globalLogoutFunction) {
         globalLogoutFunction();
       } else {
@@ -81,7 +83,7 @@ class TourService {
     if (!text) {
       return;
     }
-    
+
     try {
       return JSON.parse(text);
     } catch {
@@ -120,7 +122,7 @@ class TourService {
   }
 
   async processCubemap(
-    sceneId: string, 
+    sceneId: string,
     request: ProcessCubemapRequest
   ): Promise<ProcessCubemapResponse> {
     return this.fetchWithAuth(`scenes/${sceneId}/process-cubemap`, {
@@ -150,7 +152,7 @@ class TourService {
       console.log('Using local storage, skipping Cloudflare upload');
       return; // Skip actual upload for local development
     }
-    
+
     const formData = new FormData();
     formData.append('file', file);
 
@@ -258,6 +260,35 @@ class TourService {
     return this.fetchWithAuth(`tours/${tourId}`, {
       method: 'PUT',
       body: JSON.stringify(updateData),
+    });
+  }
+
+  // PlayTour management
+  async createPlayTour(tourId: string, playTour: Partial<PlayTour>): Promise<PlayTour> {
+    return this.fetchWithAuth(`tours/${tourId}/play-tours`, {
+      method: 'POST',
+      body: JSON.stringify(playTour),
+    });
+  }
+
+  async listPlayTours(tourId: string): Promise<PlayTour[]> {
+    return this.fetchWithAuth(`tours/${tourId}/play-tours`);
+  }
+
+  async getPlayTour(id: string): Promise<PlayTour> {
+    return this.fetchWithAuth(`play-tours/${id}`);
+  }
+
+  async updatePlayTour(id: string, playTour: Partial<PlayTour>): Promise<PlayTour> {
+    return this.fetchWithAuth(`play-tours/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(playTour),
+    });
+  }
+
+  async deletePlayTour(id: string): Promise<void> {
+    return this.fetchWithAuth(`play-tours/${id}`, {
+      method: 'DELETE',
     });
   }
 }

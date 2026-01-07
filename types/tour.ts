@@ -55,6 +55,7 @@ export interface Scene extends BaseModel {
   type: 'image' | 'video' | '360';
   src_original_url?: string;
   cubemap_manifest_url?: string;
+  tiles_manifest?: any;
   yaw: number;
   pitch: number;
   fov: number;
@@ -63,7 +64,6 @@ export interface Scene extends BaseModel {
   tour_id: string;
   hotspots: Hotspot[];
   overlays: Overlay[];
-  tiles_manifest?: any;
 }
 // interface TilesManifest {
 //   type: string;
@@ -101,6 +101,7 @@ export interface Hotspot {
   kind: 'navigation' | 'info' | 'image' | 'icon' | 'text' | 'link' | 'video';
   yaw: number;
   pitch: number;
+  transition_direction?: 'forward' | 'backward' | 'up' | 'down' | 'left' | 'right';
   payload?: string;
 }
 
@@ -135,4 +136,33 @@ export interface CreateHotspotRequest {
   payload?: Record<string, any>;
   tour_id: string;
   target_scene_id: string;
+}
+
+export interface PlayTour extends BaseModel {
+  id: string;
+  tour_id: string;
+  name: string;
+  user_id: string;
+  play_tour_scenes: PlayTourScene[];
+}
+
+export interface PlayTourScene extends BaseModel {
+  id: string;
+  play_tour_id: string;
+  scene_id: string;
+  sequence_order: number;
+
+  // Start camera position
+  start_yaw: number;
+  start_pitch: number;
+  start_fov: number;
+
+  // End camera position
+  end_yaw: number;
+  end_pitch: number;
+  end_fov: number;
+
+  move_duration: number; // milliseconds
+  wait_duration: number; // milliseconds
+  transition_direction?: 'forward' | 'backward' | 'up' | 'down' | 'left' | 'right';
 }
