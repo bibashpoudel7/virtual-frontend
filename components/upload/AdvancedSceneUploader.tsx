@@ -383,14 +383,14 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
         console.warn('No manifest found, generating fallback manifest');
         tilesManifest = {
           type: 'cubemap',
-          cubeSize: 2048,
+          cubeSize: 4096,
           tileSize: 512,
           preview: uploadedUrls.get('preview.jpg'),
           faces: ['front', 'back', 'left', 'right', 'top', 'bottom'],
           levels: [
-            { level: 0, size: 512, tiles: 1 },
-            { level: 1, size: 1024, tiles: 2 },
-            { level: 2, size: 2048, tiles: 4 }
+            { level: 1, size: 1024, tileSize: 512, tiles: 2 },
+            { level: 2, size: 2048, tileSize: 512, tiles: 4 },
+            { level: 3, size: 4096, tileSize: 512, tiles: 8 }
           ],
           tiles: []
         };

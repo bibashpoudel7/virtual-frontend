@@ -217,6 +217,8 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const [error, setError] = useState<string | null>(null);
   const [editPanel, setEditPanel] = useState<'hotspots' | 'overlays' | 'playTours' | null>('hotspots');
   const [currentCamera, setCurrentCamera] = useState({ yaw: 0, pitch: 0, fov: 75 });
+  const [previewCameraPosition, setPreviewCameraPosition] = useState<{ yaw: number; pitch: number; fov: number } | null>(null);
+  const cameraControlRef = useRef<{ setCamera: (yaw: number, pitch: number, fov: number) => void } | null>(null);
   const [hotspotType, setHotspotType] = useState<'navigation' | 'info' | 'link'>('navigation');
   const [infoText, setInfoText] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
@@ -421,7 +423,13 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         const currentPitch = pScene.start_pitch + (pScene.end_pitch - pScene.start_pitch) * easedProgress + pitchOffset;
         const currentFov = pScene.start_fov + (pScene.end_fov - pScene.start_fov) * easedProgress + fovOffset;
 
-        setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
+        // Use direct camera control for smooth animation (bypasses React state)
+        if (cameraControlRef.current) {
+          cameraControlRef.current.setCamera(currentYaw, currentPitch, currentFov);
+        } else {
+          // Fallback to state (only if ref not available)
+          setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
+        }
 
         if (progress < 1) {
           animationFrameId = requestAnimationFrame(animateCamera);
@@ -479,6 +487,115 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     if (isAutoplay) setIsAutoplay(false);
     triggerPauseAnimation();
   }, [isPlayingTour, isAutoplay]);
+
+  // Preview a scene with specific camera position (for Play Tour editor)
+  const handlePreviewScene = useCallback((sceneId: string, yaw: number, pitch: number, fov: number) => {
+    // Change to the scene if different
+    if (sceneId !== currentSceneId) {
+      handleSceneChange(sceneId);
+      // Wait for scene to load then set camera position
+      setTimeout(() => {
+        setPreviewCameraPosition({ yaw, pitch, fov });
+      }, 500);
+    } else {
+      // Same scene, set camera immediately
+      setPreviewCameraPosition({ yaw, pitch, fov });
+    }
+  }, [currentSceneId, handleSceneChange]);
+
+  // Play camera animation from start to end position (for Play Tour editor)
+  const animationRef = useRef<number | null>(null);
+  const handlePlaySceneAnimation = useCallback((
+    sceneId: string,
+    startYaw: number, startPitch: number, startFov: number,
+    endYaw: number, endPitch: number, endFov: number,
+    duration: number,
+    transitionDirection: string = 'forward'
+  ) => {
+    // Cancel any existing animation
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+    }
+
+    const startAnimation = () => {
+      const startTime = Date.now();
+
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        // Smooth easing
+        const easeInOutCubic = (t: number) =>
+          t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        const easedProgress = easeInOutCubic(progress);
+
+        // Curve effect - camera arcs during movement (sine wave peaks at middle)
+        const curveAmount = Math.sin(progress * Math.PI);
+
+        // Calculate curve offsets based on direction
+        let yawCurve = 0;
+        let pitchCurve = 0;
+        let fovCurve = 0;
+
+        switch (transitionDirection) {
+          case 'left':
+            yawCurve = -30 * curveAmount;
+            break;
+          case 'right':
+            yawCurve = 30 * curveAmount;
+            break;
+          case 'up':
+            pitchCurve = 20 * curveAmount;
+            break;
+          case 'down':
+            pitchCurve = -20 * curveAmount;
+            break;
+          case 'backward':
+            fovCurve = 40 * curveAmount;
+            break;
+          default: // forward
+            fovCurve = -15 * curveAmount;
+            break;
+        }
+
+        // Interpolate camera position with curve
+        const currentYaw = startYaw + (endYaw - startYaw) * easedProgress + yawCurve;
+        const currentPitch = Math.max(-85, Math.min(85, startPitch + (endPitch - startPitch) * easedProgress + pitchCurve));
+        const currentFov = startFov + (endFov - startFov) * easedProgress + fovCurve;
+
+        // Use direct camera control (bypasses React state for smooth animation)
+        if (cameraControlRef.current) {
+          cameraControlRef.current.setCamera(currentYaw, currentPitch, currentFov);
+        }
+
+        if (progress < 1) {
+          animationRef.current = requestAnimationFrame(animate);
+        } else {
+          animationRef.current = null;
+        }
+      };
+
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    // Change to the scene if different, then start animation
+    if (sceneId !== currentSceneId) {
+      handleSceneChange(sceneId);
+      // Wait for scene to load then start animation
+      setTimeout(() => {
+        if (cameraControlRef.current) {
+          cameraControlRef.current.setCamera(startYaw, startPitch, startFov);
+        }
+        setTimeout(startAnimation, 100);
+      }, 600);
+    } else {
+      // Same scene, set start position and begin animation
+      if (cameraControlRef.current) {
+        cameraControlRef.current.setCamera(startYaw, startPitch, startFov);
+      }
+      setTimeout(startAnimation, 100);
+    }
+  }, [currentSceneId, handleSceneChange]);
 
   const handleSceneChangeByIndex = useCallback((index: number) => {
     if (index === currentSceneIndex || isTransitioning) return;
@@ -864,14 +981,19 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           ? JSON.parse(scene.tiles_manifest)
           : scene.tiles_manifest;
 
-        if (manifest.type === 'cubemap' && manifest.levels?.[0]) {
-          // Preload level 0 tiles for quick initial display
+        if (manifest.type === 'cubemap' && manifest.levels?.length > 0) {
+          // Preload level 1 tiles for quick initial display (level 0 is not generated)
           const faceOrder = ['right', 'left', 'top', 'bottom', 'front', 'back'];
 
           faceOrder.forEach(face => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.src = `${R2_PUBLIC_URL}/scenes/${sceneId}/tiles/${face}_l0_0_0.jpg`;
+            // Level 1 has 2x2 tiles (1024px resolution with 512px tiles)
+            for (let y = 0; y < 2; y++) {
+              for (let x = 0; x < 2; x++) {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.src = `${R2_PUBLIC_URL}/scenes/${sceneId}/tiles/${face}_l1_${x}_${y}.jpg`;
+              }
+            }
           });
 
           setPreloadedScenes((prev: Set<string>) => new Set(prev).add(sceneId));
@@ -1392,8 +1514,9 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               highlightedHotspotId={editingHotspot}
               onOverlayPause={handleOverlayPause}
               onCameraChange={(yaw, pitch, fov) => setCurrentCamera({ yaw, pitch, fov })}
-              forcedCameraPosition={isPlayingTour ? currentCamera : null}
+              forcedCameraPosition={isPlayingTour ? currentCamera : previewCameraPosition}
               isPlaybackMode={isPlayingTour}
+              cameraControlRef={cameraControlRef}
             />
 
             {/* Pause Animation Overlay */}
@@ -1511,8 +1634,9 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               highlightedHotspotId={editingHotspot}
               onOverlayPause={handleOverlayPause}
               onCameraChange={(yaw, pitch, fov) => setCurrentCamera({ yaw, pitch, fov })}
-              forcedCameraPosition={isPlayingTour ? currentCamera : null}
+              forcedCameraPosition={isPlayingTour ? currentCamera : previewCameraPosition}
               isPlaybackMode={isPlayingTour}
+              cameraControlRef={cameraControlRef}
             />
 
             {/* Pause Animation Overlay */}
@@ -2029,6 +2153,8 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                           currentYaw={currentCamera.yaw}
                           currentPitch={currentCamera.pitch}
                           currentFov={currentCamera.fov}
+                          onPreviewScene={handlePreviewScene}
+                          onPlaySceneAnimation={handlePlaySceneAnimation}
                         />
                       </div>
                     </div>

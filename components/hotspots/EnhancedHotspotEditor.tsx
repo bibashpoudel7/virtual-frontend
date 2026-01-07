@@ -13,6 +13,9 @@ type HotspotPayload = {
   iconType?: 'predefined' | 'custom';
   customIconUrl?: string;
   targetSceneId?: string;
+  // Target camera direction after navigation (Matterport-style)
+  targetYaw?: number;
+  targetPitch?: number;
   transition?: string;
   title?: string;
   text?: string;
@@ -27,6 +30,7 @@ type HotspotPayload = {
   linkText?: string;
   openInNewTab?: boolean;
   customData?: string;
+  label?: string;
   [key: string]: unknown; // Allow additional properties with unknown type
 };
 
@@ -35,6 +39,9 @@ interface CreateHotspotApiRequest {
   kind: string;
   yaw: number;
   pitch: number;
+  // Target camera direction after navigation (Matterport-style)
+  target_yaw?: number;
+  target_pitch?: number;
   payload: string; // Stringified HotspotPayload
   tour_id: string;
   target_scene_id: string;
@@ -186,6 +193,9 @@ export default function EnhancedHotspotEditor({
         kind: hotspotData.kind,
         yaw: hotspotData.yaw,
         pitch: hotspotData.pitch,
+        // Include target camera direction if specified
+        target_yaw: hotspotData.payload?.targetYaw,
+        target_pitch: hotspotData.payload?.targetPitch,
         payload: JSON.stringify(hotspotData.payload),
         tour_id: tourId,
         target_scene_id: hotspotData.payload?.targetSceneId || sceneId // Default to current scene if not specified
@@ -298,6 +308,61 @@ export default function EnhancedHotspotEditor({
                 ))}
               </select>
             </div>
+
+            {/* Target Camera Direction (Matterport-style) */}
+            <div className="p-3 border rounded-lg bg-blue-50">
+              <label className="block text-sm font-medium mb-2 text-blue-800">
+                Target Camera Direction (where to look after navigation)
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">
+                    Target Yaw (Horizontal)
+                    <span className="text-gray-400 ml-1">-360° to 360°</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.payload?.targetYaw ?? ''}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      payload: {
+                        ...formData.payload,
+                        targetYaw: e.target.value ? parseFloat(e.target.value) : undefined
+                      }
+                    })}
+                    className="w-full px-3 py-2 border rounded-md"
+                    step="1"
+                    placeholder="Auto (face walking direction)"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">
+                    Target Pitch (Vertical)
+                    <span className="text-gray-400 ml-1">-90° to 90°</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.payload?.targetPitch ?? ''}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      payload: {
+                        ...formData.payload,
+                        targetPitch: e.target.value ? parseFloat(e.target.value) : undefined
+                      }
+                    })}
+                    className="w-full px-3 py-2 border rounded-md"
+                    step="1"
+                    min="-90"
+                    max="90"
+                    placeholder="0 (level view)"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Leave empty to face the walking direction. Set values to look at a specific direction in the target scene.
+              </p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium mb-1">Transition Effect</label>
               <select

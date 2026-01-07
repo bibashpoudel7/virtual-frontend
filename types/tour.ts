@@ -101,6 +101,9 @@ export interface Hotspot {
   kind: 'navigation' | 'info' | 'image' | 'icon' | 'text' | 'link' | 'video';
   yaw: number;
   pitch: number;
+  // Target camera direction after navigating to the new scene (Matterport-style)
+  target_yaw?: number;
+  target_pitch?: number;
   transition_direction?: 'forward' | 'backward' | 'up' | 'down' | 'left' | 'right';
   payload?: string;
 }
@@ -133,6 +136,9 @@ export interface CreateHotspotRequest {
   kind: string;
   yaw: number;
   pitch: number;
+  // Target camera direction after navigating (Matterport-style)
+  target_yaw?: number;
+  target_pitch?: number;
   payload?: Record<string, any>;
   tour_id: string;
   target_scene_id: string;
