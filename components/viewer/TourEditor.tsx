@@ -701,14 +701,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     } finally {
       setIsLoading(false);
     }
-    // Cleanup debounced calls on unmount
-    useEffect(() => {
-      return () => {
-        // Cancel any pending debounced API calls when component unmounts
-        debouncedUpdateHotspotAPI.cancel();
-      };
-    }, [debouncedUpdateHotspotAPI]);
-
   }, [pendingHotspot, selectedTargetScene, infoText, linkUrl, hotspotType, tour.id, currentSceneId, hotspots]);
 
   // Immediate visual update function (no API call)
@@ -769,20 +761,11 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     }
   }, [tour.id, currentSceneId]);
 
-  // Debounced API update (1 second delay)
-  const debouncedUpdateHotspotAPI = useCallback(
-    debounce(updateHotspotAPI, 1000),
-    [updateHotspotAPI]
-  );
-
   // Combined update function that handles both immediate visual update and debounced API call
   const updateHotspot = useCallback((updatedHotspot: Hotspot) => {
     // Immediate visual update for smooth dragging
     updateHotspotVisually(updatedHotspot);
-
-    // Debounced API update (only called after user stops dragging for 1 second)
-    debouncedUpdateHotspotAPI(updatedHotspot);
-  }, [updateHotspotVisually, debouncedUpdateHotspotAPI]);
+  }, [updateHotspotVisually]);
 
   // Function to update hotspot coordinates from manual input
   const updateHotspotCoordinates = useCallback((hotspotId: string, yaw: number, pitch: number) => {
@@ -1848,6 +1831,20 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                                         <button
                                           onClick={() => {
                                             if (isEditing) {
+                                              // Trigger immediate update on close
+                                              const finalYaw = parseFloat(editingYaw);
+                                              const finalPitch = parseFloat(editingPitch);
+                                              if (!isNaN(finalYaw) && !isNaN(finalPitch) && hotspot.id) {
+                                                const updatedHotspot = {
+                                                  ...hotspot,
+                                                  yaw: finalYaw,
+                                                  pitch: finalPitch
+                                                };
+                                                // Cancel any pending debounced calls to avoid double-firing or race conditions
+
+                                                // Call API immediately
+                                                updateHotspotAPI(updatedHotspot);
+                                              }
                                               setEditingHotspot(null);
                                             } else {
                                               setEditingHotspot(hotspot.id || null);
