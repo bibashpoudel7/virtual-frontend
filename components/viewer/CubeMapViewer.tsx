@@ -535,9 +535,17 @@ export default function CubeMapViewer({
     const applyAllTextures = () => {
       console.log('[CubeMapViewer] Applying all 6 face textures at once for smooth transition');
 
-      // Reset cube scale first for smooth appearance
+      // Reset cube position and scale for smooth appearance after navigation animation
       if (cubeRef.current) {
+        cubeRef.current.position.set(0, 0, 0);
         cubeRef.current.scale.set(1, 1, 1);
+      }
+
+      // Reset camera FOV to scene default after animation
+      if (cameraRef.current) {
+        const targetFov = currentScene.fov || 60;
+        cameraRef.current.fov = targetFov;
+        cameraRef.current.updateProjectionMatrix();
       }
 
       pendingTextures.forEach((texture, faceIndex) => {
@@ -1362,14 +1370,8 @@ export default function CubeMapViewer({
                 isNavigatingRef.current = false;
                 controls.isUserInteracting = false;
 
-                // Reset camera and scale for new scene
-                if (cameraRef.current) {
-                  cameraRef.current.fov = 60;
-                  cameraRef.current.updateProjectionMatrix();
-                }
-                if (cubeRef.current) {
-                  cubeRef.current.scale.set(1, 1, 1);
-                }
+                // DON'T reset scale/fov here - keep old scene visible
+                // The new scene's applyAllTextures will handle the reset
 
                 // Store the direction we should face in the new scene
                 // Check for target_yaw/target_pitch in top-level fields OR in payload
@@ -1402,7 +1404,7 @@ export default function CubeMapViewer({
                 };
                 console.log('[CubeMapViewer] Set navigation target:', navigationTargetRef.current);
 
-                // Fire event to load new scene
+                // Fire event to load new scene - old scene stays visible until new textures ready
                 if (onHotspotClick) onHotspotClick(hotspot);
               }
             };
@@ -1444,7 +1446,7 @@ export default function CubeMapViewer({
             // Phase 1: Smooth rotation toward hotspot (if needed)
             // Phase 2: Slow forward movement
             const rotationDuration = Math.min(Math.abs(deltaYaw) * 6, 800); // Slower rotation
-            const moveDuration = 2000; // Slow, smooth forward movement
+            const moveDuration = 3000; // Slower, gentle forward movement
             const startTime = Date.now();
 
             // Easing functions
@@ -1513,11 +1515,8 @@ export default function CubeMapViewer({
                 if (moveProgress < 1) {
                   requestAnimationFrame(animateToHotspot);
                 } else {
-                  // Reset cube position for next scene
-                  if (cubeRef.current) {
-                    cubeRef.current.position.set(0, 0, 0);
-                  }
-                  // Animation complete - check if preload is also done
+                  // DON'T reset cube position here - keep forward position visible
+                  // The new scene's applyAllTextures will reset position and scale
                   console.log('[CubeMapViewer] Animation complete, checking preload status');
                   animationComplete = true;
                   checkAndNavigate();
