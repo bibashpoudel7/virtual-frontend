@@ -647,7 +647,7 @@ export default function OverlayEditor({
 
       const overlayData = {
         ...formData,
-        payload: JSON.stringify(finalPayload),
+        payload: finalPayload,
         tour_id: tourId,
       };
 
