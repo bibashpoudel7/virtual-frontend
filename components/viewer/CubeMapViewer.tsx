@@ -722,6 +722,21 @@ export default function CubeMapViewer({
         z = distance * Math.cos(pitch) * Math.cos(yaw);
       }
 
+      // Helper to draw rounded rect for compatibility
+      const roundedRect = (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) => {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
+      };
+
       // Create hotspot sprite
       const canvas = document.createElement('canvas');
 
@@ -870,9 +885,46 @@ export default function CubeMapViewer({
           ctx.font = 'bold 240px Arial';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          const icon = hotspot.kind === 'navigation' ? '→' :
-            hotspot.kind === 'info' ? 'i' : '🔗';
-          ctx.fillText(icon, 512, iconY);
+
+          if (hotspot.kind === 'info') {
+            // Draw enhanced chat bubble icon for info hotspots
+            const centerX = 512;
+            const centerY = iconY;
+            const bubbleSize = 120;
+            const color = '#2196F3';
+
+            // Draw main chat bubble with rounded corners
+            const bubbleWidth = bubbleSize * 2.4;
+            const bubbleHeight = bubbleSize * 1.8;
+            const bubbleX = centerX - bubbleWidth / 2;
+            const bubbleY = centerY - bubbleHeight / 2;
+            const cornerRadius = 20;
+
+            roundedRect(ctx, bubbleX, bubbleY, bubbleWidth, bubbleHeight, cornerRadius);
+            ctx.fill();
+
+            // Triangle tip
+            ctx.beginPath();
+            ctx.moveTo(bubbleX + bubbleWidth * 0.25, bubbleY + bubbleHeight);
+            ctx.lineTo(bubbleX + bubbleWidth * 0.45, bubbleY + bubbleHeight);
+            ctx.lineTo(bubbleX + bubbleWidth * 0.3, bubbleY + bubbleHeight + bubbleSize * 0.5);
+            ctx.closePath();
+            ctx.fill();
+
+            // Text lines inside bubble
+            ctx.fillStyle = color;
+            const lineWidth = bubbleWidth * 0.6;
+            const lineHeight = 12;
+            const startX = centerX - lineWidth / 2;
+            const lineSpacing = bubbleSize * 0.35;
+
+            ctx.fillRect(startX, centerY - lineSpacing, lineWidth, lineHeight);
+            ctx.fillRect(startX, centerY, lineWidth * 0.85, lineHeight);
+            ctx.fillRect(startX, centerY + lineSpacing, lineWidth * 0.7, lineHeight);
+          } else {
+            const icon = hotspot.kind === 'navigation' ? '→' : '🔗';
+            ctx.fillText(icon, 512, iconY);
+          }
         }
       }
 

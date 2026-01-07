@@ -677,7 +677,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       }
 
       // Update payload in hotspotData
-      hotspotData.payload = payload;
+      hotspotData.payload = JSON.stringify(payload);
       const newHotspot = await HotspotsAPI.createHotspot(tour.id, hotspotData);
       const updatedHotspots = [...hotspots, newHotspot];
       setHotspots(updatedHotspots);
@@ -742,7 +742,9 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         kind: updatedHotspot.kind,
         yaw: updatedHotspot.yaw,
         pitch: updatedHotspot.pitch,
-        payload: updatedHotspot.payload
+        payload: typeof updatedHotspot.payload === 'object'
+          ? JSON.stringify(updatedHotspot.payload)
+          : updatedHotspot.payload
       };
 
       await HotspotsAPI.updateHotspot(

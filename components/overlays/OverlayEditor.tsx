@@ -254,7 +254,7 @@ export default function OverlayEditor({
         kind: editFormData.kind,
         yaw: editFormData.yaw,
         pitch: editFormData.pitch,
-        payload: finalPayload
+        payload: JSON.stringify(finalPayload)
       };
 
       const response = await tourService.updateOverlay(sceneId, selectedOverlay.id!, updatedOverlay);
@@ -647,7 +647,7 @@ export default function OverlayEditor({
 
       const overlayData = {
         ...formData,
-        payload: finalPayload,
+        payload: JSON.stringify(finalPayload),
         tour_id: tourId,
       };
 
