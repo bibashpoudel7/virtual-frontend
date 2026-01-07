@@ -1,6 +1,7 @@
 'use client';
 // frontend/components/viewer/TourEditor.tsx
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
 import CubeMapViewer from './CubeMapViewer';
 import OverlayEditor from '../overlays/OverlayEditor';
 import { Tour, Scene, Hotspot, Overlay, PlayTour } from '@/types/tour';
@@ -36,14 +37,16 @@ const ProgressBar = ({
   isAutoplay,
   isTransitioning,
   onSceneChange,
-  isOverlayModalOpen = false
+  isOverlayModalOpen = false,
+  segmentDuration = 12000
 }: {
-  scenes: Scene[];
+  scenes: any[];
   currentSceneIndex: number;
   isAutoplay: boolean;
   isTransitioning: boolean;
   onSceneChange: (index: number) => void;
   isOverlayModalOpen?: boolean;
+  segmentDuration?: number;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number | undefined>(undefined);
@@ -62,13 +65,13 @@ const ProgressBar = ({
     }
 
     if (isAutoplay && !isOverlayModalOpen) {
-      startTimeRef.current = Date.now() - (pausedProgressRef.current * 12000);
+      startTimeRef.current = Date.now() - (pausedProgressRef.current * segmentDuration);
 
       const updateProgress = () => {
         if (!progressBarRef.current || isTransitioning) return;
 
         const elapsed = Date.now() - startTimeRef.current;
-        const progress = Math.min(1, elapsed / 12000);
+        const progress = Math.min(1, elapsed / segmentDuration);
 
         pausedProgressRef.current = progress;
 
@@ -97,7 +100,7 @@ const ProgressBar = ({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen]);
+  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen, segmentDuration]);
 
   if (scenes.length <= 1) return null;
 
@@ -251,6 +254,9 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const [currentPlayTourSceneIndex, setCurrentPlayTourSceneIndex] = useState(0);
   const [isPlayingTour, setIsPlayingTour] = useState(false);
 
+  const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+
   const playTourDisplayScenes = useMemo(() => {
     if (!selectedPlayTourId) return null;
     const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
@@ -266,8 +272,10 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         id: `${ps.id}-${idx}`, // Unique ID for the progress bar key
         originalId: scene.id,
         name: scene.name || 'Tour Step',
+        move_duration: ps.move_duration,
+        wait_duration: ps.wait_duration
       };
-    }).filter(Boolean) as (Scene & { originalId: string })[];
+    }).filter(Boolean) as (Scene & { originalId: string; move_duration?: number; wait_duration?: number })[];
   }, [selectedPlayTourId, playTours, scenes]);
 
   const currentScene = scenes.find(s => s.id === currentSceneId) || scenes[0];
@@ -346,124 +354,96 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
   // Play Tour playback logic
   useEffect(() => {
-    if (!isPlayingTour || !selectedPlayTourId) {
-      return;
-    }
+    if (!isPlayingTour || !selectedPlayTourId) return;
 
     const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
     if (!selectedTour || !selectedTour.play_tour_scenes || selectedTour.play_tour_scenes.length === 0) {
-      console.error('[Play Tour] No scenes in selected Play Tour');
       setIsPlayingTour(false);
       return;
     }
 
-    let currentSceneIdx = 0;
+    if (currentPlayTourSceneIndex >= selectedTour.play_tour_scenes.length) {
+      setIsPlayingTour(false);
+      return;
+    }
+
+    const pScene = selectedTour.play_tour_scenes[currentPlayTourSceneIndex];
+    const sceneId = pScene.scene_id;
     let animationFrameId: number | null = null;
     let timeoutId: NodeJS.Timeout | null = null;
     let isCleanedUp = false;
 
-    const playNextScene = () => {
-      if (isCleanedUp || currentSceneIdx >= selectedTour.play_tour_scenes.length) {
-        // Tour complete
-        setIsPlayingTour(false);
-        return;
-      }
-
-      const playTourScene = selectedTour.play_tour_scenes[currentSceneIdx];
-      const sceneId = playTourScene.scene_id;
-
-      // Change to the scene
+    // Change to the scene
+    const sceneIndex = scenes.findIndex(s => s.id === sceneId);
+    if (sceneIndex !== -1 && (sceneIndex !== currentSceneIndex || currentSceneId !== sceneId)) {
       setCurrentSceneId(sceneId);
-      const sceneIndex = scenes.findIndex(s => s.id === sceneId);
-      if (sceneIndex !== -1) {
-        setCurrentSceneIndex(sceneIndex);
-      }
+      setCurrentSceneIndex(sceneIndex);
+    }
 
-      // Wait for scene to load, then animate camera
-      setTimeout(() => {
+    // Wait for scene to load, then animate camera
+    timeoutId = setTimeout(() => {
+      if (isCleanedUp) return;
+
+      const startTime = Date.now();
+      const moveDuration = pScene.move_duration || 5000;
+      const waitDuration = pScene.wait_duration || 1000;
+
+      const easeInOutCubic = (t: number) => {
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      };
+
+      const animateCamera = () => {
         if (isCleanedUp) return;
 
-        const startTime = Date.now();
-        const moveDuration = playTourScene.move_duration || 5000;
-        const waitDuration = playTourScene.wait_duration || 1000;
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / moveDuration, 1);
+        const easedProgress = easeInOutCubic(progress);
 
-        // Easing function for smooth animation
-        const easeInOutCubic = (t: number) => {
-          return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-        };
+        // Calculate curve offset based on transition direction
+        const direction = pScene.transition_direction || 'forward';
+        let yawOffset = 0;
+        let pitchOffset = 0;
+        let fovOffset = 0;
 
-        const animateCamera = () => {
-          if (isCleanedUp) return;
+        if (direction !== 'forward') {
+          const curveProgress = Math.sin(progress * Math.PI);
+          if (direction === 'left') yawOffset = -30 * curveProgress;
+          else if (direction === 'right') yawOffset = 30 * curveProgress;
+          else if (direction === 'up') pitchOffset = 20 * curveProgress;
+          else if (direction === 'down') pitchOffset = -20 * curveProgress;
+          else if (direction === 'backward') {
+            fovOffset = 40 * curveProgress;
+            yawOffset = 180 * curveProgress;
+          }
+        }
 
-          const elapsed = Date.now() - startTime;
-          const progress = Math.min(elapsed / moveDuration, 1);
-          const easedProgress = easeInOutCubic(progress);
+        const currentYaw = pScene.start_yaw + (pScene.end_yaw - pScene.start_yaw) * easedProgress + yawOffset;
+        const currentPitch = pScene.start_pitch + (pScene.end_pitch - pScene.start_pitch) * easedProgress + pitchOffset;
+        const currentFov = pScene.start_fov + (pScene.end_fov - pScene.start_fov) * easedProgress + fovOffset;
 
-          // Calculate curve offset based on transition direction
-          // This creates a smooth arc that peaks at 50% progress and returns to 0 at 100%
-          const direction = playTourScene.transition_direction || 'forward';
-          let yawOffset = 0;
-          let pitchOffset = 0;
-          let fovOffset = 0;
+        setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
 
-          if (direction !== 'forward') {
-            // Use sine wave for smooth curve: peaks at middle, returns to 0 at end
-            const curveProgress = Math.sin(progress * Math.PI);
-
-            if (direction === 'left') {
-              yawOffset = -30 * curveProgress; // Arc 30° to the left
-            } else if (direction === 'right') {
-              yawOffset = 30 * curveProgress; // Arc 30° to the right
-            } else if (direction === 'up') {
-              pitchOffset = 20 * curveProgress; // Arc 20° upward
-            } else if (direction === 'down') {
-              pitchOffset = -20 * curveProgress; // Arc 20° downward
-            } else if (direction === 'backward') {
-              // Zoom out in the middle, then back in
-              fovOffset = 40 * curveProgress; // Increase FOV by up to 40°
-              yawOffset = 180 * curveProgress; // Also rotate 180° for backward effect
+        if (progress < 1) {
+          animationFrameId = requestAnimationFrame(animateCamera);
+        } else {
+          // Animation complete, wait then move to next scene
+          timeoutId = setTimeout(() => {
+            if (!isCleanedUp) {
+              setCurrentPlayTourSceneIndex(prev => prev + 1);
             }
-          }
+          }, waitDuration);
+        }
+      };
 
-          // Interpolate camera position with offsets
-          const currentYaw = playTourScene.start_yaw + (playTourScene.end_yaw - playTourScene.start_yaw) * easedProgress + yawOffset;
-          const currentPitch = playTourScene.start_pitch + (playTourScene.end_pitch - playTourScene.start_pitch) * easedProgress + pitchOffset;
-          const currentFov = playTourScene.start_fov + (playTourScene.end_fov - playTourScene.start_fov) * easedProgress + fovOffset;
+      animateCamera();
+    }, 500);
 
-          // Update camera state
-          setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
-
-          if (progress < 1) {
-            animationFrameId = requestAnimationFrame(animateCamera);
-          } else {
-            // Animation complete, wait then move to next scene
-            timeoutId = setTimeout(() => {
-              if (!isCleanedUp) {
-                currentSceneIdx++;
-                playNextScene();
-              }
-            }, waitDuration);
-          }
-        };
-
-        animateCamera();
-      }, 500); // Wait 500ms for scene to load
-    };
-
-    // Start playback
-    playNextScene();
-
-    // Cleanup function
     return () => {
       isCleanedUp = true;
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-      }
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
-      }
+      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+      if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  }, [isPlayingTour, selectedPlayTourId, playTours, scenes]);
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, currentSceneId]);
 
   const handleSceneChange = useCallback((sceneId: string) => {
     if (sceneId === currentSceneId) return; // Don't transition to the same scene
@@ -495,10 +475,10 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   }, [currentSceneId, scenes, selectedPlayTourId, playTours]);
 
   const handleOverlayPause = useCallback(() => {
-    setIsAutoplay(false);
-    setShowPauseOverlay(true);
-    setTimeout(() => setShowPauseOverlay(false), 500);
-  }, []);
+    if (isPlayingTour) setIsPlayingTour(false);
+    if (isAutoplay) setIsAutoplay(false);
+    triggerPauseAnimation();
+  }, [isPlayingTour, isAutoplay]);
 
   const handleSceneChangeByIndex = useCallback((index: number) => {
     if (index === currentSceneIndex || isTransitioning) return;
@@ -516,6 +496,18 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       setIsTransitioning(false);
     }, 1200);
   }, [currentSceneIndex, isTransitioning, scenes]);
+
+  const handlePrevScene = useCallback(() => {
+    if (currentSceneIndex > 0) {
+      handleSceneChangeByIndex(currentSceneIndex - 1);
+    }
+  }, [currentSceneIndex, handleSceneChangeByIndex]);
+
+  const handleNextScene = useCallback(() => {
+    if (currentSceneIndex < scenes.length - 1) {
+      handleSceneChangeByIndex(currentSceneIndex + 1);
+    }
+  }, [currentSceneIndex, scenes.length, handleSceneChangeByIndex]);
 
   const handleHotspotClick = useCallback((hotspot: Hotspot) => {
     if (hotspot.kind === 'navigation' && hotspot.payload) {
@@ -550,7 +542,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
         // Create and show info modal
         const modal = document.createElement('div');
-        modal.className = 'absolute inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4';
+        modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4';
         modal.innerHTML = `
           <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
             <div class="flex items-center justify-between p-6 border-b border-gray-200">
@@ -1157,11 +1149,46 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     setIsAudioMuted(audioRef.current.muted);
   };
 
+  const triggerPauseAnimation = () => {
+    if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
+    setShowPauseOverlay(true);
+    pauseTimeoutRef.current = setTimeout(() => setShowPauseOverlay(false), 500);
+  };
+
   const toggleAutoplay = () => {
-    setIsAutoplay(!isAutoplay);
-    // Force a small delay to ensure the state change is processed
-    setTimeout(() => {
-    }, 100);
+    if (playTours.length > 0 && selectedPlayTourId) {
+      // Prioritize Play Tour when one is selected
+      const nextState = !isPlayingTour;
+      if (!nextState) {
+        triggerPauseAnimation();
+        // Keep current camera position when pausing (don't reset)
+      } else {
+        setIsAutoplay(false); // Disable normal sequential autoplay
+
+        const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+        if (selectedTour && selectedTour.play_tour_scenes) {
+          // Smart Resume: Check if current scene is part of the tour
+          const currentSceneId = scenes[currentSceneIndex]?.id;
+          const matchingSceneIndex = selectedTour.play_tour_scenes.findIndex(
+            (ps: any) => ps.scene_id === currentSceneId
+          );
+
+          if (matchingSceneIndex !== -1) {
+            // Resume from current location
+            setCurrentPlayTourSceneIndex(matchingSceneIndex);
+          } else {
+            // If current scene is not in the tour, start from the beginning
+            setCurrentPlayTourSceneIndex(0);
+          }
+        }
+      }
+      setIsPlayingTour(nextState);
+    } else {
+      // No Play Tour selected, just toggle autoplay
+      const nextState = !isAutoplay;
+      if (!nextState) triggerPauseAnimation();
+      setIsAutoplay(nextState);
+    }
   };
 
   // Audio management functions
@@ -1395,11 +1422,74 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               </div>
             )}
 
+            {/* Bottom Navigation Controls - Match public tour page */}
+            <div className="absolute bottom-6 left-6 z-30">
+              <div className="flex items-center gap-4">
+                {/* Navigation Controls */}
+                {scenes.length > 1 && (
+                  <div className="flex items-center bg-white/95 backdrop-blur-sm rounded-full px-1 py-1 shadow-lg border border-white/20">
+                    <button
+                      onClick={handlePrevScene}
+                      disabled={isTransitioning}
+                      className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer group"
+                    >
+                      <ChevronLeft className="w-4 h-4 text-gray-700 group-hover:text-gray-900 transition-colors" />
+                      {/* Previous Tooltip */}
+                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none">
+                        <div className="bg-black/80 backdrop-blur-sm text-white text-sm px-3 py-2 rounded-lg whitespace-nowrap">
+                          Previous
+                        </div>
+                        {/* Arrow pointing down */}
+                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={toggleAutoplay}
+                      className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 cursor-pointer group"
+                    >
+                      {isPlayingTour || isAutoplay ? (
+                        <div className="w-4 h-4 flex items-center justify-center">
+                          <div className="w-1 h-3 bg-red-500 rounded-sm mr-0.5 group-hover:bg-red-600 transition-colors"></div>
+                          <div className="w-1 h-3 bg-red-500 rounded-sm group-hover:bg-red-600 transition-colors"></div>
+                        </div>
+                      ) : (
+                        <Play className="w-4 h-4 text-red-500 ml-0.5 group-hover:text-red-600 transition-colors" />
+                      )}
+                      {/* Play/Pause Tooltip */}
+                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none">
+                        <div className="bg-black/80 backdrop-blur-sm text-white text-sm px-3 py-2 rounded-lg whitespace-nowrap">
+                          {isPlayingTour ? 'Stop Play Tour' : isAutoplay ? 'Pause' : 'Play'}
+                        </div>
+                        {/* Arrow pointing down */}
+                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
+                      </div>
+                    </button>
+                    <button
+                      onClick={handleNextScene}
+                      disabled={isTransitioning}
+                      className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer group"
+                    >
+                      <ChevronRight className="w-4 h-4 text-gray-700 group-hover:text-gray-900 transition-colors" />
+                      {/* Next Tooltip */}
+                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none">
+                        <div className="bg-black/80 backdrop-blur-sm text-white text-sm px-3 py-2 rounded-lg whitespace-nowrap">
+                          Next
+                        </div>
+                        {/* Arrow pointing down */}
+                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Progress Bar - Only show in fullscreen mode */}
             <ProgressBar
               scenes={playTourDisplayScenes || scenes}
               currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
               isAutoplay={isAutoplay || (!!selectedPlayTourId && isPlayingTour)}
+              segmentDuration={isPlayingTour && playTourDisplayScenes ? (playTourDisplayScenes[currentPlayTourSceneIndex]?.move_duration || 5000) : 12000}
               isTransitioning={isTransitioning}
               onSceneChange={(index) => {
                 if (selectedPlayTourId && playTourDisplayScenes) {
@@ -1655,16 +1745,16 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
                   {/* Instructions */}
                   <div className={`border-2 rounded-lg p-3 mb-4 ${editPanel === 'playTours'
+                    ? 'bg-purple-50 border-purple-200'
+                    : editPanel === 'overlays'
                       ? 'bg-purple-50 border-purple-200'
-                      : editPanel === 'overlays'
-                        ? 'bg-purple-50 border-purple-200'
-                        : 'bg-blue-50 border-blue-200'
+                      : 'bg-blue-50 border-blue-200'
                     }`}>
                     <p className={`text-sm font-medium ${editPanel === 'playTours'
+                      ? 'text-purple-900'
+                      : editPanel === 'overlays'
                         ? 'text-purple-900'
-                        : editPanel === 'overlays'
-                          ? 'text-purple-900'
-                          : 'text-blue-900'
+                        : 'text-blue-900'
                       }`}>
                       {editPanel === 'playTours' ? (
                         <>
