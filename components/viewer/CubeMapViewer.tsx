@@ -56,7 +56,7 @@ export default function CubeMapViewer({
 
   const [isLoading, setIsLoading] = useState(true);
   const [manifest, setManifest] = useState<CubeMapManifest | null>(null);
-  const [currentLevel, setCurrentLevel] = useState(0);
+  const [currentLevel, setCurrentLevel] = useState(1);
   const [isAutoRotating, setIsAutoRotating] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -127,7 +127,7 @@ export default function CubeMapViewer({
             loadedTexturesRef.current.clear();
           }
           setManifest(parsed);
-          setCurrentLevel(0); // Reset to level 0 for new scene
+          setCurrentLevel(1); // Reset to level 1 for new scene
         }
       } catch (error) {
         console.error('Failed to parse cube map manifest:', error);
@@ -343,14 +343,16 @@ export default function CubeMapViewer({
   const loadCubeMapLevel = useCallback((level: number) => {
     // Always use the current manifest from state, not from closure
     const currentManifest = manifest;
-    if (!currentManifest || !sceneRef.current || !currentManifest.levels[level]) return;
+    if (!currentManifest || !sceneRef.current) return;
+
+    // Find level info by level number (not array index) since level 0 is removed
+    const levelInfo = currentManifest.levels.find(l => l.level === level);
+    if (!levelInfo) return;
 
     // optimization: During playback, stick to lower levels (max level 1) to prevent lag
     if (isPlaybackMode && level > 1) {
       return;
     }
-
-    const levelInfo = currentManifest.levels[level];
     const tilesPerSide = levelInfo.tiles;
     const faceSize = levelInfo.size;
 
@@ -363,59 +365,7 @@ export default function CubeMapViewer({
       CubeFace.BACK
     ];
 
-    // Special case for level 0 - single tile per face
-    if (level === 0) {
-      const loader = new THREE.TextureLoader();
-      faceOrder.forEach((face, faceIndex) => {
-        // Check cache first
-        const cacheKey = `${currentScene.id}_${face}_l${level}`;
-        if (loadedTexturesRef.current.has(cacheKey)) {
-          const cachedTexture = loadedTexturesRef.current.get(cacheKey)!;
-          if (materialsRef.current[faceIndex]) {
-            materialsRef.current[faceIndex].map = cachedTexture;
-            materialsRef.current[faceIndex].needsUpdate = true;
-          }
-          return;
-        }
-
-        // Load single tile
-        const tileUrl = `${R2_PUBLIC_URL}/scenes/${currentScene.id}/tiles/${face}_l${level}_0_0.jpg`;
-
-        loader.load(
-          tileUrl,
-          (texture) => {
-            texture.colorSpace = THREE.SRGBColorSpace;
-            texture.minFilter = THREE.LinearMipmapLinearFilter;
-            texture.magFilter = THREE.LinearFilter;
-            texture.generateMipmaps = true;
-            texture.anisotropy = rendererRef.current?.capabilities.getMaxAnisotropy() || 16;
-            texture.needsUpdate = true;
-
-            // Cache the texture
-            loadedTexturesRef.current.set(cacheKey, texture);
-
-            // Update material
-            if (materialsRef.current[faceIndex]) {
-              const oldMap = materialsRef.current[faceIndex].map;
-              materialsRef.current[faceIndex].map = texture;
-              materialsRef.current[faceIndex].needsUpdate = true;
-
-              // Dispose old texture if it's not cached
-              if (oldMap && oldMap !== texture && !Array.from(loadedTexturesRef.current.values()).includes(oldMap)) {
-                oldMap.dispose();
-              }
-            }
-          },
-          undefined,
-          (error) => {
-            console.error(`Failed to load tile: ${face}_l${level}_0_0.jpg`, error);
-          }
-        );
-      });
-      return;
-    }
-
-    // For levels 1+ - composite multiple tiles
+    // Composite multiple tiles for all levels (level 0 removed)
     faceOrder.forEach((face, faceIndex) => {
       // Check cache first
       const cacheKey = `${currentScene.id}_${face}_l${level}`;
@@ -553,12 +503,12 @@ export default function CubeMapViewer({
       CubeFace.BACK    // -Z
     ];
 
-    // Start with level 0 for quick loading
-    const level = 0;
+    // Start with level 1 for quick loading (level 0 removed)
+    const level = 1;
 
     let loadedCount = 0;
     faceOrder.forEach(face => {
-      // Build URL for this face at level 0, tile 0,0
+      // Build URL for this face at level 1
       const tileUrl = `${R2_PUBLIC_URL}/scenes/${currentScene.id}/tiles/${face}_l${level}_0_0.jpg`;
 
       const texture = loader.load(
@@ -586,29 +536,22 @@ export default function CubeMapViewer({
 
             // Automatically load higher quality levels progressively
             // Note: We're using the manifest from the effect's dependency, which should be current
+            // Level 0 is removed, so we start at level 1 and progressively load 2, 3
             if (manifest && manifest.levels && manifest.levels.length > 1) {
-              // Load level 1 immediately for better default quality
-              setTimeout(() => {
+              // Pre-load level 2 after level 1 is loaded
+              if (manifest.levels.length > 2) {
+                setTimeout(() => {
+                  loadCubeMapLevel(2);
+                  setCurrentLevel(2);
 
-                loadCubeMapLevel(1);
-                setCurrentLevel(1);
-
-                // Pre-load level 2 after level 1 is loaded
-                if (manifest.levels.length > 2) {
-                  setTimeout(() => {
-
-                    loadCubeMapLevel(2);
-
-                    // Pre-load level 3 for maximum quality
-                    if (manifest.levels.length > 3) {
-                      setTimeout(() => {
-
-                        loadCubeMapLevel(3);
-                      }, 1500);
-                    }
-                  }, 1000);
-                }
-              }, 100);
+                  // Pre-load level 3 for maximum quality
+                  if (manifest.levels.length > 3) {
+                    setTimeout(() => {
+                      loadCubeMapLevel(3);
+                    }, 1500);
+                  }
+                }, 500);
+              }
             }
           }
         },
@@ -1299,7 +1242,7 @@ export default function CubeMapViewer({
         } else if (cameraRef.current.fov <= 60) {
           targetLevel = Math.min(1, manifest.levels.length - 1); // Medium quality
         } else {
-          targetLevel = 0; // Base quality for wide view
+          targetLevel = 1; // Base quality for wide view (level 0 removed)
         }
 
         // Only change level if we're upgrading quality or significantly zooming out

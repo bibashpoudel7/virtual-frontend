@@ -194,7 +194,7 @@ export async function generateCubeMapTiles(
   // Generate preview
   const previewBuffer = await sharp(panoramaBuffer)
     .resize(512, 256, { fit: 'fill' })
-    .jpeg({ quality: 80 })
+    .jpeg({ quality: 90 })
     .toBuffer();
   
   tiles.push({
@@ -219,7 +219,7 @@ export async function generateCubeMapTiles(
     { resolution: 8192, tileSize: 1024 }   // Level 4: 8x8 tiles of 1024x1024 - extreme quality
   ];
   
-  for (let level = 0; level < numLevels; level++) {
+  for (let level = 1; level < numLevels; level++) {
     // Get configuration for this level
     const config = levelConfigs[Math.min(level, levelConfigs.length - 1)];
     const levelSize = config.resolution;
