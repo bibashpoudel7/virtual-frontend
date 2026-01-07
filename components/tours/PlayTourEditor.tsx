@@ -179,7 +179,7 @@ export default function PlayTourEditor({
 
     return (
         <div className="flex flex-col h-full bg-white text-gray-900 border-l border-gray-200 w-80 overflow-y-auto shadow-xl">
-            <div className="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center sticky top-0 z-10">
+            <div className="p-4 pr-14 border-b border-gray-200 bg-gray-50 flex justify-between items-center sticky top-0 z-10">
                 <h2 className="text-lg font-bold text-gray-800">Play Tours</h2>
                 <button
                     onClick={() => setIsCreating(true)}
@@ -364,8 +364,8 @@ export default function PlayTourEditor({
                                                                 key={dir}
                                                                 onClick={() => handleUpdateSceneParams(idx, { transition_direction: dir as any })}
                                                                 className={`px-1 py-1 rounded border text-[9px] font-bold capitalize transition-colors cursor-pointer ${ps.transition_direction === dir
-                                                                        ? 'border-purple-500 bg-purple-50 text-purple-700'
-                                                                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                                                                    ? 'border-purple-500 bg-purple-50 text-purple-700'
+                                                                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
                                                                     }`}
                                                             >
                                                                 {dir === 'forward' && '⬆️'}

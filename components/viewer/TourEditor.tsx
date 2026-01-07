@@ -1654,14 +1654,29 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                   </div>
 
                   {/* Instructions */}
-                  <div className={`border-2 rounded-lg p-3 mb-4 ${editPanel === 'overlays'
-                    ? 'bg-purple-50 border-purple-200'
-                    : 'bg-blue-50 border-blue-200'
+                  <div className={`border-2 rounded-lg p-3 mb-4 ${editPanel === 'playTours'
+                      ? 'bg-purple-50 border-purple-200'
+                      : editPanel === 'overlays'
+                        ? 'bg-purple-50 border-purple-200'
+                        : 'bg-blue-50 border-blue-200'
                     }`}>
-                    <p className={`text-sm font-medium ${editPanel === 'overlays' ? 'text-purple-900' : 'text-blue-900'
+                    <p className={`text-sm font-medium ${editPanel === 'playTours'
+                        ? 'text-purple-900'
+                        : editPanel === 'overlays'
+                          ? 'text-purple-900'
+                          : 'text-blue-900'
                       }`}>
-                      <strong>How to add {editPanel}:</strong><br />
-                      Hold <kbd className="px-1 py-0.5 bg-white rounded border text-gray-800 font-semibold">Shift</kbd> + Click on the panorama
+                      {editPanel === 'playTours' ? (
+                        <>
+                          <strong>Play Tours:</strong><br />
+                          Manage automated tour sequences and camera movements
+                        </>
+                      ) : (
+                        <>
+                          <strong>How to add {editPanel}:</strong><br />
+                          Hold <kbd className="px-1 py-0.5 bg-white rounded border text-gray-800 font-semibold">Shift</kbd> + Click on the panorama
+                        </>
+                      )}
                     </p>
                   </div>
 
@@ -1912,6 +1927,13 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                   {editPanel === 'playTours' && (
                     <div className="fixed top-0 left-0 bottom-0 z-50 animate-in slide-in-from-left duration-300">
                       <div className="flex bg-white h-full relative">
+                        <button
+                          onClick={() => setEditPanel('hotspots')}
+                          className="absolute right-4 top-4 bg-gray-100 p-2 rounded-lg shadow-md text-gray-700 hover:bg-gray-200 cursor-pointer z-50 font-bold"
+                          title="Close Play Tour Editor"
+                        >
+                          ✕
+                        </button>
                         <PlayTourEditor
                           tourId={tour.id}
                           scenes={scenes}
@@ -1919,13 +1941,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                           currentPitch={currentCamera.pitch}
                           currentFov={currentCamera.fov}
                         />
-                        <button
-                          onClick={() => setEditPanel('hotspots')}
-                          className="absolute -right-10 top-4 bg-white p-2 rounded-r-lg shadow-lg text-gray-900 border border-l-0 border-gray-200 hover:bg-gray-50 cursor-pointer z-50 font-bold"
-                          title="Close Play Tour Editor"
-                        >
-                          ✕
-                        </button>
                       </div>
                     </div>
                   )}
