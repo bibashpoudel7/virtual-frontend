@@ -23,6 +23,7 @@ interface OverlayRendererProps {
   isFullscreen?: boolean;
   isAutoplay?: boolean;
   onPause?: () => void;
+  radius?: number;
 }
 
 // Helper function to format URLs
@@ -41,7 +42,7 @@ const formatUrl = (url: string): string => {
 };
 
 // Create 3D overlay sprite
-function createOverlaySprite(overlay: Overlay): THREE.Group {
+function createOverlaySprite(overlay: Overlay, radius: number = 450): THREE.Group {
   const group = new THREE.Group();
 
   // Check for invalid coordinates
@@ -52,15 +53,14 @@ function createOverlaySprite(overlay: Overlay): THREE.Group {
 
   // Use raw values to match CubeMapViewer hotspot logic
   // pitch/yaw are in degrees
-  const yawRad = THREE.MathUtils.degToRad(overlay.yaw || 0);
-  const pitchRad = THREE.MathUtils.degToRad(overlay.pitch || 0);
+  // Align with yawPitchToVector logic from multires/geometry.ts
+  const phi = THREE.MathUtils.degToRad(90 - (overlay.pitch || 0));
+  const theta = THREE.MathUtils.degToRad((overlay.yaw || 0) + 180);
 
-  // Use slightly smaller radius than SPHERE_RADIUS (500) to avoid Z-fighting 
-  // and ensure overlays are visible in front of the sphere texture
-  const renderRadius = 450;
-  const x = renderRadius * Math.cos(pitchRad) * Math.sin(yawRad);
-  const y = renderRadius * Math.sin(pitchRad);
-  const z = renderRadius * Math.cos(pitchRad) * Math.cos(yawRad);
+  // Calculate position using spherical coordinates
+  const x = radius * Math.sin(phi) * Math.cos(theta);
+  const y = radius * Math.cos(phi);
+  const z = radius * Math.sin(phi) * Math.sin(theta);
 
   const position = new THREE.Vector3(x, y, z);
   group.position.copy(position);
@@ -76,11 +76,18 @@ function createOverlaySprite(overlay: Overlay): THREE.Group {
     depthWrite: false,  // Don't write to depth buffer
     depthTest: false,   // Don't check depth buffer - ALWAYS render on top
     alphaTest: 0.05,    // Lower alpha threshold to ensure softer edges show
+    sizeAttenuation: false, // Keep fixed size on screen
   });
   const iconSprite = new THREE.Sprite(iconMaterial);
-  iconSprite.scale.setScalar(50); // Slightly larger for better visibility
-  iconSprite.renderOrder = 9999; // Very high render order to ensure it's drawn last (on top)
+  // Default base scale for overlays
+  const baseScale = 0.12;
+  iconSprite.scale.setScalar(baseScale);
+  iconSprite.renderOrder = 9999;
   iconSprite.frustumCulled = false;
+
+  // Store baseScale for the viewer's animate loop to use
+  iconSprite.userData.baseScale = baseScale;
+
   group.add(iconSprite);
 
   return group;
@@ -245,7 +252,8 @@ export default function OverlayRenderer({
   overlayGroup = null,
   isFullscreen = false,
   isAutoplay = false,
-  onPause
+  onPause,
+  radius = 450
 }: OverlayRendererProps) {
   const overlaySpritesRef = useRef<Map<string, THREE.Group>>(new Map());
   const [hoveredOverlay, setHoveredOverlay] = useState<Overlay | null>(null);
@@ -406,21 +414,9 @@ export default function OverlayRenderer({
     overlays.forEach((overlay) => {
       if (!overlay.id) return;
 
-      const sprite = createOverlaySprite(overlay);
+      const sprite = createOverlaySprite(overlay, radius);
       overlayGroup.add(sprite);
       overlaySpritesRef.current.set(overlay.id, sprite);
-
-      // Initialize video state for video overlays
-      if (overlay.kind === 'video') {
-        setVideoStates(prev => {
-          const newStates = new Map(prev);
-          newStates.set(overlay.id!, {
-            isVideoPlaying: false,
-            hasStartedPlaying: false
-          });
-          return newStates;
-        });
-      }
 
       // Ensure visibility
       sprite.visible = true;
@@ -431,28 +427,23 @@ export default function OverlayRenderer({
       });
     });
 
-    // Ensure the overlay group itself is visible
-    overlayGroup.visible = true;
-  }, [overlays, scene, overlayGroup]);
-
-  // Scale overlay sprites based on camera FOV with enhanced quality
-  useEffect(() => {
-    if (!overlayGroup) return;
-
-    const spriteScale = THREE.MathUtils.clamp(56 - (fov - 40) * 0.2, 38, 54); // Slightly larger range
-    overlayGroup.children.forEach((child) => {
-      if (child instanceof THREE.Group) {
-        child.children.forEach((groupChild) => {
-          if (groupChild instanceof THREE.Sprite) {
-            groupChild.scale.setScalar(spriteScale);
-            groupChild.visible = true;
-          }
+    // Initialize video states in one go
+    const newVideoStates = new Map<string, { isVideoPlaying: boolean; hasStartedPlaying: boolean }>();
+    overlays.forEach(overlay => {
+      if (overlay.kind === 'video' && overlay.id) {
+        newVideoStates.set(overlay.id, {
+          isVideoPlaying: false,
+          hasStartedPlaying: false
         });
-        child.visible = true;
       }
     });
+    if (newVideoStates.size > 0) {
+      setVideoStates(newVideoStates);
+    }
+
+    // Ensure the overlay group itself is visible
     overlayGroup.visible = true;
-  }, [fov, overlayGroup]);
+  }, [overlays, scene, overlayGroup, radius]);
 
   // Handle advanced hover functionality with better throttling
   const handleOverlayHover = (overlay: Overlay, position: { x: number; y: number }) => {

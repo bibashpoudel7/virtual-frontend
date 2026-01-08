@@ -290,6 +290,22 @@ export default function CubeMapViewer({
       // Ensure proper orientation
       cameraRef.current.up.set(0, 1, 0);
 
+      // Scale overlay sprites the same way as hotspots
+      if (overlaysRef.current && cameraRef.current) {
+        const scaleFactor = cameraRef.current.fov / 60;
+        overlaysRef.current.children.forEach((child: THREE.Object3D) => {
+          if (child instanceof THREE.Group) {
+            child.children.forEach((groupChild: THREE.Object3D) => {
+              if (groupChild instanceof THREE.Sprite && groupChild.userData.baseScale) {
+                const scale = groupChild.userData.baseScale * scaleFactor;
+                groupChild.scale.set(scale, scale, 1);
+                groupChild.visible = true;
+              }
+            });
+            child.visible = true;
+          }
+        });
+      }
       // Adjust hotspot/overlay sizes based on FOV (zoom level) and add glow/highlight effects
       if (hotspotsRef.current && cameraRef.current) {
         const scaleFactor = cameraRef.current.fov / 60; // Base FOV is 60
@@ -341,8 +357,6 @@ export default function CubeMapViewer({
         });
       }
 
-      // Overlay scaling is now handled by OverlayRenderer
-      // Removed manual overlay scaling logic
 
       rendererRef.current.render(sceneRef.current, cameraRef.current);
 
@@ -1695,8 +1709,8 @@ export default function CubeMapViewer({
           overlays={overlays}
           viewerWidth={viewerDimensions.width}
           viewerHeight={viewerDimensions.height}
-          currentYaw={THREE.MathUtils.radToDeg(controlsRef.current.lon)}
-          currentPitch={THREE.MathUtils.radToDeg(controlsRef.current.lat)}
+          currentYaw={controlsRef.current.lon}
+          currentPitch={controlsRef.current.lat}
           fov={cameraRef.current.fov}
           camera={cameraRef.current}
           scene={sceneRef.current}
@@ -1705,6 +1719,7 @@ export default function CubeMapViewer({
           isAutoplay={isAutoRotating || autoRotate || isPlaybackMode}
           onPause={onOverlayPause}
           onOverlayClick={(overlay) => void 0}
+          radius={45}
         />
       )}
     </div>

@@ -1175,28 +1175,33 @@ export default function OverlayEditor({
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-semibold mb-2 text-gray-900">Overlay Type</label>
-              <select
-                value={formData.kind}
-                onChange={(e) => {
-                  const newKind = e.target.value;
-                  const newPayload: any = { style: 'default', animation: 'fade' };
-                  if (newKind === 'image') {
-                    newPayload.imageSource = 'url';
-                  }
-                  setFormData({
-                    ...formData,
-                    kind: newKind,
-                    payload: newPayload
-                  });
-                }}
-                className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg text-gray-900 bg-white cursor-pointer focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
-              >
+              <div className="grid grid-cols-3 gap-2">
                 {overlayTypes.map(type => (
-                  <option key={type.value} value={type.value}>
-                    {type.icon} {type.label}
-                  </option>
+                  <button
+                    key={type.value}
+                    type="button"
+                    onClick={() => {
+                      const newKind = type.value;
+                      const newPayload: any = { style: 'default', animation: 'fade' };
+                      if (newKind === 'image') {
+                        newPayload.imageSource = 'url';
+                      }
+                      setFormData({
+                        ...formData,
+                        kind: newKind,
+                        payload: newPayload
+                      });
+                    }}
+                    className={`px-3 py-2 rounded border text-sm font-medium transition-colors cursor-pointer flex flex-col items-center gap-1 ${formData.kind === type.value
+                      ? 'border-purple-500 bg-purple-50 text-purple-700'
+                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                  >
+                    <span className="text-xl">{type.icon}</span>
+                    <span>{type.label.split(' ')[0]}</span>
+                  </button>
                 ))}
-              </select>
+              </div>
               <p className="text-xs text-gray-700 mt-1 font-medium">
                 {overlayTypes.find(t => t.value === formData.kind)?.description}
               </p>
