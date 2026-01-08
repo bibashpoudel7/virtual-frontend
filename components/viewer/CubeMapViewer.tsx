@@ -135,6 +135,7 @@ export default function CubeMapViewer({
     }
 
     // Reset camera to scene defaults (only if not in playback mode AND no forced camera position)
+    // We only trigger this when the *scene* changes, not when playback mode toggles.
     if (!isPlaybackMode && !forcedCameraPosition) {
       const controls = controlsRef.current;
       controls.lon = currentScene.yaw || 0;
@@ -148,7 +149,7 @@ export default function CubeMapViewer({
         cameraRef.current.updateProjectionMatrix();
       }
     }
-  }, [currentScene, isPlaybackMode]);
+  }, [currentScene]);
 
   // Initialize Three.js scene
   useEffect(() => {
