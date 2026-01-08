@@ -402,9 +402,29 @@ export default function PublicTourViewer() {
         setAllOverlays(allOverlays);
       }
 
-      setPlayTours(data.playTours || []);
-      if (data.playTours && data.playTours.length > 0) {
-        setSelectedPlayTourId(data.playTours[0].id);
+      const playToursData = data.playTours || [];
+
+      // Sort play tour scenes by sequence order
+      playToursData.forEach((pt: any) => {
+        if (pt.play_tour_scenes) {
+          pt.play_tour_scenes.sort((a: any, b: any) => (a.sequence_order || 0) - (b.sequence_order || 0));
+        }
+      });
+
+      setPlayTours(playToursData);
+
+      if (playToursData.length > 0) {
+        setSelectedPlayTourId(playToursData[0].id);
+
+        // Find the index of the first scene of the first play tour in the scenes array
+        const firstPlayTour = playToursData[0];
+        if (firstPlayTour.play_tour_scenes && firstPlayTour.play_tour_scenes.length > 0) {
+          const firstSceneId = firstPlayTour.play_tour_scenes[0].scene_id;
+          const sceneIndex = (data.scenes || []).findIndex((s: any) => s.id === firstSceneId);
+          if (sceneIndex !== -1) {
+            setCurrentSceneIndex(sceneIndex);
+          }
+        }
       }
 
       setLoading(false);
@@ -1100,8 +1120,8 @@ export default function PublicTourViewer() {
           scenes={scenes}
           onSceneChange={handleViewerSceneChange}
           onHotspotClick={handleHotspotClick}
-          hotspots={currentSceneHotspots}
-          overlays={currentSceneOverlays}
+          hotspots={showControls ? currentSceneHotspots : []}
+          overlays={showControls ? currentSceneOverlays : []}
           autoRotate={isAutoplay}
           forcedCameraPosition={currentCamera}
           isPlaybackMode={isPlayingTour}

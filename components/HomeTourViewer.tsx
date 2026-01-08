@@ -414,9 +414,30 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
               tourService.listPlayTours(firstTour.id)
             ]);
 
-            setPlayTours(playToursData || []);
-            if (playToursData && playToursData.length > 0) {
-              setSelectedPlayTourId(playToursData[0].id);
+            // Sort play tour scenes by sequence order
+            const finalPlayTours = (playToursData || []).map((pt: any) => {
+              if (pt.play_tour_scenes) {
+                return {
+                  ...pt,
+                  play_tour_scenes: [...pt.play_tour_scenes].sort((a: any, b: any) => (a.sequence_order || 0) - (b.sequence_order || 0))
+                };
+              }
+              return pt;
+            });
+
+            setPlayTours(finalPlayTours);
+            if (finalPlayTours.length > 0) {
+              setSelectedPlayTourId(finalPlayTours[0].id);
+
+              // Find the index of the first scene of the first play tour in the scenes array
+              const firstPlayTour = finalPlayTours[0];
+              if (firstPlayTour.play_tour_scenes && firstPlayTour.play_tour_scenes.length > 0) {
+                const firstSceneId = firstPlayTour.play_tour_scenes[0].scene_id;
+                const sceneIndex = (scenesData || []).findIndex((s: Scene) => s.id === firstSceneId);
+                if (sceneIndex !== -1) {
+                  setCurrentSceneIndex(sceneIndex);
+                }
+              }
             }
 
             const flattenedHotspots = hotspotsArrays.flat();
@@ -1144,8 +1165,8 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
             scenes={scenes}
             onSceneChange={handleViewerSceneChange}
             onHotspotClick={handleHotspotClick}
-            hotspots={currentSceneHotspots}
-            overlays={currentSceneOverlays}
+            hotspots={showControls ? currentSceneHotspots : []}
+            overlays={showControls ? currentSceneOverlays : []}
             autoRotate={isAutoplay}
             forcedCameraPosition={currentCamera}
             isPlaybackMode={isPlayingTour}
