@@ -6,6 +6,7 @@ import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
 import { tourService } from '@/services/tourService';
 import CubeMapViewer from './viewer/CubeMapViewer';
+import PlayTourOverlay from './tours/PlayTourOverlay';
 import AutoplayController from './viewer/AutoplayController';
 import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy, X } from 'lucide-react';
 
@@ -349,6 +350,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   // Play Tour state
   const [playTours, setPlayTours] = useState<any[]>([]);
   const [isPlayingTour, setIsPlayingTour] = useState(false);
+  const [hasPlayTourStarted, setHasPlayTourStarted] = useState(false);
   const [selectedPlayTourId, setSelectedPlayTourId] = useState<string | null>(null);
   const [currentPlayTourSceneIndex, setCurrentPlayTourSceneIndex] = useState(0);
   const [currentCamera, setCurrentCamera] = useState<{ yaw: number; pitch: number; fov: number } | null>(null);
@@ -453,7 +455,9 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         id: `${ps.id}-${idx}`, // Unique ID for the progress bar key
         name: scene?.name || 'Tour Step',
         move_duration: ps.move_duration,
-        wait_duration: ps.wait_duration
+        wait_duration: ps.wait_duration,
+        title: ps.title,
+        description: ps.description
       };
     });
   }, [selectedPlayTourId, playTours, scenes]);
@@ -661,6 +665,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         }
       }
       setIsPlayingTour(nextState);
+      if (nextState) setHasPlayTourStarted(true);
     } else {
       const nextState = !isAutoplay;
       if (!nextState) {
@@ -799,6 +804,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     setShowControls(true);
     if (playTours.length > 0) {
       setIsPlayingTour(true);
+      setHasPlayTourStarted(true);
     } else {
       setIsAutoplay(true);
     }
@@ -1084,7 +1090,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
             <h3 className="text-white text-2xl font-bold mb-2 drop-shadow-lg">
               Tons of Natural Light
             </h3>
-            <p className="text-white/90 text-sm drop-shadow-lg max-w-md">
+            <p className="text-white/90 text-sm drop-shadow-lg max-w-md font-semibold">
               Unique throughout with expansive windows, high ceilings, floating stairs and tons of natural light
             </p>
           </div>
@@ -1167,6 +1173,14 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
           </div>
         </div>
 
+        {/* Play Tour Title/Description Overlay */}
+        <PlayTourOverlay
+          title={playTourDisplayScenes ? playTourDisplayScenes[currentPlayTourSceneIndex]?.title : undefined}
+          description={playTourDisplayScenes ? playTourDisplayScenes[currentPlayTourSceneIndex]?.description : undefined}
+          isVisible={!!(hasPlayTourStarted && playTourDisplayScenes && playTourDisplayScenes[currentPlayTourSceneIndex])}
+          variant={isFullscreen ? 'default' : 'compact'}
+        />
+
         {/* Autoplay Controller - Disabled for now - using built-in autoplay instead */}
 
         {!showControls && (
@@ -1239,7 +1253,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         {/* Controls - Only show after center play is clicked */}
         {showControls && (
           <>
-            <div className="absolute bottom-6 left-6 z-30">
+            <div className="absolute bottom-6 left-6 z-50">
               <div className="flex items-center gap-4">
                 {/* Navigation Controls */}
                 {scenes.length > 1 && (

@@ -1,11 +1,11 @@
 'use client';
-// frontend/components/viewer/TourEditor.tsx
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Pencil } from 'lucide-react';
 import CubeMapViewer from './CubeMapViewer';
 import OverlayEditor from '../overlays/OverlayEditor';
 import { Tour, Scene, Hotspot, Overlay, PlayTour } from '@/types/tour';
 import PlayTourEditor from '../tours/PlayTourEditor';
+import PlayTourOverlay from '../tours/PlayTourOverlay';
 
 const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
 import { HotspotsAPI } from '@/lib/api/hotspots';
@@ -105,7 +105,7 @@ const ProgressBar = ({
   if (scenes.length <= 1) return null;
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 p-4" ref={progressBarRef}>
+    <div className="absolute bottom-0 left-0 right-0 p-4 z-[60] pointer-events-auto" ref={progressBarRef}>
       <div className="flex gap-1 w-full h-1">
         {scenes.map((scene, index) => {
           const isCompleted = index < currentSceneIndex;
@@ -255,6 +255,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const [selectedPlayTourId, setSelectedPlayTourId] = useState<string | null>(null);
   const [currentPlayTourSceneIndex, setCurrentPlayTourSceneIndex] = useState(0);
   const [isPlayingTour, setIsPlayingTour] = useState(false);
+  const [hasPlayTourStarted, setHasPlayTourStarted] = useState(false);
 
   const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -275,9 +276,11 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         originalId: scene.id,
         name: scene.name || 'Tour Step',
         move_duration: ps.move_duration,
-        wait_duration: ps.wait_duration
+        wait_duration: ps.wait_duration,
+        title: ps.title,
+        description: ps.description
       };
-    }).filter(Boolean) as (Scene & { originalId: string; move_duration?: number; wait_duration?: number })[];
+    }).filter(Boolean) as (Scene & { originalId: string; move_duration?: number; wait_duration?: number; title?: string; description?: string })[];
   }, [selectedPlayTourId, playTours, scenes]);
 
   const currentScene = scenes.find(s => s.id === currentSceneId) || scenes[0];
@@ -289,6 +292,8 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       setCurrentSceneIndex(newIndex);
     }
   }, [currentSceneId, scenes, currentSceneIndex]);
+
+
 
   // Memoize filtered hotspots and overlays to prevent re-renders in CubeMapViewer
   // causing performance issues during playback animation
@@ -345,6 +350,13 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         // Auto-select the first play tour if available
         if (tours && tours.length > 0) {
           setSelectedPlayTourId(tours[0].id);
+          // Auto-select the first scene of the play tour to ensure we start at the beginning
+          if (tours[0].play_tour_scenes && tours[0].play_tour_scenes.length > 0) {
+            // Note: Scenes are already sorted by the service
+            const firstScene = tours[0].play_tour_scenes[0];
+            setCurrentSceneId(firstScene.scene_id);
+            setCurrentPlayTourSceneIndex(0);
+          }
         }
       } catch (err) {
         console.error('Failed to load play tours:', err);
@@ -423,13 +435,9 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         const currentPitch = pScene.start_pitch + (pScene.end_pitch - pScene.start_pitch) * easedProgress + pitchOffset;
         const currentFov = pScene.start_fov + (pScene.end_fov - pScene.start_fov) * easedProgress + fovOffset;
 
-        // Use direct camera control for smooth animation (bypasses React state)
-        if (cameraControlRef.current) {
-          cameraControlRef.current.setCamera(currentYaw, currentPitch, currentFov);
-        } else {
-          // Fallback to state (only if ref not available)
-          setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
-        }
+        // Use state-based camera control to match public viewer behavior
+        // This ensures forcedCameraPosition prop is always accurate and prevents conflicts
+        setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
 
         if (progress < 1) {
           animationFrameId = requestAnimationFrame(animateCamera);
@@ -512,6 +520,9 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     duration: number,
     transitionDirection: string = 'forward'
   ) => {
+    // Ensure duration has a valid value (default 5s)
+    const animDuration = duration || 5000;
+
     // Cancel any existing animation
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
@@ -522,7 +533,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
       const animate = () => {
         const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / duration, 1);
+        const progress = Math.min(elapsed / animDuration, 1);
 
         // Smooth easing
         const easeInOutCubic = (t: number) =>
@@ -552,9 +563,13 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
             break;
           case 'backward':
             fovCurve = 40 * curveAmount;
+            yawCurve = 180 * curveAmount; // Also rotate 180 for backward
             break;
           default: // forward
-            fovCurve = -15 * curveAmount;
+            // Small FOV change for forward feel
+            if (transitionDirection === 'forward') {
+              fovCurve = -5 * curveAmount;
+            }
             break;
         }
 
@@ -572,6 +587,10 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           animationRef.current = requestAnimationFrame(animate);
         } else {
           animationRef.current = null;
+          // Ensure we land exactly on the end state
+          if (cameraControlRef.current) {
+            cameraControlRef.current.setCamera(endYaw, endPitch, endFov);
+          }
         }
       };
 
@@ -583,6 +602,9 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       handleSceneChange(sceneId);
       // Wait for scene to load then start animation
       setTimeout(() => {
+        // Force start position via state as backup
+        setPreviewCameraPosition({ yaw: startYaw, pitch: startPitch, fov: startFov });
+
         if (cameraControlRef.current) {
           cameraControlRef.current.setCamera(startYaw, startPitch, startFov);
         }
@@ -590,6 +612,8 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       }, 600);
     } else {
       // Same scene, set start position and begin animation
+      setPreviewCameraPosition({ yaw: startYaw, pitch: startPitch, fov: startFov });
+
       if (cameraControlRef.current) {
         cameraControlRef.current.setCamera(startYaw, startPitch, startFov);
       }
@@ -1274,22 +1298,14 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
         const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
         if (selectedTour && selectedTour.play_tour_scenes) {
-          // Smart Resume: Check if current scene is part of the tour
-          const currentSceneId = scenes[currentSceneIndex]?.id;
-          const matchingSceneIndex = selectedTour.play_tour_scenes.findIndex(
-            (ps: any) => ps.scene_id === currentSceneId
-          );
-
-          if (matchingSceneIndex !== -1) {
-            // Resume from current location
-            setCurrentPlayTourSceneIndex(matchingSceneIndex);
-          } else {
-            // If current scene is not in the tour, start from the beginning
+          // Reset to start if we finished the tour previously
+          if (currentPlayTourSceneIndex >= selectedTour.play_tour_scenes.length) {
             setCurrentPlayTourSceneIndex(0);
           }
         }
       }
       setIsPlayingTour(nextState);
+      if (nextState) setHasPlayTourStarted(true);
     } else {
       // No Play Tour selected, just toggle autoplay
       const nextState = !isAutoplay;
@@ -1389,57 +1405,56 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   };
 
   return (
-    <div className="absolute inset-0" ref={containerRef}>
-      {/* Fullscreen Viewer Mode */}
+    <div className={`absolute inset-0 ${isViewerFullscreen ? 'fixed z-50 bg-black' : ''}`} ref={containerRef}>
+      {/* Shared Viewer Instance - Persists across state changes */}
+      <div className="w-full h-full relative">
+        <CubeMapViewer
+          tour={tour}
+          currentScene={currentScene}
+          scenes={scenes}
+          onSceneChange={handleSceneChange}
+          onHotspotClick={handleHotspotClick}
+          isEditMode={isViewerFullscreen ? false : isEditMode}
+          onHotspotCreate={handleHotspotCreate}
+          onHotspotUpdate={updateHotspot}
+          hotspots={currentSceneHotspots}
+          overlays={currentSceneOverlays}
+          autoRotate={isAutoplay}
+          highlightedHotspotId={editingHotspot}
+          onOverlayPause={handleOverlayPause}
+          onCameraChange={(yaw, pitch, fov) => setCurrentCamera({ yaw, pitch, fov })}
+          forcedCameraPosition={isPlayingTour ? currentCamera : previewCameraPosition}
+          isPlaybackMode={isPlayingTour}
+          cameraControlRef={cameraControlRef}
+        />
+
+        {/* Pause Animation Overlay */}
+        {showPauseOverlay && (
+          <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
+            <div className="bg-black/60 rounded-full p-8 animate-in fade-in zoom-in duration-300">
+              <svg className="w-16 h-16 text-white" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+              </svg>
+            </div>
+          </div>
+        )}
+
+        {/* Play Tour Title/Description Overlay */}
+        {/* Rendered here to be behind the sidebar (z-40) but available in both modes */}
+        <PlayTourOverlay
+          title={playTourDisplayScenes ? playTourDisplayScenes[currentPlayTourSceneIndex]?.title : undefined}
+          description={playTourDisplayScenes ? playTourDisplayScenes[currentPlayTourSceneIndex]?.description : undefined}
+          isVisible={!!(hasPlayTourStarted && playTourDisplayScenes && playTourDisplayScenes[currentPlayTourSceneIndex])}
+        />
+      </div>
+
+      {/* Fullscreen Mode UI Overlays */}
       {isViewerFullscreen ? (
-        <div className="fixed inset-0 z-50 bg-black">
-          {/* Full Integrated Controls for Fullscreen */}
-          <div className="absolute top-4 right-4 z-60">
+        <div className="absolute inset-0 pointer-events-none">
+          {/* Top Right Controls */}
+          <div className="absolute top-4 right-4 z-60 pointer-events-auto">
             <div className="bg-white rounded-lg shadow-lg p-2">
               <div className="flex items-center gap-2">
-                {/* Play Tour Selection */}
-                {playTours.length > 0 && (
-                  <>
-                    <select
-                      value={selectedPlayTourId || ''}
-                      onChange={(e) => setSelectedPlayTourId(e.target.value || null)}
-                      className="px-3 py-2 bg-gray-50 text-gray-900 rounded border border-gray-200 text-sm font-medium cursor-pointer"
-                    >
-                      <option value="">Select Play Tour...</option>
-                      {playTours.map(playTour => (
-                        <option key={playTour.id} value={playTour.id}>
-                          🎬 {playTour.name}
-                        </option>
-                      ))}
-                    </select>
-                    {selectedPlayTourId && (
-                      <button
-                        onClick={() => setIsPlayingTour(!isPlayingTour)}
-                        className={`px-3 py-2 rounded text-sm font-medium transition-colors cursor-pointer ${isPlayingTour
-                          ? 'bg-red-600 text-white hover:bg-red-700'
-                          : 'bg-green-600 text-white hover:bg-green-700'
-                          }`}
-                        title={isPlayingTour ? 'Stop Play Tour' : 'Start Play Tour'}
-                      >
-                        {isPlayingTour ? '⏹ Stop' : '▶ Play'}
-                      </button>
-                    )}
-                  </>
-                )}
-
-                {/* Autoplay Control */}
-                <button
-                  onClick={toggleAutoplay}
-                  className={`p-2 rounded transition-colors flex items-center gap-1 cursor-pointer ${isAutoplay
-                    ? 'bg-blue-600 text-white hover:bg-blue-700'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  title={isAutoplay ? 'Pause Auto-rotation' : 'Start Auto-rotation'}
-                >
-                  {isAutoplay ? '⏸' : '▶'}
-                  <span className="text-xs hidden sm:inline">Auto</span>
-                </button>
-
                 {/* Audio Controls */}
                 {isClient && (
                   <>
@@ -1497,160 +1512,80 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
             </div>
           </div>
 
-          {/* Clean Viewer */}
-          <div className="w-full h-full relative">
-            <CubeMapViewer
-              tour={tour}
-              currentScene={currentScene}
-              scenes={scenes}
-              onSceneChange={handleSceneChange}
-              onHotspotClick={handleHotspotClick}
-              isEditMode={false} // Disable edit mode in fullscreen
-              onHotspotCreate={handleHotspotCreate}
-              onHotspotUpdate={updateHotspot}
-              hotspots={currentSceneHotspots}
-              overlays={currentSceneOverlays}
-              autoRotate={isAutoplay}
-              highlightedHotspotId={editingHotspot}
-              onOverlayPause={handleOverlayPause}
-              onCameraChange={(yaw, pitch, fov) => setCurrentCamera({ yaw, pitch, fov })}
-              forcedCameraPosition={isPlayingTour ? currentCamera : previewCameraPosition}
-              isPlaybackMode={isPlayingTour}
-              cameraControlRef={cameraControlRef}
-            />
-
-            {/* Pause Animation Overlay */}
-            {showPauseOverlay && (
-              <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
-                <div className="bg-black/60 rounded-full p-8 animate-in fade-in zoom-in duration-300">
-                  <svg className="w-16 h-16 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                  </svg>
+          {/* Bottom Left Controls */}
+          <div className="absolute bottom-6 left-6 z-30 pointer-events-auto">
+            <div className="flex items-center gap-4">
+              {/* Navigation Controls */}
+              {scenes.length > 1 && (
+                <div className="flex items-center bg-white/95 backdrop-blur-sm rounded-full px-1 py-1 shadow-lg border border-white/20">
+                  <button
+                    onClick={handlePrevScene}
+                    disabled={isTransitioning}
+                    className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer group"
+                  >
+                    <ChevronLeft className="w-4 h-4 text-gray-700 group-hover:text-gray-900 transition-colors" />
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none">
+                      <div className="bg-black/80 backdrop-blur-sm text-white text-sm px-3 py-2 rounded-lg whitespace-nowrap">Previous</div>
+                      <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={toggleAutoplay}
+                    className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 cursor-pointer group"
+                  >
+                    {isPlayingTour || isAutoplay ? (
+                      <div className="w-4 h-4 flex items-center justify-center">
+                        <div className="w-1 h-3 bg-red-500 rounded-sm mr-0.5 group-hover:bg-red-600 transition-colors"></div>
+                        <div className="w-1 h-3 bg-red-500 rounded-sm group-hover:bg-red-600 transition-colors"></div>
+                      </div>
+                    ) : (
+                      <Play className="w-4 h-4 text-red-500 ml-0.5 group-hover:text-red-600 transition-colors" />
+                    )}
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none">
+                      <div className="bg-black/80 backdrop-blur-sm text-white text-sm px-3 py-2 rounded-lg whitespace-nowrap">
+                        {isPlayingTour ? 'Stop Play Tour' : isAutoplay ? 'Pause' : 'Play'}
+                      </div>
+                      <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={handleNextScene}
+                    disabled={isTransitioning}
+                    className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer group"
+                  >
+                    <ChevronRight className="w-4 h-4 text-gray-700 group-hover:text-gray-900 transition-colors" />
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none">
+                      <div className="bg-black/80 backdrop-blur-sm text-white text-sm px-3 py-2 rounded-lg whitespace-nowrap">Next</div>
+                      <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
+                    </div>
+                  </button>
                 </div>
-              </div>
-            )}
-
-            {/* Bottom Navigation Controls - Match public tour page */}
-            <div className="absolute bottom-6 left-6 z-30">
-              <div className="flex items-center gap-4">
-                {/* Navigation Controls */}
-                {scenes.length > 1 && (
-                  <div className="flex items-center bg-white/95 backdrop-blur-sm rounded-full px-1 py-1 shadow-lg border border-white/20">
-                    <button
-                      onClick={handlePrevScene}
-                      disabled={isTransitioning}
-                      className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer group"
-                    >
-                      <ChevronLeft className="w-4 h-4 text-gray-700 group-hover:text-gray-900 transition-colors" />
-                      {/* Previous Tooltip */}
-                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none">
-                        <div className="bg-black/80 backdrop-blur-sm text-white text-sm px-3 py-2 rounded-lg whitespace-nowrap">
-                          Previous
-                        </div>
-                        {/* Arrow pointing down */}
-                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
-                      </div>
-                    </button>
-                    <button
-                      onClick={toggleAutoplay}
-                      className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 cursor-pointer group"
-                    >
-                      {isPlayingTour || isAutoplay ? (
-                        <div className="w-4 h-4 flex items-center justify-center">
-                          <div className="w-1 h-3 bg-red-500 rounded-sm mr-0.5 group-hover:bg-red-600 transition-colors"></div>
-                          <div className="w-1 h-3 bg-red-500 rounded-sm group-hover:bg-red-600 transition-colors"></div>
-                        </div>
-                      ) : (
-                        <Play className="w-4 h-4 text-red-500 ml-0.5 group-hover:text-red-600 transition-colors" />
-                      )}
-                      {/* Play/Pause Tooltip */}
-                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none">
-                        <div className="bg-black/80 backdrop-blur-sm text-white text-sm px-3 py-2 rounded-lg whitespace-nowrap">
-                          {isPlayingTour ? 'Stop Play Tour' : isAutoplay ? 'Pause' : 'Play'}
-                        </div>
-                        {/* Arrow pointing down */}
-                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
-                      </div>
-                    </button>
-                    <button
-                      onClick={handleNextScene}
-                      disabled={isTransitioning}
-                      className="relative p-2.5 hover:bg-gray-100 rounded-full transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer group"
-                    >
-                      <ChevronRight className="w-4 h-4 text-gray-700 group-hover:text-gray-900 transition-colors" />
-                      {/* Next Tooltip */}
-                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none">
-                        <div className="bg-black/80 backdrop-blur-sm text-white text-sm px-3 py-2 rounded-lg whitespace-nowrap">
-                          Next
-                        </div>
-                        {/* Arrow pointing down */}
-                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
-                      </div>
-                    </button>
-                  </div>
-                )}
-              </div>
+              )}
             </div>
-
-            {/* Progress Bar - Only show in fullscreen mode */}
-            <ProgressBar
-              scenes={playTourDisplayScenes || scenes}
-              currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
-              isAutoplay={isAutoplay || (!!selectedPlayTourId && isPlayingTour)}
-              segmentDuration={isPlayingTour && playTourDisplayScenes ? (playTourDisplayScenes[currentPlayTourSceneIndex]?.move_duration || 5000) : 12000}
-              isTransitioning={isTransitioning}
-              onSceneChange={(index) => {
-                if (selectedPlayTourId && playTourDisplayScenes) {
-                  // Navigate within play tour
-                  const targetStep = playTourDisplayScenes[index];
-                  if (targetStep && targetStep.originalId) {
-                    handleSceneChange(targetStep.originalId);
-                    setCurrentPlayTourSceneIndex(index);
-                  }
-                } else {
-                  handleSceneChangeByIndex(index);
-                }
-              }}
-              isOverlayModalOpen={showOverlayDialog || showHotspotDialog || isInfoModalOpen}
-            />
           </div>
+
+          <ProgressBar
+            scenes={playTourDisplayScenes || scenes}
+            currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
+            isAutoplay={isAutoplay || (!!selectedPlayTourId && isPlayingTour)}
+            segmentDuration={isPlayingTour && playTourDisplayScenes ? (playTourDisplayScenes[currentPlayTourSceneIndex]?.move_duration || 5000) : 12000}
+            isTransitioning={isTransitioning}
+            onSceneChange={(index) => {
+              if (selectedPlayTourId && playTourDisplayScenes) {
+                const targetStep = playTourDisplayScenes[index];
+                if (targetStep && targetStep.originalId) {
+                  handleSceneChange(targetStep.originalId);
+                  setCurrentPlayTourSceneIndex(index);
+                }
+              } else {
+                handleSceneChangeByIndex(index);
+              }
+            }}
+            isOverlayModalOpen={showOverlayDialog || showHotspotDialog || isInfoModalOpen}
+          />
         </div>
       ) : (
         <>
-          {/* Normal Editor Mode */}
-          <div className="w-full h-full relative">
-            <CubeMapViewer
-              tour={tour}
-              currentScene={currentScene}
-              scenes={scenes}
-              onSceneChange={handleSceneChange}
-              onHotspotClick={handleHotspotClick}
-              isEditMode={isEditMode}
-              onHotspotCreate={handleHotspotCreate}
-              onHotspotUpdate={updateHotspot}
-              hotspots={currentSceneHotspots}
-              overlays={currentSceneOverlays}
-              autoRotate={isAutoplay}
-              highlightedHotspotId={editingHotspot}
-              onOverlayPause={handleOverlayPause}
-              onCameraChange={(yaw, pitch, fov) => setCurrentCamera({ yaw, pitch, fov })}
-              forcedCameraPosition={isPlayingTour ? currentCamera : previewCameraPosition}
-              isPlaybackMode={isPlayingTour}
-              cameraControlRef={cameraControlRef}
-            />
-
-            {/* Pause Animation Overlay */}
-            {showPauseOverlay && (
-              <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none">
-                <div className="bg-black/60 rounded-full p-8 animate-in fade-in zoom-in duration-300">
-                  <svg className="w-16 h-16 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                  </svg>
-                </div>
-              </div>
-            )}
-          </div>
-
           {/* Sidebar Toggle Button - Only show when sidebar is closed */}
           {!sidebarOpen && (
             <div className="absolute left-2 top-2 z-40">
@@ -1673,7 +1608,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           )}
 
           {/* Left Sidebar - Scene Navigation */}
-          <div className={`absolute left-0 top-0 bottom-0 z-30 transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-80 opacity-100' : 'w-0 opacity-0 pointer-events-none'
+          <div className={`absolute left-0 top-0 bottom-0 z-50 transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-80 opacity-100' : 'w-0 opacity-0 pointer-events-none'
             }`}>
             <div className="bg-white shadow-xl h-full flex flex-col overflow-hidden rounded-r-lg">
               {/* Header */}
@@ -1689,7 +1624,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                         title="Close sidebar"
                       >
                         <svg
-                          className="w-4 h-4 text-gray-600 hover:text-gray-800 cursor-pointer"
+                          className="w-5 h-5 text-gray-700 hover:text-gray-800 cursor-pointer"
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24"
@@ -1802,366 +1737,361 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           </div>
 
           {/* Edit Controls Panel - Responsive to sidebar */}
-          <div className={`absolute bottom-4 left-2 z-30 transition-all duration-300 ${sidebarOpen ? 'ml-80 pl-2' : 'ml-0'
+          <div className={`absolute bottom-4 left-2 z-50 transition-all duration-300 ${sidebarOpen ? 'ml-80 pl-2' : 'ml-0'
             }`}>
-            <div className="bg-white rounded-lg shadow-xl p-4" style={{ width: '320px' }}>
-              {/* Edit Mode Toggle */}
+            {/* Editor Controls Toggle Button (when closed) */}
+            <div className={`absolute bottom-0 left-0 transition-all duration-300 transform ${!isEditMode
+              ? 'opacity-100 scale-100 translate-y-0'
+              : 'opacity-0 scale-90 translate-y-4 pointer-events-none'
+              }`}>
+              <button
+                onClick={() => setIsEditMode(true)}
+                className="bg-white rounded-full p-4 shadow-xl hover:bg-gray-50 transition-all duration-200 group border border-gray-100 cursor-pointer"
+                title="Open Editor Controls"
+              >
+                <Pencil className="w-6 h-6 text-gray-700 group-hover:text-blue-600 transition-colors" />
+              </button>
+            </div>
+
+            {/* Full Editor Panel (when open) */}
+            <div
+              className={`bg-white rounded-lg shadow-xl p-4 transition-all duration-300 transform origin-bottom ${isEditMode
+                ? 'opacity-100 translate-y-0 scale-100'
+                : 'opacity-0 translate-y-8 scale-95 pointer-events-none absolute bottom-0 left-0'
+                }`}
+              style={{ width: '320px' }}
+            >
+              {/* Edit Mode Header */}
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Editor Controls</h3>
                 <button
-                  onClick={() => setIsEditMode(!isEditMode)}
-                  className={`px-3 py-1 rounded-full text-sm font-medium transition-colors cursor-pointer ${isEditMode
-                    ? 'bg-green-600 text-white'
-                    : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-                    }`}
+                  onClick={() => setIsEditMode(false)}
+                  className="px-3 py-1 rounded-full text-sm font-medium transition-colors cursor-pointer bg-green-600 text-white hover:bg-green-700"
                 >
-                  {isEditMode ? 'ON' : 'OFF'}
+                  ON
                 </button>
               </div>
 
-              {isEditMode && (
-                <>
-                  {/* Edit Type Selector */}
-                  <div className="flex gap-2 mb-4">
-                    <button
-                      onClick={() => setEditPanel('hotspots')}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${editPanel === 'hotspots'
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-md'
-                        : 'bg-white text-gray-700 border-gray-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700'
-                        }`}
-                    >
-                      🔥 Hotspots
-                    </button>
-                    <button
-                      onClick={() => setEditPanel('overlays')}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${editPanel === 'overlays'
-                        ? 'bg-purple-600 text-white border-purple-600 shadow-md'
-                        : 'bg-white text-gray-700 border-gray-200 hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700'
-                        }`}
-                    >
-                      ✨ Overlays
-                    </button>
-                    <button
-                      onClick={() => setEditPanel('playTours')}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${editPanel === 'playTours'
-                        ? 'bg-purple-600 text-white border-purple-600 shadow-md'
-                        : 'bg-white text-gray-700 border-gray-200 hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700'
-                        }`}
-                    >
-                      🎬 Play Tours
-                    </button>
-                  </div>
 
-                  {/* Instructions */}
-                  <div className={`border-2 rounded-lg p-3 mb-4 ${editPanel === 'playTours'
-                    ? 'bg-purple-50 border-purple-200'
-                    : editPanel === 'overlays'
-                      ? 'bg-purple-50 border-purple-200'
-                      : 'bg-blue-50 border-blue-200'
-                    }`}>
-                    <p className={`text-sm font-medium ${editPanel === 'playTours'
-                      ? 'text-purple-900'
-                      : editPanel === 'overlays'
-                        ? 'text-purple-900'
-                        : 'text-blue-900'
-                      }`}>
-                      {editPanel === 'playTours' ? (
-                        <>
-                          <strong>Play Tours:</strong><br />
-                          Manage automated tour sequences and camera movements
-                        </>
-                      ) : (
-                        <>
-                          <strong>How to add {editPanel}:</strong><br />
-                          Hold <kbd className="px-1 py-0.5 bg-white rounded border text-gray-800 font-semibold">Shift</kbd> + Click on the panorama
-                        </>
-                      )}
-                    </p>
-                  </div>
+              {/* Edit Type Selector */}
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => setEditPanel('hotspots')}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${editPanel === 'hotspots'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700'
+                    }`}
+                >
+                  🔥 Hotspots
+                </button>
+                <button
+                  onClick={() => setEditPanel('overlays')}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${editPanel === 'overlays'
+                    ? 'bg-purple-600 text-white border-purple-600 shadow-md'
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700'
+                    }`}
+                >
+                  ✨ Overlays
+                </button>
+                <button
+                  onClick={() => setEditPanel('playTours')}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${editPanel === 'playTours'
+                    ? 'bg-purple-600 text-white border-purple-600 shadow-md'
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700'
+                    }`}
+                >
+                  🎬 Play Tours
+                </button>
+              </div>
 
-                  {/* Hotspots List */}
-                  {editPanel === 'hotspots' && (
-                    <div>
-                      <h4 className="text-sm font-semibold mb-2 text-gray-900">Current Hotspots ({hotspots.filter(h => h.scene_id === currentSceneId).length})</h4>
-                      <div className="max-h-32 overflow-y-auto space-y-1">
-                        {hotspots
-                          .filter(h => h.scene_id === currentSceneId)
-                          .map(hotspot => {
-                            let displayLabel: string = hotspot.kind;
-                            let targetScene = null;
+              {/* Instructions */}
+              <div className={`border-2 rounded-lg p-3 mb-4 ${editPanel === 'playTours'
+                ? 'bg-purple-50 border-purple-200'
+                : editPanel === 'overlays'
+                  ? 'bg-purple-50 border-purple-200'
+                  : 'bg-blue-50 border-blue-200'
+                }`}>
+                <p className={`text-sm font-medium ${editPanel === 'playTours'
+                  ? 'text-purple-900'
+                  : editPanel === 'overlays'
+                    ? 'text-purple-900'
+                    : 'text-blue-900'
+                  }`}>
+                  {editPanel === 'playTours' ? (
+                    <>
+                      <strong>Play Tours:</strong><br />
+                      Manage automated tour sequences and camera movements
+                    </>
+                  ) : (
+                    <>
+                      <strong>How to add {editPanel}:</strong><br />
+                      Hold <kbd className="px-1 py-0.5 bg-white rounded border text-gray-800 font-semibold">Shift</kbd> + Click on the panorama
+                    </>
+                  )}
+                </p>
+              </div>
 
-                            try {
-                              const payload = JSON.parse(hotspot.payload || '{}');
+              {/* Hotspots List */}
+              {editPanel === 'hotspots' && (
+                <div>
+                  <h4 className="text-sm font-semibold mb-2 text-gray-900">Current Hotspots ({hotspots.filter(h => h.scene_id === currentSceneId).length})</h4>
+                  <div className="max-h-32 overflow-y-auto space-y-1">
+                    {hotspots
+                      .filter(h => h.scene_id === currentSceneId)
+                      .map(hotspot => {
+                        let displayLabel: string = hotspot.kind;
+                        let targetScene = null;
 
-                              // Check if there's a custom label in the payload
-                              if (payload.label) {
-                                displayLabel = payload.label;
-                              } else if (hotspot.kind === 'navigation' && payload.targetSceneId) {
-                                // Find target scene and create "Go to [scene name]" label
-                                targetScene = scenes.find(s => s.id === payload.targetSceneId);
-                                if (targetScene) {
-                                  displayLabel = `Go to ${targetScene.name}`;
-                                }
-                              } else if (hotspot.kind === 'info' && payload.infoText) {
-                                // For info hotspots, show truncated info text
-                                displayLabel = payload.infoText.length > 20
-                                  ? `${payload.infoText.substring(0, 20)}...`
-                                  : payload.infoText;
-                              } else if (hotspot.kind === 'link' && payload.url) {
-                                // For link hotspots, show domain name
-                                try {
-                                  const urlObj = new URL(payload.url);
-                                  displayLabel = `Link to ${urlObj.hostname}`;
-                                } catch {
-                                  displayLabel = 'External Link';
-                                }
-                              }
-                            } catch {
-                              // Fallback to target scene name if payload parsing fails
-                              if (hotspot.kind === 'navigation' && hotspot.target_scene_id) {
-                                targetScene = scenes.find(s => s.id === hotspot.target_scene_id);
-                                if (targetScene) {
-                                  displayLabel = `Go to ${targetScene.name}`;
-                                }
-                              }
+                        try {
+                          const payload = JSON.parse(hotspot.payload || '{}');
+
+                          // Check if there's a custom label in the payload
+                          if (payload.label) {
+                            displayLabel = payload.label;
+                          } else if (hotspot.kind === 'navigation' && payload.targetSceneId) {
+                            // Find target scene and create "Go to [scene name]" label
+                            targetScene = scenes.find(s => s.id === payload.targetSceneId);
+                            if (targetScene) {
+                              displayLabel = `Go to ${targetScene.name}`;
                             }
+                          } else if (hotspot.kind === 'info' && payload.infoText) {
+                            // For info hotspots, show truncated info text
+                            displayLabel = payload.infoText.length > 20
+                              ? `${payload.infoText.substring(0, 20)}...`
+                              : payload.infoText;
+                          } else if (hotspot.kind === 'link' && payload.url) {
+                            // For link hotspots, show domain name
+                            try {
+                              const urlObj = new URL(payload.url);
+                              displayLabel = `Link to ${urlObj.hostname}`;
+                            } catch {
+                              displayLabel = 'External Link';
+                            }
+                          }
+                        } catch {
+                          // Fallback to target scene name if payload parsing fails
+                          if (hotspot.kind === 'navigation' && hotspot.target_scene_id) {
+                            targetScene = scenes.find(s => s.id === hotspot.target_scene_id);
+                            if (targetScene) {
+                              displayLabel = `Go to ${targetScene.name}`;
+                            }
+                          }
+                        }
 
-                            const isEditing = editingHotspot === hotspot.id;
+                        const isEditing = editingHotspot === hotspot.id;
 
-                            return (
-                              <div key={hotspot.id} className="p-3 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
-                                <div className="flex items-center justify-between">
-                                  <span className="truncate flex items-center gap-2">
-                                    <span className="text-lg">
-                                      {hotspot.kind === 'navigation' && '🔄'}
-                                      {hotspot.kind === 'info' && 'ℹ️'}
-                                      {hotspot.kind === 'link' && '🔗'}
-                                    </span>
-                                    <span className="font-medium">{displayLabel}</span>
-                                    {/* Save indicator */}
-                                    {hotspot.id && pendingSaves.has(hotspot.id) && (
-                                      <span className="flex items-center gap-1 text-xs text-blue-600">
-                                        <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        return (
+                          <div key={hotspot.id} className="p-3 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
+                            <div className="flex items-center justify-between">
+                              <span className="truncate flex items-center gap-2">
+                                <span className="text-lg">
+                                  {hotspot.kind === 'navigation' && '🔄'}
+                                  {hotspot.kind === 'info' && 'ℹ️'}
+                                  {hotspot.kind === 'link' && '🔗'}
+                                </span>
+                                <span className="font-medium">{displayLabel}</span>
+                                {/* Save indicator */}
+                                {hotspot.id && pendingSaves.has(hotspot.id) && (
+                                  <span className="flex items-center gap-1 text-xs text-blue-600">
+                                    <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Saving...
+                                  </span>
+                                )}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                {hotspot?.id && (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        if (isEditing) {
+                                          // Trigger immediate update on close
+                                          const finalYaw = parseFloat(editingYaw);
+                                          const finalPitch = parseFloat(editingPitch);
+                                          if (!isNaN(finalYaw) && !isNaN(finalPitch) && hotspot.id) {
+                                            const updatedHotspot = {
+                                              ...hotspot,
+                                              yaw: finalYaw,
+                                              pitch: finalPitch
+                                            };
+                                            // Cancel any pending debounced calls to avoid double-firing or race conditions
+
+                                            // Call API immediately
+                                            updateHotspotAPI(updatedHotspot);
+                                          }
+                                          setEditingHotspot(null);
+                                        } else {
+                                          setEditingHotspot(hotspot.id || null);
+                                          setEditingPitch((hotspot.pitch || 0).toFixed(2));
+                                          setEditingYaw((hotspot.yaw || 0).toFixed(2));
+                                        }
+                                      }}
+                                      className="text-blue-500 hover:text-blue-700 hover:bg-blue-100 cursor-pointer flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                      title={isEditing ? "Close editor" : "Edit coordinates"}
+                                    >
+                                      {isEditing ? '✓' : '✏️'}
+                                    </button>
+                                    <button
+                                      onClick={() => deleteHotspot(hotspot.id ?? '')}
+                                      disabled={deletingHotspotId === hotspot.id}
+                                      className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                      title="Delete hotspot"
+                                    >
+                                      {deletingHotspotId === hotspot.id ? (
+                                        <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                         </svg>
-                                        Saving...
-                                      </span>
-                                    )}
-                                  </span>
-                                  <div className="flex items-center gap-1">
-                                    {hotspot?.id && (
-                                      <>
-                                        <button
-                                          onClick={() => {
-                                            if (isEditing) {
-                                              // Trigger immediate update on close
-                                              const finalYaw = parseFloat(editingYaw);
-                                              const finalPitch = parseFloat(editingPitch);
-                                              if (!isNaN(finalYaw) && !isNaN(finalPitch) && hotspot.id) {
-                                                const updatedHotspot = {
-                                                  ...hotspot,
-                                                  yaw: finalYaw,
-                                                  pitch: finalPitch
-                                                };
-                                                // Cancel any pending debounced calls to avoid double-firing or race conditions
+                                      ) : (
+                                        '✕'
+                                      )}
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
 
-                                                // Call API immediately
-                                                updateHotspotAPI(updatedHotspot);
-                                              }
-                                              setEditingHotspot(null);
-                                            } else {
-                                              setEditingHotspot(hotspot.id || null);
-                                              setEditingPitch((hotspot.pitch || 0).toFixed(2));
-                                              setEditingYaw((hotspot.yaw || 0).toFixed(2));
-                                            }
-                                          }}
-                                          className="text-blue-500 hover:text-blue-700 hover:bg-blue-100 cursor-pointer flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
-                                          title={isEditing ? "Close editor" : "Edit coordinates"}
-                                        >
-                                          {isEditing ? '✓' : '✏️'}
-                                        </button>
-                                        <button
-                                          onClick={() => deleteHotspot(hotspot.id ?? '')}
-                                          disabled={deletingHotspotId === hotspot.id}
-                                          className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
-                                          title="Delete hotspot"
-                                        >
-                                          {deletingHotspotId === hotspot.id ? (
-                                            <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                            </svg>
-                                          ) : (
-                                            '✕'
-                                          )}
-                                        </button>
-                                      </>
-                                    )}
+                            {/* Coordinate Editor */}
+                            {isEditing && (
+                              <div className="mt-3 p-3 bg-white rounded-lg border border-blue-300">
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">Yaw (°)</label>
+                                    <input
+                                      type="number"
+                                      value={editingYaw}
+                                      onChange={(e) => {
+                                        setEditingYaw(e.target.value);
+                                        // Update hotspot immediately for real-time feedback
+                                        const yawValue = parseFloat(e.target.value);
+                                        if (!isNaN(yawValue)) {
+                                          updateHotspotCoordinates(hotspot.id!, yawValue, hotspot.pitch || 0);
+                                        }
+                                      }}
+                                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                      step="0.1"
+                                      min="-180"
+                                      max="180"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">Pitch (°)</label>
+                                    <input
+                                      type="number"
+                                      value={editingPitch}
+                                      onChange={(e) => {
+                                        setEditingPitch(e.target.value);
+                                        // Update hotspot immediately for real-time feedback
+                                        const pitchValue = parseFloat(e.target.value);
+                                        if (!isNaN(pitchValue)) {
+                                          updateHotspotCoordinates(hotspot.id!, hotspot.yaw || 0, pitchValue);
+                                        }
+                                      }}
+                                      className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                      step="0.1"
+                                      min="-90"
+                                      max="90"
+                                    />
                                   </div>
                                 </div>
-
-                                {/* Coordinate Editor */}
-                                {isEditing && (
-                                  <div className="mt-3 p-3 bg-white rounded-lg border border-blue-300">
-                                    <div className="grid grid-cols-2 gap-3">
-                                      <div>
-                                        <label className="block text-xs font-medium text-gray-700 mb-1">Yaw (°)</label>
-                                        <input
-                                          type="number"
-                                          value={editingYaw}
-                                          onChange={(e) => {
-                                            setEditingYaw(e.target.value);
-                                            // Update hotspot immediately for real-time feedback
-                                            const yawValue = parseFloat(e.target.value);
-                                            if (!isNaN(yawValue)) {
-                                              updateHotspotCoordinates(hotspot.id!, yawValue, hotspot.pitch || 0);
-                                            }
-                                          }}
-                                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                          step="0.1"
-                                          min="-180"
-                                          max="180"
-                                        />
-                                      </div>
-                                      <div>
-                                        <label className="block text-xs font-medium text-gray-700 mb-1">Pitch (°)</label>
-                                        <input
-                                          type="number"
-                                          value={editingPitch}
-                                          onChange={(e) => {
-                                            setEditingPitch(e.target.value);
-                                            // Update hotspot immediately for real-time feedback
-                                            const pitchValue = parseFloat(e.target.value);
-                                            if (!isNaN(pitchValue)) {
-                                              updateHotspotCoordinates(hotspot.id!, hotspot.yaw || 0, pitchValue);
-                                            }
-                                          }}
-                                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                          step="0.1"
-                                          min="-90"
-                                          max="90"
-                                        />
-                                      </div>
-                                    </div>
-                                    <div className="mt-2 text-xs text-gray-500">
-                                      <div>Horizontal: -180° to 180°</div>
-                                      <div>Vertical: -90° (down) to 90° (up)</div>
-                                    </div>
-                                  </div>
-                                )}
+                                <div className="mt-2 text-xs text-gray-500">
+                                  <div>Horizontal: -180° to 180°</div>
+                                  <div>Vertical: -90° (down) to 90° (up)</div>
+                                </div>
                               </div>
-                            );
-                          })}
-                        {hotspots.filter(h => h.scene_id === currentSceneId).length === 0 && (
-                          <div className="text-center py-6">
-                            <div className="text-4xl mb-2">🔥</div>
-                            <p className="text-gray-500 text-sm font-medium">No hotspots yet</p>
-                            <p className="text-gray-400 text-xs mt-1">Add navigation points to connect scenes</p>
+                            )}
                           </div>
-                        )}
+                        );
+                      })}
+                    {hotspots.filter(h => h.scene_id === currentSceneId).length === 0 && (
+                      <div className="text-center py-6">
+                        <div className="text-4xl mb-2">🔥</div>
+                        <p className="text-gray-500 text-sm font-medium">No hotspots yet</p>
+                        <p className="text-gray-400 text-xs mt-1">Add navigation points to connect scenes</p>
                       </div>
-                    </div>
-                  )}
-
-                  {/* Overlays List */}
-                  {editPanel === 'overlays' && (
-                    <div>
-                      <h4 className="text-sm font-semibold mb-2 text-gray-900">Current Overlays ({overlays.filter(o => o.scene_id === currentSceneId).length})</h4>
-                      <div className="max-h-32 overflow-y-auto space-y-1">
-                        {overlays
-                          .filter(o => o.scene_id === currentSceneId)
-                          .map(overlay => {
-                            let displayLabel: string = overlay.kind;
-
-                            try {
-                              const payload = JSON.parse(overlay.payload || '{}');
-
-                              if (payload.text) {
-                                displayLabel = payload.text.length > 20
-                                  ? `${payload.text.substring(0, 20)}...`
-                                  : payload.text;
-                              } else if (overlay.kind === 'image' && payload.imageName) {
-                                displayLabel = payload.imageName;
-                              } else if (overlay.kind === 'video' && payload.videoUrl) {
-                                displayLabel = 'Video content';
-                              } else {
-                                displayLabel = `${overlay.kind} overlay`;
-                              }
-                            } catch {
-                              displayLabel = `${overlay.kind} overlay`;
-                            }
-
-                            return (
-                              <div key={overlay.id} className="flex items-center justify-between p-3 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
-                                <span className="truncate flex items-center gap-2">
-                                  <span className="text-lg">
-                                    {overlay.kind === 'text' && '📝'}
-                                    {overlay.kind === 'image' && '🖼️'}
-                                    {overlay.kind === 'video' && '🎥'}
-                                    {overlay.kind === 'badge' && '🏷️'}
-                                    {overlay.kind === 'html' && '🌐'}
-                                    {overlay.kind === 'tooltip' && '💬'}
-                                  </span>
-                                  <span className="font-medium">{displayLabel}</span>
-                                </span>
-                                {overlay?.id && (
-                                  <button
-                                    onClick={() => handleOverlayDeleted(overlay.id ?? '')}
-                                    disabled={deletingOverlayId === overlay.id}
-                                    className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
-                                    title="Delete overlay"
-                                  >
-                                    {deletingOverlayId === overlay.id ? (
-                                      <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                      </svg>
-                                    ) : (
-                                      '✕'
-                                    )}
-                                  </button>
-                                )}
-                              </div>
-                            );
-                          })}
-                        {overlays.filter(o => o.scene_id === currentSceneId).length === 0 && (
-                          <div className="text-center py-6">
-                            <div className="text-4xl mb-2">✨</div>
-                            <p className="text-gray-500 text-sm font-medium">No overlays yet</p>
-                            <p className="text-gray-400 text-xs mt-1">Add your first overlay to enhance this scene</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Play Tours Editor */}
-                  {editPanel === 'playTours' && (
-                    <div className="fixed top-0 left-0 bottom-0 z-50 animate-in slide-in-from-left duration-300">
-                      <div className="flex bg-white h-full relative">
-                        <button
-                          onClick={() => setEditPanel('hotspots')}
-                          className="absolute right-4 top-4 bg-gray-100 p-2 rounded-lg shadow-md text-gray-700 hover:bg-gray-200 cursor-pointer z-50 font-bold"
-                          title="Close Play Tour Editor"
-                        >
-                          ✕
-                        </button>
-                        <PlayTourEditor
-                          tourId={tour.id}
-                          scenes={scenes}
-                          currentYaw={currentCamera.yaw}
-                          currentPitch={currentCamera.pitch}
-                          currentFov={currentCamera.fov}
-                          onPreviewScene={handlePreviewScene}
-                          onPlaySceneAnimation={handlePlaySceneAnimation}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </>
+                    )}
+                  </div>
+                </div>
               )}
+
+              {/* Overlays List */}
+              {editPanel === 'overlays' && (
+                <div>
+                  <h4 className="text-sm font-semibold mb-2 text-gray-900">Current Overlays ({overlays.filter(o => o.scene_id === currentSceneId).length})</h4>
+                  <div className="max-h-32 overflow-y-auto space-y-1">
+                    {overlays
+                      .filter(o => o.scene_id === currentSceneId)
+                      .map(overlay => {
+                        let displayLabel: string = overlay.kind;
+
+                        try {
+                          const payload = JSON.parse(overlay.payload || '{}');
+
+                          if (payload.text) {
+                            displayLabel = payload.text.length > 20
+                              ? `${payload.text.substring(0, 20)}...`
+                              : payload.text;
+                          } else if (overlay.kind === 'image' && payload.imageName) {
+                            displayLabel = payload.imageName;
+                          } else if (overlay.kind === 'video' && payload.videoUrl) {
+                            displayLabel = 'Video content';
+                          } else {
+                            displayLabel = `${overlay.kind} overlay`;
+                          }
+                        } catch {
+                          displayLabel = `${overlay.kind} overlay`;
+                        }
+
+                        return (
+                          <div key={overlay.id} className="flex items-center justify-between p-3 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg text-sm text-gray-700 hover:shadow-sm transition-all duration-200">
+                            <span className="truncate flex items-center gap-2">
+                              <span className="text-lg">
+                                {overlay.kind === 'text' && '📝'}
+                                {overlay.kind === 'image' && '🖼️'}
+                                {overlay.kind === 'video' && '🎥'}
+                                {overlay.kind === 'badge' && '🏷️'}
+                                {overlay.kind === 'html' && '🌐'}
+                                {overlay.kind === 'tooltip' && '💬'}
+                              </span>
+                              <span className="font-medium">{displayLabel}</span>
+                            </span>
+                            {overlay?.id && (
+                              <button
+                                onClick={() => handleOverlayDeleted(overlay.id ?? '')}
+                                disabled={deletingOverlayId === overlay.id}
+                                className="text-red-500 hover:text-red-700 hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200"
+                                title="Delete overlay"
+                              >
+                                {deletingOverlayId === overlay.id ? (
+                                  <svg className="animate-spin h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                ) : (
+                                  '✕'
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    {overlays.filter(o => o.scene_id === currentSceneId).length === 0 && (
+                      <div className="text-center py-6">
+                        <div className="text-4xl mb-2">✨</div>
+                        <p className="text-gray-500 text-sm font-medium">No overlays yet</p>
+                        <p className="text-gray-400 text-xs mt-1">Add your first overlay to enhance this scene</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+
+
             </div>
+
           </div>
 
           {/* Scene selector */}
@@ -2188,8 +2118,8 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               {/* Consolidated Controls Container */}
               <div className="bg-white rounded-lg shadow-lg p-2">
                 <div className="flex items-center gap-2">
-                  {/* Play Tour Selection */}
-                  {playTours.length > 0 && (
+                  {/* Play Tour Selection - Commented out as requested */}
+                  {/* {playTours.length > 0 && (
                     <>
                       <select
                         value={selectedPlayTourId || ''}
@@ -2216,11 +2146,11 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                         </button>
                       )}
                     </>
-                  )}
+                  )} */}
 
                   {/* Audio & Autoplay Controls */}
                   {/* Autoplay Control */}
-                  <button
+                  {/* <button
                     onClick={toggleAutoplay}
                     className={`p-2 rounded transition-colors flex items-center gap-1 cursor-pointer ${isAutoplay
                       ? 'bg-blue-600 text-white hover:bg-blue-700'
@@ -2230,7 +2160,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                   >
                     {isAutoplay ? '⏸' : '▶'}
                     <span className="text-xs hidden sm:inline">Auto</span>
-                  </button>
+                  </button> */}
 
                   {/* Audio Controls - Always show since we have default audio */}
                   {isClient && (
@@ -2624,9 +2554,29 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               </div>
             </div>
           )}
+          {/* Play Tours Editor - Rendered outside of bottom controls for proper positioning */}
+          {isEditMode && editPanel === 'playTours' && (
+            <div className="fixed top-0 left-0 bottom-0 z-50 animate-in slide-in-from-left duration-300">
+              <div className="flex bg-white h-full relative shadow-2xl">
+                <div className="w-[400px] h-full overflow-y-auto bg-white border-r border-gray-200">
+                  <PlayTourEditor
+                    tourId={tour.id}
+                    scenes={scenes}
+                    currentYaw={currentCamera.yaw}
+                    currentPitch={currentCamera.pitch}
+                    currentFov={currentCamera.fov}
+                    onPreviewScene={handlePreviewScene}
+                    onPlaySceneAnimation={handlePlaySceneAnimation}
+                    onClose={() => setEditPanel('hotspots')}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </>
-      )}
+      )
+      }
 
-    </div>
+    </div >
   );
 }

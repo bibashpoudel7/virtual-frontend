@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Tour, Scene, PlayTour, PlayTourScene } from '@/types/tour';
 import { tourService } from '@/services/tourService';
 
@@ -21,17 +22,32 @@ export default function PlayTourEditor({
     currentPitch = 0,
     currentFov = 75,
     onPreviewScene,
-    onPlaySceneAnimation
-}: PlayTourEditorProps) {
+    onPlaySceneAnimation,
+    onClose
+}: PlayTourEditorProps & { onClose?: () => void }) {
     const [playTours, setPlayTours] = useState<PlayTour[]>([]);
     const [selectedPlayTour, setSelectedPlayTour] = useState<PlayTour | null>(null);
-    const [isCreating, setIsCreating] = useState(false);
-    const [newTourName, setNewTourName] = useState('');
+    // const [isCreating, setIsCreating] = useState(false);
+    // const [newTourName, setNewTourName] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
+    const [draggedSceneIndex, setDraggedSceneIndex] = useState<number | null>(null);
+    const [collapsedScenes, setCollapsedScenes] = useState<Set<string>>(new Set());
+
+    const toggleSceneCollapse = (sceneId: string) => {
+        setCollapsedScenes(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(sceneId)) {
+                newSet.delete(sceneId);
+            } else {
+                newSet.add(sceneId);
+            }
+            return newSet;
+        });
+    };
 
     useEffect(() => {
         loadPlayTours();
@@ -42,6 +58,10 @@ export default function PlayTourEditor({
             setLoading(true);
             const tours = await tourService.listPlayTours(tourId);
             setPlayTours(tours);
+            // Auto-select first tour if exists
+            if (tours.length > 0) {
+                setSelectedPlayTour(tours[0]);
+            }
         } catch (err) {
             setError('Failed to load play tours');
         } finally {
@@ -50,17 +70,17 @@ export default function PlayTourEditor({
     };
 
     const handleCreatePlayTour = async () => {
-        if (!newTourName.trim()) return;
         try {
             setSaving(true);
             const newTour = await tourService.createPlayTour(tourId, {
-                name: newTourName,
+                // name: newTourName,
+                name: "Main Tour",
                 tour_id: tourId,
                 play_tour_scenes: []
             });
             setPlayTours([...playTours, newTour]);
-            setNewTourName('');
-            setIsCreating(false);
+            // setNewTourName('');
+            // setIsCreating(false);
             setSelectedPlayTour(newTour);
         } catch (err) {
             setError('Failed to create play tour');
@@ -180,17 +200,57 @@ export default function PlayTourEditor({
             setSaving(false);
         }
     };
+    // Drag and Drop Reordering Logic
+    const handleDragStart = (e: React.DragEvent, index: number) => {
+        setDraggedSceneIndex(index);
+        e.dataTransfer.effectAllowed = 'move';
+        // Optional: Custom drag image if needed
+    };
+
+    const handleDragOver = (e: React.DragEvent, index: number) => {
+        e.preventDefault(); // Allow dropping
+        if (draggedSceneIndex === null || draggedSceneIndex === index) return;
+        if (!selectedPlayTour) return;
+
+        const updatedScenes = [...selectedPlayTour.play_tour_scenes];
+        const draggedItem = updatedScenes[draggedSceneIndex];
+
+        // Remove from old index
+        updatedScenes.splice(draggedSceneIndex, 1);
+        // Insert at new index
+        updatedScenes.splice(index, 0, draggedItem);
+
+        // Update sequence order
+        updatedScenes.forEach((s, i) => { s.sequence_order = i + 1; });
+
+        setSelectedPlayTour({
+            ...selectedPlayTour,
+            play_tour_scenes: updatedScenes
+        });
+        setDraggedSceneIndex(index);
+    };
+
+    const handleDragEnd = () => {
+        setDraggedSceneIndex(null);
+    };
 
     return (
-        <div className="flex flex-col h-full bg-white text-gray-900 border-l border-gray-200 w-80 overflow-y-auto shadow-xl">
-            <div className="p-4 pr-14 border-b border-gray-200 bg-gray-50 flex justify-between items-center sticky top-0 z-10">
-                <h2 className="text-lg font-bold text-gray-800">Play Tours</h2>
-                <button
-                    onClick={() => setIsCreating(true)}
-                    className="bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded text-sm font-medium transition-colors cursor-pointer"
-                >
-                    + New
-                </button>
+        <div className="flex flex-col h-full bg-white text-gray-900 w-full">
+            <div className="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center sticky top-0 z-10">
+                <h2 className="text-lg font-bold text-gray-800">Play Tour</h2>
+                <div className="flex gap-2">
+                    {onClose && (
+                        <button
+                            onClick={onClose}
+                            className="bg-gray-200 hover:bg-gray-300 text-gray-700 p-1.5 rounded-full transition-colors cursor-pointer"
+                            title="Close"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    )}
+                </div>
             </div>
 
             {error && (
@@ -199,77 +259,36 @@ export default function PlayTourEditor({
                 </div>
             )}
 
-            {isCreating && (
-                <div className="p-4 border-b border-gray-200 bg-purple-50 space-y-3">
-                    <input
-                        type="text"
-                        placeholder="Enter tour name..."
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-200 outline-none text-sm text-gray-900"
-                        value={newTourName}
-                        onChange={(e) => setNewTourName(e.target.value)}
-                    />
-                    <div className="flex gap-2">
-                        <button
-                            onClick={handleCreatePlayTour}
-                            disabled={saving}
-                            className="flex-1 bg-purple-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-purple-700 transition-colors cursor-pointer disabled:opacity-50"
-                        >
-                            {saving ? 'Creating...' : 'Create'}
-                        </button>
-                        <button
-                            onClick={() => setIsCreating(false)}
-                            className="flex-1 bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded-lg text-xs font-semibold hover:bg-gray-50 transition-colors cursor-pointer"
-                        >
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-            )}
-
             {!selectedPlayTour ? (
-                <div className="flex-1">
+                <div className="flex-1 flex flex-col items-center justify-center p-8">
                     {loading ? (
-                        <div className="p-10 text-center text-gray-400">Loading...</div>
-                    ) : playTours.length === 0 ? (
-                        <div className="p-10 text-center text-gray-400 italic">No play tours yet.</div>
+                        <div className="p-4 text-center text-gray-400">Loading...</div>
                     ) : (
-                        <div className="divide-y divide-gray-100">
-                            {playTours.map(t => (
-                                <div
-                                    key={t.id}
-                                    className="p-4 hover:bg-gray-50 cursor-pointer flex justify-between items-center group transition-colors"
-                                    onClick={() => setSelectedPlayTour(t)}
-                                >
-                                    <span className="font-medium text-gray-700">{t.name}</span>
-                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleDeletePlayTour(t.id); }}
-                                            className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
-                                        >
-                                            🗑️
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
+                        <div className="text-center">
+                            <h3 className="text-lg font-semibold text-gray-800 mb-2">No Play Tour Found</h3>
+                            <p className="text-sm text-gray-500 mb-4">Create a play tour to start automating scene sequences.</p>
+                            <button
+                                onClick={handleCreatePlayTour}
+                                disabled={saving}
+                                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer shadow-md disabled:opacity-50"
+                            >
+                                {saving ? 'Creating...' : '+ Create Play Tour'}
+                            </button>
                         </div>
                     )}
                 </div>
             ) : (
                 <div className="flex-1 flex flex-col">
-                    <div className="p-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between sticky top-[61px] z-10">
-                        <button
-                            onClick={() => setSelectedPlayTour(null)}
-                            className="text-sm text-purple-600 font-semibold hover:text-purple-700 cursor-pointer"
-                        >
-                            ← Back
-                        </button>
-                        <span className="font-bold text-gray-800 truncate px-2">{selectedPlayTour.name}</span>
+                    <div className="p-3 bg-white border-b border-gray-100 flex items-center justify-between sticky top-0 z-10 shadow-sm">
+                        <span className="font-bold text-gray-800 truncate px-2 text-sm">
+                            Tour Actions
+                        </span>
                         <button
                             onClick={handleSavePlayTour}
                             disabled={saving}
-                            className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50"
+                            className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 shadow-sm"
                         >
-                            {saving ? '...' : 'Save'}
+                            {saving ? 'Saving...' : 'Save Changes'}
                         </button>
                     </div>
 
@@ -291,7 +310,10 @@ export default function PlayTourEditor({
                     </div>
 
                     <div className="p-4 flex-1">
-                        <h3 className="text-sm font-bold text-gray-800 mb-3 border-b border-gray-100 pb-2">Scenes in Tour</h3>
+                        <h3 className="text-sm font-bold text-gray-800 mb-1">Scenes in Tour</h3>
+                        <p className="text-xs text-gray-400 mb-3 pb-2 border-b border-gray-100 italic">
+                            Drag items to reorder the sequence
+                        </p>
                         <div className="space-y-4">
                             {selectedPlayTour.play_tour_scenes
                                 .sort((a, b) => a.sequence_order - b.sequence_order)
@@ -300,9 +322,28 @@ export default function PlayTourEditor({
                                     const isEditingScene = editingSceneId === ps.id;
 
                                     return (
-                                        <div key={ps.id} className="border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow bg-white">
-                                            <div className="p-3 bg-gray-50 flex items-center justify-between">
+                                        <div
+                                            key={ps.id}
+                                            draggable
+                                            onDragStart={(e) => {
+                                                // Prevent drag if interacting with inputs or buttons (checking closest to handle icons)
+                                                if ((e.target as HTMLElement).closest('button, input, textarea')) {
+                                                    e.preventDefault();
+                                                    return;
+                                                }
+                                                handleDragStart(e, idx);
+                                            }}
+                                            onDragOver={(e) => handleDragOver(e, idx)}
+                                            onDragEnd={handleDragEnd}
+                                            className={`border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all bg-white mb-2 ${draggedSceneIndex === idx ? 'opacity-40 border-dashed border-purple-500' : ''
+                                                }`}
+                                        >
+                                            <div className="p-3 bg-gray-50 flex items-center justify-between cursor-move">
                                                 <div className="flex items-center gap-2">
+                                                    {/* Drag Handle Icon */}
+                                                    <svg className="w-4 h-4 text-gray-400 hover:text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+                                                    </svg>
                                                     <span className="bg-purple-600 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold">
                                                         {ps.sequence_order}
                                                     </span>
@@ -311,6 +352,13 @@ export default function PlayTourEditor({
                                                     </span>
                                                 </div>
                                                 <div className="flex gap-1 items-center">
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); toggleSceneCollapse(ps.id); }}
+                                                        className="p-1 text-gray-700 hover:text-purple-600 rounded hover:bg-purple-100 mr-1 transition-colors cursor-pointer"
+                                                        title={collapsedScenes.has(ps.id) ? "Expand" : "Collapse"}
+                                                    >
+                                                        {collapsedScenes.has(ps.id) ? <ChevronDown size={18} strokeWidth={2.5} /> : <ChevronUp size={18} strokeWidth={2.5} />}
+                                                    </button>
                                                     <button
                                                         onClick={() => onPlaySceneAnimation?.(
                                                             ps.scene_id,
@@ -347,108 +395,134 @@ export default function PlayTourEditor({
                                                 </div>
                                             </div>
 
-                                            <div className="p-3 space-y-3 bg-white">
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    <div className="space-y-1">
-                                                        <span className="text-[10px] font-bold text-gray-500 uppercase">Move Duration (ms)</span>
-                                                        <input
-                                                            type="number"
-                                                            className="w-full text-xs p-1.5 border border-gray-300 rounded bg-white text-gray-900 focus:border-purple-500 outline-none"
-                                                            value={ps.move_duration}
-                                                            onChange={(e) => handleUpdateSceneParams(idx, { move_duration: parseInt(e.target.value) })}
-                                                            step={500}
-                                                            min={0}
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-1">
-                                                        <span className="text-[10px] font-bold text-gray-500 uppercase">Wait Duration (ms)</span>
-                                                        <input
-                                                            type="number"
-                                                            className="w-full text-xs p-1.5 border border-gray-300 rounded bg-white text-gray-900 focus:border-purple-500 outline-none"
-                                                            value={ps.wait_duration}
-                                                            onChange={(e) => handleUpdateSceneParams(idx, { wait_duration: parseInt(e.target.value) })}
-                                                            step={500}
-                                                            min={0}
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                <div className="space-y-1">
-                                                    <span className="text-[10px] font-bold text-gray-500 uppercase">Transition Direction</span>
-                                                    <div className="grid grid-cols-3 gap-1">
-                                                        {['forward', 'backward', 'left', 'right', 'up', 'down'].map((dir) => (
-                                                            <button
-                                                                key={dir}
-                                                                onClick={() => handleUpdateSceneParams(idx, { transition_direction: dir as any })}
-                                                                className={`px-1 py-1 rounded border text-[9px] font-bold capitalize transition-colors cursor-pointer ${ps.transition_direction === dir
-                                                                    ? 'border-purple-500 bg-purple-50 text-purple-700'
-                                                                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                                                                    }`}
-                                                            >
-                                                                {dir === 'forward' && '⬆️'}
-                                                                {dir === 'backward' && '⬇️'}
-                                                                {dir === 'left' && '⬅️'}
-                                                                {dir === 'right' && '➡️'}
-                                                                {dir === 'up' && '↗️'}
-                                                                {dir === 'down' && '↙️'}
-                                                                {' ' + dir}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-
-                                                <div className="space-y-2 pt-2 border-t border-gray-100">
-                                                    <div className="flex justify-between items-center group/pos">
-                                                        <span className="text-[10px] font-bold text-purple-700 uppercase">Start Position</span>
-                                                        <div className="flex gap-1">
-                                                            <button
-                                                                onClick={() => onPreviewScene?.(ps.scene_id, ps.start_yaw, ps.start_pitch, ps.start_fov)}
-                                                                className="text-[10px] bg-green-100 hover:bg-green-200 text-green-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
-                                                                title="Preview start position"
-                                                            >
-                                                                ▶ View
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleCapturePosition(idx, 'start')}
-                                                                className="text-[10px] bg-purple-100 hover:bg-purple-200 text-purple-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
-                                                            >
-                                                                Capture
-                                                            </button>
+                                            {!collapsedScenes.has(ps.id) && (
+                                                <div className="p-3 space-y-3 bg-white">
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <div className="space-y-1">
+                                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Move Duration (ms)</span>
+                                                            <input
+                                                                type="number"
+                                                                className="w-full text-xs p-1.5 border border-gray-300 rounded bg-white text-gray-900 focus:border-purple-500 outline-none"
+                                                                value={ps.move_duration}
+                                                                onChange={(e) => handleUpdateSceneParams(idx, { move_duration: parseInt(e.target.value) })}
+                                                                step={500}
+                                                                min={0}
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <span className="text-[10px] font-bold text-gray-500 uppercase">Wait Duration (ms)</span>
+                                                            <input
+                                                                type="number"
+                                                                className="w-full text-xs p-1.5 border border-gray-300 rounded bg-white text-gray-900 focus:border-purple-500 outline-none"
+                                                                value={ps.wait_duration}
+                                                                onChange={(e) => handleUpdateSceneParams(idx, { wait_duration: parseInt(e.target.value) })}
+                                                                step={500}
+                                                                min={0}
+                                                            />
                                                         </div>
                                                     </div>
-                                                    <div className="grid grid-cols-3 gap-1 text-[10px] text-gray-600 bg-gray-50 p-2 rounded">
-                                                        <div className="truncate">Y: {ps.start_yaw.toFixed(2)}</div>
-                                                        <div className="truncate">P: {ps.start_pitch.toFixed(2)}</div>
-                                                        <div className="truncate">F: {ps.start_fov.toFixed(0)}</div>
-                                                    </div>
-                                                </div>
 
-                                                <div className="space-y-2">
-                                                    <div className="flex justify-between items-center group/pos">
-                                                        <span className="text-[10px] font-bold text-teal-700 uppercase">End Position</span>
-                                                        <div className="flex gap-1">
-                                                            <button
-                                                                onClick={() => onPreviewScene?.(ps.scene_id, ps.end_yaw, ps.end_pitch, ps.end_fov)}
-                                                                className="text-[10px] bg-green-100 hover:bg-green-200 text-green-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
-                                                                title="Preview end position"
-                                                            >
-                                                                ▶ View
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleCapturePosition(idx, 'end')}
-                                                                className="text-[10px] bg-teal-100 hover:bg-teal-200 text-teal-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
-                                                            >
-                                                                Capture
-                                                            </button>
+                                                    <div className="space-y-1">
+                                                        <span className="text-[10px] font-bold text-gray-500 uppercase">Transition Direction</span>
+                                                        <div className="grid grid-cols-3 gap-1">
+                                                            {['forward', 'backward', 'left', 'right', 'up', 'down'].map((dir) => (
+                                                                <button
+                                                                    key={dir}
+                                                                    onClick={() => handleUpdateSceneParams(idx, { transition_direction: dir as any })}
+                                                                    className={`px-1 py-1 rounded border text-[9px] font-bold capitalize transition-colors cursor-pointer ${ps.transition_direction === dir
+                                                                        ? 'border-purple-500 bg-purple-50 text-purple-700'
+                                                                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                                                                        }`}
+                                                                >
+                                                                    {dir === 'forward' && '⬆️'}
+                                                                    {dir === 'backward' && '⬇️'}
+                                                                    {dir === 'left' && '⬅️'}
+                                                                    {dir === 'right' && '➡️'}
+                                                                    {dir === 'up' && '↗️'}
+                                                                    {dir === 'down' && '↙️'}
+                                                                    {' ' + dir}
+                                                                </button>
+                                                            ))}
                                                         </div>
                                                     </div>
-                                                    <div className="grid grid-cols-3 gap-1 text-[10px] text-gray-600 bg-gray-50 p-2 rounded">
-                                                        <div className="truncate">Y: {ps.end_yaw.toFixed(2)}</div>
-                                                        <div className="truncate">P: {ps.end_pitch.toFixed(2)}</div>
-                                                        <div className="truncate">F: {ps.end_fov.toFixed(0)}</div>
+
+                                                    {/* Title and Description Overlays */}
+                                                    <div className="space-y-2 pt-3 border-t border-gray-100">
+                                                        <div className="space-y-1">
+                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Title Overlay</label>
+                                                            <input
+                                                                type="text"
+                                                                value={ps.title || ''}
+                                                                onChange={(e) => handleUpdateSceneParams(idx, { title: e.target.value })}
+                                                                placeholder="e.g. Thoughtful Luxury Details"
+                                                                className="w-full text-xs p-1.5 border border-gray-300 rounded focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <label className="text-[10px] font-bold text-gray-500 uppercase">Description Overlay</label>
+                                                            <textarea
+                                                                value={ps.description || ''}
+                                                                onChange={(e) => handleUpdateSceneParams(idx, { description: e.target.value })}
+                                                                placeholder="e.g. Handcrafted wood cabinets, Dacor appliances..."
+                                                                rows={2}
+                                                                className="w-full text-xs p-1.5 border border-gray-300 rounded focus:border-purple-500 focus:ring-1 focus:ring-purple-500 resize-none"
+                                                            />
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="space-y-2 pt-2 border-t border-gray-100">
+                                                        <div className="flex justify-between items-center group/pos">
+                                                            <span className="text-[10px] font-bold text-purple-700 uppercase">Start Position</span>
+                                                            <div className="flex gap-1">
+                                                                <button
+                                                                    onClick={() => onPreviewScene?.(ps.scene_id, ps.start_yaw, ps.start_pitch, ps.start_fov)}
+                                                                    className="text-[10px] bg-green-100 hover:bg-green-200 text-green-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
+                                                                    title="Preview start position"
+                                                                >
+                                                                    ▶ View
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleCapturePosition(idx, 'start')}
+                                                                    className="text-[10px] bg-purple-100 hover:bg-purple-200 text-purple-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
+                                                                >
+                                                                    Capture
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <div className="grid grid-cols-3 gap-1 text-[10px] text-gray-600 bg-gray-50 p-2 rounded">
+                                                            <div className="truncate">Y: {ps.start_yaw.toFixed(2)}</div>
+                                                            <div className="truncate">P: {ps.start_pitch.toFixed(2)}</div>
+                                                            <div className="truncate">F: {ps.start_fov.toFixed(0)}</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <div className="flex justify-between items-center group/pos">
+                                                            <span className="text-[10px] font-bold text-teal-700 uppercase">End Position</span>
+                                                            <div className="flex gap-1">
+                                                                <button
+                                                                    onClick={() => onPreviewScene?.(ps.scene_id, ps.end_yaw, ps.end_pitch, ps.end_fov)}
+                                                                    className="text-[10px] bg-green-100 hover:bg-green-200 text-green-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
+                                                                    title="Preview end position"
+                                                                >
+                                                                    ▶ View
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleCapturePosition(idx, 'end')}
+                                                                    className="text-[10px] bg-teal-100 hover:bg-teal-200 text-teal-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
+                                                                >
+                                                                    Capture
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <div className="grid grid-cols-3 gap-1 text-[10px] text-gray-600 bg-gray-50 p-2 rounded">
+                                                            <div className="truncate">Y: {ps.end_yaw.toFixed(2)}</div>
+                                                            <div className="truncate">P: {ps.end_pitch.toFixed(2)}</div>
+                                                            <div className="truncate">F: {ps.end_fov.toFixed(0)}</div>
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
+                                            )}
                                         </div>
                                     );
                                 })}

@@ -171,4 +171,6 @@ export interface PlayTourScene extends BaseModel {
   move_duration: number; // milliseconds
   wait_duration: number; // milliseconds
   transition_direction?: 'forward' | 'backward' | 'up' | 'down' | 'left' | 'right';
+  title?: string;
+  description?: string;
 }

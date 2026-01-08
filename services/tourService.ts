@@ -272,11 +272,23 @@ class TourService {
   }
 
   async listPlayTours(tourId: string): Promise<PlayTour[]> {
-    return this.fetchWithAuth(`tours/${tourId}/play-tours`);
+    const tours = await this.fetchWithAuth(`tours/${tourId}/play-tours`) as PlayTour[];
+    if (Array.isArray(tours)) {
+      tours.forEach(tour => {
+        if (tour.play_tour_scenes) {
+          tour.play_tour_scenes.sort((a, b) => a.sequence_order - b.sequence_order);
+        }
+      });
+    }
+    return tours;
   }
 
   async getPlayTour(id: string): Promise<PlayTour> {
-    return this.fetchWithAuth(`play-tours/${id}`);
+    const tour = await this.fetchWithAuth(`play-tours/${id}`) as PlayTour;
+    if (tour && tour.play_tour_scenes) {
+      tour.play_tour_scenes.sort((a, b) => a.sequence_order - b.sequence_order);
+    }
+    return tour;
   }
 
   async updatePlayTour(id: string, playTour: Partial<PlayTour>): Promise<PlayTour> {

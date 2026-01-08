@@ -359,7 +359,7 @@ export default function CubeMapViewer({
 
     animate();
 
-    // Handle resize
+    // Handle resize using ResizeObserver to detect container size changes
     const handleResize = () => {
       if (!cameraRef.current || !rendererRef.current || !containerRef.current) return;
 
@@ -373,12 +373,21 @@ export default function CubeMapViewer({
       setViewerDimensions({ width, height });
     };
 
-    window.addEventListener('resize', handleResize);
+    // Use ResizeObserver to detect size changes of the container element
+    // This supports both window resize AND container resizing (e.g. fullscreen toggle)
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
+
+    resizeObserver.observe(container);
+
+    // Initial resize to ensure correct size
+    handleResize();
 
     // Cleanup
     return () => {
       if (animationId) cancelAnimationFrame(animationId);
-      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }

@@ -6,6 +6,7 @@ import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 
 const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
 import CubeMapViewer from '@/components/viewer/CubeMapViewer';
+import PlayTourOverlay from '@/components/tours/PlayTourOverlay';
 import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, X, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy } from 'lucide-react';
 
 // Share Modal Component
@@ -345,6 +346,7 @@ export default function PublicTourViewer() {
   // Play Tour state
   const [playTours, setPlayTours] = useState<any[]>([]);
   const [isPlayingTour, setIsPlayingTour] = useState(false);
+  const [hasPlayTourStarted, setHasPlayTourStarted] = useState(false);
   const [selectedPlayTourId, setSelectedPlayTourId] = useState<string | null>(null);
   const [currentPlayTourSceneIndex, setCurrentPlayTourSceneIndex] = useState(0);
   const [currentCamera, setCurrentCamera] = useState<{ yaw: number; pitch: number; fov: number } | null>(null);
@@ -564,22 +566,14 @@ export default function PublicTourViewer() {
 
         const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
         if (selectedTour && selectedTour.play_tour_scenes) {
-          // Smart Resume: Check if current scene is part of the tour
-          const currentSceneId = scenes[currentSceneIndex]?.id;
-          const matchingSceneIndex = selectedTour.play_tour_scenes.findIndex(
-            (ps: any) => ps.scene_id === currentSceneId
-          );
-
-          if (matchingSceneIndex !== -1) {
-            // Resume from current location
-            setCurrentPlayTourSceneIndex(matchingSceneIndex);
-          } else {
-            // If current scene is not in the tour, start from the beginning
+          // Reset to start if we finished the tour previously
+          if (currentPlayTourSceneIndex >= selectedTour.play_tour_scenes.length) {
             setCurrentPlayTourSceneIndex(0);
           }
         }
       }
       setIsPlayingTour(nextState);
+      if (nextState) setHasPlayTourStarted(true);
     } else {
       const nextState = !isAutoplay;
       if (!nextState) triggerPauseAnimation();
@@ -598,7 +592,9 @@ export default function PublicTourViewer() {
         ...baseScene,
         id: `${ps.id}-${idx}`, // Unique ID for progress segments
         move_duration: ps.move_duration,
-        wait_duration: ps.wait_duration
+        wait_duration: ps.wait_duration,
+        title: ps.title,
+        description: ps.description
       };
     });
   }, [isPlayingTour, selectedPlayTourId, playTours, scenes]);
@@ -775,6 +771,7 @@ export default function PublicTourViewer() {
     setShowControls(true);
     if (playTours.length > 0) {
       setIsPlayingTour(true);
+      setHasPlayTourStarted(true);
     } else {
       setIsAutoplay(true);
     }
@@ -1130,6 +1127,13 @@ export default function PublicTourViewer() {
             </div>
           </div>
         </div>
+
+        {/* Play Tour Title/Description Overlay */}
+        <PlayTourOverlay
+          title={playTourDisplayScenes ? playTourDisplayScenes[currentPlayTourSceneIndex]?.title : undefined}
+          description={playTourDisplayScenes ? playTourDisplayScenes[currentPlayTourSceneIndex]?.description : undefined}
+          isVisible={!!(hasPlayTourStarted && playTourDisplayScenes && playTourDisplayScenes[currentPlayTourSceneIndex])}
+        />
 
         {/* Tour Title - Only show when controls are not active */}
         {!showControls && (
