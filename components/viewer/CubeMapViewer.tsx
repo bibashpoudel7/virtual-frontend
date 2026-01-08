@@ -25,6 +25,7 @@ interface CubeMapViewerProps {
   onCameraChange?: (yaw: number, pitch: number, fov: number) => void;
   forcedCameraPosition?: { yaw: number; pitch: number; fov: number } | null;
   isPlaybackMode?: boolean;
+  cameraControlRef?: React.MutableRefObject<{ setCamera: (yaw: number, pitch: number, fov: number) => void } | null>;
 }
 
 
@@ -45,6 +46,7 @@ export default function CubeMapViewer({
   onCameraChange,
   forcedCameraPosition = null,
   isPlaybackMode = false,
+  cameraControlRef,
 }: CubeMapViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -56,7 +58,7 @@ export default function CubeMapViewer({
 
   const [isLoading, setIsLoading] = useState(true);
   const [manifest, setManifest] = useState<CubeMapManifest | null>(null);
-  const [currentLevel, setCurrentLevel] = useState(0);
+  const [currentLevel, setCurrentLevel] = useState(1);
   const [isAutoRotating, setIsAutoRotating] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -69,6 +71,9 @@ export default function CubeMapViewer({
   const hoveredHotspotRef = useRef<THREE.Sprite | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const isNavigatingRef = useRef(false);
+  const loadingTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
+  // Store target camera direction when navigating to new scene
+  const navigationTargetRef = useRef<{ yaw: number; pitch: number } | null>(null);
 
   // Controls state
   const controlsRef = useRef({
@@ -111,6 +116,28 @@ export default function CubeMapViewer({
     }
   }, [forcedCameraPosition]);
 
+  // Expose direct camera control for smooth animations (bypasses React state)
+  useEffect(() => {
+    if (cameraControlRef) {
+      cameraControlRef.current = {
+        setCamera: (yaw: number, pitch: number, fov: number) => {
+          const controls = controlsRef.current;
+          controls.lon = yaw;
+          controls.lat = pitch;
+          if (cameraRef.current) {
+            cameraRef.current.fov = fov;
+            cameraRef.current.updateProjectionMatrix();
+          }
+        }
+      };
+    }
+    return () => {
+      if (cameraControlRef) {
+        cameraControlRef.current = null;
+      }
+    };
+  }, [cameraControlRef]);
+
   // Parse manifest from scene
   useEffect(() => {
     if (currentScene.tiles_manifest) {
@@ -118,6 +145,9 @@ export default function CubeMapViewer({
         const parsed = typeof currentScene.tiles_manifest === 'string'
           ? JSON.parse(currentScene.tiles_manifest)
           : currentScene.tiles_manifest;
+
+        console.log('[CubeMapViewer] Parsed manifest:', parsed);
+        console.log('[CubeMapViewer] Levels:', parsed.levels);
 
         if (parsed.type === 'cubemap') {
 
@@ -127,27 +157,46 @@ export default function CubeMapViewer({
             loadedTexturesRef.current.clear();
           }
           setManifest(parsed);
-          setCurrentLevel(0); // Reset to level 0 for new scene
+          setCurrentLevel(1); // Reset to level 1 for new scene
+        } else {
+          console.error('[CubeMapViewer] Invalid manifest type:', parsed.type);
         }
       } catch (error) {
-        console.error('Failed to parse cube map manifest:', error);
+        console.error('[CubeMapViewer] Failed to parse cube map manifest:', error);
       }
+    } else {
+      console.warn('[CubeMapViewer] No tiles_manifest in currentScene');
     }
 
-    // Reset camera to scene defaults (only if not in playback mode AND no forced camera position)
-    // We only trigger this when the *scene* changes, not when playback mode toggles.
+    // Reset camera - use navigation target if we just walked to this scene, otherwise use scene defaults
     if (!isPlaybackMode && !forcedCameraPosition) {
       const controls = controlsRef.current;
-      controls.lon = currentScene.yaw || 0;
-      controls.lat = currentScene.pitch || 0;
+      const isNavigatedEntry = !!navigationTargetRef.current;
+
+      if (navigationTargetRef.current) {
+        // We navigated here via hotspot - face the direction we were walking
+        console.log('[CubeMapViewer] Using navigation target direction:', navigationTargetRef.current);
+        controls.lon = navigationTargetRef.current.yaw;
+        controls.lat = navigationTargetRef.current.pitch;
+        navigationTargetRef.current = null; // Clear after use
+      } else {
+        // Normal load - use scene defaults
+        controls.lon = currentScene.yaw || 0;
+        controls.lat = currentScene.pitch || 0;
+      }
+
       controls.targetRotationX = 0; // Reset momentum
       controls.targetRotationY = 0;
 
+      const targetFov = currentScene.fov || 60;
+
       if (cameraRef.current) {
-        // Reset FOV if defined, or default to 60 (or tour default if we had access, otherwise 60)
-        cameraRef.current.fov = currentScene.fov || 60;
+        cameraRef.current.fov = targetFov;
         cameraRef.current.updateProjectionMatrix();
       }
+
+      // Entry animation is handled by applyAllTextures() when new textures are ready
+      // This ensures the scene is visible before any animation starts
     }
   }, [currentScene]);
 
@@ -223,12 +272,13 @@ export default function CubeMapViewer({
       // Skip auto-rotate during playback mode
       if (!isPlaybackMode && (autoRotateRef.current || isAutoRotatingRef.current) && !controls.isUserInteracting) {
         const rotateSpeed = 0.5;
-        controls.lon += rotateSpeed * 0.2; // Apply rotation speed (increased for visibility)
+        controls.lon += rotateSpeed * 0.2;
       }
 
       controls.lat = Math.max(-90, Math.min(90, controls.lat)); // Allow full vertical range
       controls.phi = THREE.MathUtils.degToRad(90 - controls.lat);
-      controls.theta = THREE.MathUtils.degToRad(controls.lon);
+      // Add 180° to align camera with cubemap front face
+      controls.theta = THREE.MathUtils.degToRad(controls.lon + 180);
 
       const target = new THREE.Vector3();
       target.x = 500 * Math.sin(controls.phi) * Math.cos(controls.theta);
@@ -298,8 +348,7 @@ export default function CubeMapViewer({
 
       // Report camera changes to parent if needed
       if (onCameraChange) {
-        // Use lon (yaw) and lat (pitch) which are already in degrees
-        // Normalize lon to -180 to 180 range like TourEditor does
+        // Normalize lon to -180 to 180 range
         let normalizedLon = controls.lon % 360;
         if (normalizedLon > 180) normalizedLon -= 360;
         if (normalizedLon < -180) normalizedLon += 360;
@@ -340,94 +389,198 @@ export default function CubeMapViewer({
   // Keep track of loaded textures to prevent reloading
   const loadedTexturesRef = useRef<Map<string, THREE.Texture>>(new Map());
 
+  // Track preloaded scene tiles for smooth navigation
+  const preloadedTilesRef = useRef<Map<string, Map<string, HTMLImageElement>>>(new Map());
+  const preloadingPromiseRef = useRef<Map<string, Promise<boolean>>>(new Map());
+
+  // Preload tiles for a scene (used during navigation animation)
+  const preloadSceneTiles = useCallback((targetSceneId: string): Promise<boolean> => {
+    // Check if already preloading this scene
+    if (preloadingPromiseRef.current.has(targetSceneId)) {
+      return preloadingPromiseRef.current.get(targetSceneId)!;
+    }
+
+    // Find target scene from scenes array
+    const targetScene = scenes.find(s => s.id === targetSceneId);
+    if (!targetScene || !targetScene.tiles_manifest) {
+      console.warn('[CubeMapViewer] Cannot preload - no manifest for scene:', targetSceneId);
+      return Promise.resolve(false);
+    }
+
+    const targetManifest = typeof targetScene.tiles_manifest === 'string'
+      ? JSON.parse(targetScene.tiles_manifest)
+      : targetScene.tiles_manifest;
+
+    if (targetManifest.type !== 'cubemap') {
+      return Promise.resolve(false);
+    }
+
+    // Get level 1 info
+    const levelInfo = targetManifest.levels?.find((l: { level: number }) => l.level === 1);
+    if (!levelInfo) {
+      console.warn('[CubeMapViewer] No level 1 found in target manifest');
+      return Promise.resolve(false);
+    }
+
+    const tileSize = levelInfo.tileSize || targetManifest.tileSize || 512;
+    const tilesPerSide = levelInfo.tiles || Math.ceil(levelInfo.size / tileSize);
+    const faceOrder = ['right', 'left', 'bottom', 'top', 'front', 'back'];
+
+    console.log(`[CubeMapViewer] Preloading scene ${targetSceneId}: ${faceOrder.length} faces, ${tilesPerSide}x${tilesPerSide} tiles each`);
+
+    const promise = new Promise<boolean>((resolve) => {
+      const tileImages = new Map<string, HTMLImageElement>();
+      let loadedCount = 0;
+      const totalTiles = faceOrder.length * tilesPerSide * tilesPerSide;
+
+      faceOrder.forEach(face => {
+        for (let y = 0; y < tilesPerSide; y++) {
+          for (let x = 0; x < tilesPerSide; x++) {
+            const tileKey = `${face}_l1_${x}_${y}`;
+            const tileUrl = `${R2_PUBLIC_URL}/scenes/${targetSceneId}/tiles/${tileKey}.jpg`;
+
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+
+            img.onload = () => {
+              tileImages.set(tileKey, img);
+              loadedCount++;
+              if (loadedCount === totalTiles) {
+                console.log(`[CubeMapViewer] Preloaded all ${totalTiles} tiles for scene ${targetSceneId}`);
+                preloadedTilesRef.current.set(targetSceneId, tileImages);
+                preloadingPromiseRef.current.delete(targetSceneId);
+                resolve(true);
+              }
+            };
+
+            img.onerror = () => {
+              loadedCount++;
+              console.warn(`[CubeMapViewer] Failed to preload tile: ${tileUrl}`);
+              if (loadedCount === totalTiles) {
+                preloadedTilesRef.current.set(targetSceneId, tileImages);
+                preloadingPromiseRef.current.delete(targetSceneId);
+                resolve(true); // Still resolve even with some failures
+              }
+            };
+
+            img.src = tileUrl;
+          }
+        }
+      });
+    });
+
+    preloadingPromiseRef.current.set(targetSceneId, promise);
+    return promise;
+  }, [scenes]);
+
   // Progressive loading of cube map tiles with proper compositing
   const loadCubeMapLevel = useCallback((level: number) => {
     // Always use the current manifest from state, not from closure
     const currentManifest = manifest;
-    if (!currentManifest || !sceneRef.current || !currentManifest.levels[level]) return;
+    console.log('[CubeMapViewer] loadCubeMapLevel called with level:', level);
+    console.log('[CubeMapViewer] currentManifest:', currentManifest);
+    console.log('[CubeMapViewer] sceneRef.current:', !!sceneRef.current);
+
+    if (!currentManifest || !sceneRef.current) {
+      console.warn('[CubeMapViewer] Skipping loadCubeMapLevel - missing manifest or scene');
+      return;
+    }
+
+    // Find level info by level number (not array index) since level 0 is removed
+    const levelInfo = currentManifest.levels.find(l => l.level === level);
+    console.log('[CubeMapViewer] levelInfo for level', level, ':', JSON.stringify(levelInfo));
+    console.log('[CubeMapViewer] All levels:', JSON.stringify(currentManifest.levels));
+
+    if (!levelInfo) {
+      console.error('[CubeMapViewer] No levelInfo found for level:', level, 'Available levels:', currentManifest.levels.map(l => l.level));
+      return;
+    }
+
+    if (!levelInfo.size) {
+      console.error('[CubeMapViewer] levelInfo missing size property:', levelInfo);
+      return;
+    }
 
     // optimization: During playback, stick to lower levels (max level 1) to prevent lag
     if (isPlaybackMode && level > 1) {
       return;
     }
-
-    const levelInfo = currentManifest.levels[level];
-    const tilesPerSide = levelInfo.tiles;
     const faceSize = levelInfo.size;
+    const tileSize = levelInfo.tileSize || currentManifest.tileSize || 512;
+    // Calculate tilesPerSide with fallback in case manifest doesn't have it
+    const tilesPerSide = levelInfo.tiles || Math.ceil(faceSize / tileSize);
+
+    console.log(`[CubeMapViewer] Level ${level}: faceSize=${faceSize}, tileSize=${tileSize}, tilesPerSide=${tilesPerSide}`);
 
     const faceOrder = [
       CubeFace.RIGHT,
       CubeFace.LEFT,
-      CubeFace.TOP,
-      CubeFace.BOTTOM,
+      CubeFace.BOTTOM,  // Swapped: Three.js +Y expects bottom when viewing from inside
+      CubeFace.TOP,     // Swapped: Three.js -Y expects top when viewing from inside
       CubeFace.FRONT,
       CubeFace.BACK
     ];
 
-    // Special case for level 0 - single tile per face
-    if (level === 0) {
-      const loader = new THREE.TextureLoader();
-      faceOrder.forEach((face, faceIndex) => {
-        // Check cache first
-        const cacheKey = `${currentScene.id}_${face}_l${level}`;
-        if (loadedTexturesRef.current.has(cacheKey)) {
-          const cachedTexture = loadedTexturesRef.current.get(cacheKey)!;
-          if (materialsRef.current[faceIndex]) {
-            materialsRef.current[faceIndex].map = cachedTexture;
-            materialsRef.current[faceIndex].needsUpdate = true;
+    console.log(`[CubeMapViewer] Starting to load ${faceOrder.length} faces, ${tilesPerSide}x${tilesPerSide}=${tilesPerSide * tilesPerSide} tiles each`);
+
+    // Check if tiles were preloaded for this scene
+    const preloadedSceneTiles = preloadedTilesRef.current.get(currentScene.id);
+    const hasPreloadedTiles = preloadedSceneTiles && level === 1;
+
+    // Track completed faces for batch update (smooth transition)
+    let facesCompleted = 0;
+    const pendingTextures: Map<number, THREE.Texture> = new Map();
+
+    // Function to apply all textures at once (smooth Matterport-style swap)
+    const applyAllTextures = () => {
+      console.log('[CubeMapViewer] Applying all 6 face textures at once for smooth transition');
+
+      // Reset cube position and scale for smooth appearance after navigation animation
+      if (cubeRef.current) {
+        cubeRef.current.position.set(0, 0, 0);
+        cubeRef.current.scale.set(1, 1, 1);
+      }
+
+      // Reset camera FOV to scene default after animation
+      if (cameraRef.current) {
+        const targetFov = currentScene.fov || 60;
+        cameraRef.current.fov = targetFov;
+        cameraRef.current.updateProjectionMatrix();
+      }
+
+      pendingTextures.forEach((texture, faceIndex) => {
+        if (materialsRef.current[faceIndex]) {
+          const oldMap = materialsRef.current[faceIndex].map;
+          materialsRef.current[faceIndex].map = texture;
+          materialsRef.current[faceIndex].color.setHex(0xffffff);
+          materialsRef.current[faceIndex].needsUpdate = true;
+
+          // Dispose old texture if not cached
+          if (oldMap && oldMap !== texture && !Array.from(loadedTexturesRef.current.values()).includes(oldMap)) {
+            oldMap.dispose();
           }
-          return;
         }
-
-        // Load single tile
-        const tileUrl = `${R2_PUBLIC_URL}/scenes/${currentScene.id}/tiles/${face}_l${level}_0_0.jpg`;
-
-        loader.load(
-          tileUrl,
-          (texture) => {
-            texture.colorSpace = THREE.SRGBColorSpace;
-            texture.minFilter = THREE.LinearMipmapLinearFilter;
-            texture.magFilter = THREE.LinearFilter;
-            texture.generateMipmaps = true;
-            texture.anisotropy = rendererRef.current?.capabilities.getMaxAnisotropy() || 16;
-            texture.needsUpdate = true;
-
-            // Cache the texture
-            loadedTexturesRef.current.set(cacheKey, texture);
-
-            // Update material
-            if (materialsRef.current[faceIndex]) {
-              const oldMap = materialsRef.current[faceIndex].map;
-              materialsRef.current[faceIndex].map = texture;
-              materialsRef.current[faceIndex].needsUpdate = true;
-
-              // Dispose old texture if it's not cached
-              if (oldMap && oldMap !== texture && !Array.from(loadedTexturesRef.current.values()).includes(oldMap)) {
-                oldMap.dispose();
-              }
-            }
-          },
-          undefined,
-          (error) => {
-            console.error(`Failed to load tile: ${face}_l${level}_0_0.jpg`, error);
-          }
-        );
       });
-      return;
-    }
 
-    // For levels 1+ - composite multiple tiles
+      setIsTransitioning(false);
+      setIsLoading(false);
+    };
+
+    // Composite multiple tiles for all levels (level 0 removed)
     faceOrder.forEach((face, faceIndex) => {
       // Check cache first
       const cacheKey = `${currentScene.id}_${face}_l${level}`;
       if (loadedTexturesRef.current.has(cacheKey)) {
-        const cachedTexture = loadedTexturesRef.current.get(cacheKey)!;
-        if (materialsRef.current[faceIndex]) {
-          materialsRef.current[faceIndex].map = cachedTexture;
-          materialsRef.current[faceIndex].needsUpdate = true;
+        console.log(`[CubeMapViewer] Using cached texture for ${face} level ${level}`);
+        pendingTextures.set(faceIndex, loadedTexturesRef.current.get(cacheKey)!);
+        facesCompleted++;
+        if (facesCompleted === 6) {
+          applyAllTextures();
         }
         return;
       }
+
+      console.log(`[CubeMapViewer] Loading tiles for face ${face} (index ${faceIndex}), level ${level}`);
 
       // Create canvas for compositing tiles
       const canvas = document.createElement('canvas');
@@ -437,84 +590,80 @@ export default function CubeMapViewer({
 
       if (!ctx) {
         console.error('Failed to get canvas context');
+        facesCompleted++;
+        if (facesCompleted === 6) applyAllTextures();
         return;
       }
 
       // Track loaded tiles for this face
       let tilesLoaded = 0;
       const totalTiles = tilesPerSide * tilesPerSide;
-      // Use the tileSize from the levelInfo we already have at the top
-      const tileSize = levelInfo.tileSize || currentManifest.tileSize || 512;
+
+      // Function called when all tiles for this face are loaded
+      const onFaceComplete = () => {
+        console.log('[CubeMapViewer] Face complete:', face);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.generateMipmaps = true;
+        texture.anisotropy = rendererRef.current?.capabilities.getMaxAnisotropy() || 16;
+        texture.flipY = false;
+        texture.needsUpdate = true;
+
+        loadedTexturesRef.current.set(cacheKey, texture);
+        pendingTextures.set(faceIndex, texture);
+        facesCompleted++;
+
+        // When all 6 faces are ready, apply them all at once
+        if (facesCompleted === 6) {
+          applyAllTextures();
+        }
+      };
+
+      // Helper function to process a loaded image
+      const processLoadedImage = (img: HTMLImageElement, x: number, y: number) => {
+        const destX = x * tileSize;
+        const destY = y * tileSize;
+        const drawWidth = Math.min(tileSize, faceSize - destX);
+        const drawHeight = Math.min(tileSize, faceSize - destY);
+        ctx.drawImage(img, 0, 0, img.width, img.height, destX, destY, drawWidth, drawHeight);
+        tilesLoaded++;
+
+        if (tilesLoaded === totalTiles) {
+          onFaceComplete();
+        }
+      };
 
       // Load all tiles for this face
       for (let y = 0; y < tilesPerSide; y++) {
         for (let x = 0; x < tilesPerSide; x++) {
-          const tileUrl = `${R2_PUBLIC_URL}/scenes/${currentScene.id}/tiles/${face}_l${level}_${x}_${y}.jpg`;
+          const tileKey = `${face}_l${level}_${x}_${y}`;
+
+          // Check for preloaded tile first
+          if (hasPreloadedTiles) {
+            const preloadedImg = preloadedSceneTiles.get(tileKey);
+            if (preloadedImg) {
+              processLoadedImage(preloadedImg, x, y);
+              continue;
+            }
+          }
+
+          // Fallback: load tile from network
+          const tileUrl = `${R2_PUBLIC_URL}/scenes/${currentScene.id}/tiles/${tileKey}.jpg`;
 
           const img = new Image();
           img.crossOrigin = 'anonymous';
 
           img.onload = () => {
-            // Draw tile at correct position
-            const destX = x * tileSize;
-            const destY = y * tileSize;
-
-            // Handle edge tiles that might be smaller
-            const drawWidth = Math.min(tileSize, faceSize - destX);
-            const drawHeight = Math.min(tileSize, faceSize - destY);
-
-            ctx.drawImage(img, 0, 0, img.width, img.height, destX, destY, drawWidth, drawHeight);
-
-            tilesLoaded++;
-
-            // All tiles loaded for this face
-            if (tilesLoaded === totalTiles) {
-              // Create texture from composite canvas
-              const texture = new THREE.CanvasTexture(canvas);
-              texture.colorSpace = THREE.SRGBColorSpace;
-              texture.minFilter = THREE.LinearMipmapLinearFilter;
-              texture.magFilter = THREE.LinearFilter;
-              texture.generateMipmaps = true;
-              texture.anisotropy = rendererRef.current?.capabilities.getMaxAnisotropy() || 16;
-              texture.needsUpdate = true;
-
-              // Cache the texture
-              loadedTexturesRef.current.set(cacheKey, texture);
-
-              // Update material
-              if (materialsRef.current[faceIndex]) {
-                const oldMap = materialsRef.current[faceIndex].map;
-                materialsRef.current[faceIndex].map = texture;
-                materialsRef.current[faceIndex].needsUpdate = true;
-
-                // Dispose old texture if it's not cached
-                if (oldMap && oldMap !== texture && !Array.from(loadedTexturesRef.current.values()).includes(oldMap)) {
-                  oldMap.dispose();
-                }
-              }
-
-
-            }
+            processLoadedImage(img, x, y);
           };
 
-          img.onerror = () => {
-            console.error(`Failed to load tile: ${face}_l${level}_${x}_${y}.jpg`);
+          img.onerror = (err) => {
+            console.error(`[CubeMapViewer] Failed to load tile: ${tileUrl}`, err);
             tilesLoaded++;
-
-            // Still create texture even if some tiles fail
             if (tilesLoaded === totalTiles) {
-              const texture = new THREE.CanvasTexture(canvas);
-              texture.colorSpace = THREE.SRGBColorSpace;
-              texture.minFilter = THREE.LinearMipmapLinearFilter;
-              texture.magFilter = THREE.LinearFilter;
-              texture.generateMipmaps = true;
-
-              loadedTexturesRef.current.set(cacheKey, texture);
-
-              if (materialsRef.current[faceIndex]) {
-                materialsRef.current[faceIndex].map = texture;
-                materialsRef.current[faceIndex].needsUpdate = true;
-              }
+              onFaceComplete();
             }
           };
 
@@ -528,136 +677,95 @@ export default function CubeMapViewer({
   useEffect(() => {
     if (!manifest || !sceneRef.current) return;
 
-    // Only show loading state on initial load, not during transitions
-    if (!isNavigatingRef.current && !isTransitioning) {
-      setIsLoading(true);
-    }
-
-    // Create cube geometry
-    const geometry = new THREE.BoxGeometry(100, 100, 100);
-    geometry.scale(-1, 1, 1); // Invert for inside view
-    geometry.rotateX(Math.PI); // Rotate 180 degrees around X axis to fix upside-down issue
-
-    // Load textures for each face
     const loader = new THREE.TextureLoader();
-    const materials: THREE.MeshBasicMaterial[] = [];
-    materialsRef.current = materials;
+    const sceneId = currentScene.id;
 
     // Face order for Three.js BoxGeometry: +X, -X, +Y, -Y, +Z, -Z
-    // This matches how Three.js expects cube map faces
+    // When viewing from inside, +Y shows floor and -Y shows ceiling
     const faceOrder = [
       CubeFace.RIGHT,  // +X
       CubeFace.LEFT,   // -X
-      CubeFace.TOP,    // +Y
-      CubeFace.BOTTOM, // -Y
+      CubeFace.BOTTOM, // +Y (swapped - floor appears at top position)
+      CubeFace.TOP,    // -Y (swapped - ceiling appears at bottom position)
       CubeFace.FRONT,  // +Z
       CubeFace.BACK    // -Z
     ];
 
-    // Start with level 0 for quick loading
-    const level = 0;
+    // Check if cube already exists (scene transition) or needs to be created
+    const isSceneTransition = cubeRef.current !== null;
+    console.log('[CubeMapViewer] isSceneTransition:', isSceneTransition, 'cubeRef.current:', !!cubeRef.current);
 
-    let loadedCount = 0;
-    faceOrder.forEach(face => {
-      // Build URL for this face at level 0, tile 0,0
-      const tileUrl = `${R2_PUBLIC_URL}/scenes/${currentScene.id}/tiles/${face}_l${level}_0_0.jpg`;
+    if (!isSceneTransition) {
+      // First load - create cube geometry and materials
+      console.log('[CubeMapViewer] Creating new cube and materials');
+      setIsLoading(true);
 
-      const texture = loader.load(
-        tileUrl,
-        () => {
-          loadedCount++;
-          if (loadedCount === 6) {
-            // Remove old cube when transitioning and new one is ready
-            if (isTransitioning && sceneRef.current) {
-              // Remove all existing cubes to prevent overlap
-              const existingCubes = sceneRef.current.children.filter(
-                child => child instanceof THREE.Mesh && child.geometry instanceof THREE.BoxGeometry
-              );
-              existingCubes.forEach(cube => {
-                if (cube !== cubeRef.current) {
-                  sceneRef.current!.remove(cube);
-                }
-              });
-            }
+      const geometry = new THREE.BoxGeometry(100, 100, 100);
+      // No transformations needed - use BackSide to see inside the cube
 
-            // Add a small delay before marking as loaded for smoother transition
-            setTimeout(() => {
-              setIsLoading(false);
-            }, 200);
+      const materials: THREE.MeshBasicMaterial[] = [];
+      materialsRef.current = materials;
 
-            // Automatically load higher quality levels progressively
-            // Note: We're using the manifest from the effect's dependency, which should be current
-            if (manifest && manifest.levels && manifest.levels.length > 1) {
-              // Load level 1 immediately for better default quality
-              setTimeout(() => {
-
-                loadCubeMapLevel(1);
-                setCurrentLevel(1);
-
-                // Pre-load level 2 after level 1 is loaded
-                if (manifest.levels.length > 2) {
-                  setTimeout(() => {
-
-                    loadCubeMapLevel(2);
-
-                    // Pre-load level 3 for maximum quality
-                    if (manifest.levels.length > 3) {
-                      setTimeout(() => {
-
-                        loadCubeMapLevel(3);
-                      }, 1500);
-                    }
-                  }, 1000);
-                }
-              }, 100);
-            }
-          }
-        },
-        undefined,
-        (error) => {
-          console.error(`Failed to load cube face ${face}:`, error);
-          // Set visible error message
-          setErrorMsg(`Failed to load tile: ${tileUrl}. Server might be unreachable.`);
-          loadedCount++;
-          if (loadedCount === 6) {
-            setIsLoading(false);
-          }
-        }
-      );
-
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.minFilter = THREE.LinearMipmapLinearFilter;
-      texture.magFilter = THREE.LinearFilter;
-      texture.generateMipmaps = true;
-      texture.anisotropy = rendererRef.current?.capabilities.getMaxAnisotropy() || 1;
-
-      materials.push(new THREE.MeshBasicMaterial({
-        map: texture,
-        side: THREE.FrontSide // Use FrontSide since geometry is inverted
-      }));
-    });
-
-    // Create cube mesh
-    const cube = new THREE.Mesh(geometry, materials);
-    sceneRef.current.add(cube);
-    cubeRef.current = cube;
-
-    // Cleanup
-    return () => {
-      // Don't remove cube during transitions to prevent white screen
-      if (sceneRef.current && cubeRef.current && !isTransitioning) {
-        sceneRef.current.remove(cubeRef.current);
-        cubeRef.current = null; // Clear the reference
-      }
-      materials.forEach(mat => {
-        if (mat.map) mat.map.dispose();
-        mat.dispose();
+      // Create placeholder materials
+      faceOrder.forEach(() => {
+        materials.push(new THREE.MeshBasicMaterial({
+          color: 0x000000,
+          side: THREE.DoubleSide
+        }));
       });
-      geometry.dispose();
-    };
-  }, [manifest, currentScene.id, loadCubeMapLevel, isTransitioning]);
 
-  // Render hotspots
+      console.log('[CubeMapViewer] Created', materials.length, 'materials');
+
+      const cube = new THREE.Mesh(geometry, materials);
+      sceneRef.current.add(cube);
+      cubeRef.current = cube;
+      console.log('[CubeMapViewer] Cube added to scene');
+    } else {
+      console.log('[CubeMapViewer] Using existing cube, materialsRef.current.length:', materialsRef.current.length);
+    }
+
+    // Clear any pending loading timeouts from previous scene
+    loadingTimeoutsRef.current.forEach(t => clearTimeout(t));
+    loadingTimeoutsRef.current = [];
+
+    // Load level 1 tiles (now 2x2 tiles of 512px each)
+    // Use loadCubeMapLevel which handles compositing multiple tiles
+    setIsLoading(true);
+
+    console.log('[CubeMapViewer] Scheduling loadCubeMapLevel(1) with setTimeout');
+
+    // Small delay to ensure cube is created, then load level 1 only
+    // Higher levels (2, 3) are loaded on-demand when user zooms in
+    const t1 = setTimeout(() => {
+      console.log('[CubeMapViewer] Loading level 1 (current scene stays visible until ready)');
+      loadCubeMapLevel(1);
+      setCurrentLevel(1);
+
+      // Clean up preloaded tiles after they've been consumed by loadCubeMapLevel
+      setTimeout(() => {
+        if (preloadedTilesRef.current.has(currentScene.id)) {
+          console.log('[CubeMapViewer] Cleaning up preloaded tiles for scene:', currentScene.id);
+          preloadedTilesRef.current.delete(currentScene.id);
+        }
+      }, 100);
+
+      // Note: setIsLoading, setIsTransitioning, and cube scale reset
+      // are handled by applyAllTextures() when all faces are ready
+    }, 50);
+    loadingTimeoutsRef.current.push(t1);
+
+    // Cleanup on unmount only - DON'T remove cube on scene change to keep current view visible
+    return () => {
+      // Clear all pending timeouts
+      loadingTimeoutsRef.current.forEach(t => clearTimeout(t));
+      loadingTimeoutsRef.current = [];
+
+      // Only remove cube on actual unmount, not on scene change
+      // The cube stays visible with old textures until new textures are loaded
+    };
+  }, [manifest, currentScene.id, loadCubeMapLevel]);
+
+  // Render hotspots - only after tiles are loaded
   useEffect(() => {
     if (!hotspotsRef.current || !sceneRef.current) return;
 
@@ -677,10 +785,14 @@ export default function CubeMapViewer({
       }
     }
 
+    // Don't show hotspots until tiles are fully loaded
+    if (isLoading) return;
+
     // Add new hotspots
     hotspots.forEach((hotspot) => {
       // Convert yaw/pitch to 3D position
-      const yaw = (hotspot.yaw || 0) * Math.PI / 180;
+      // Add 180° and swap to match camera coordinate system (cos/sin instead of sin/cos)
+      const yaw = ((hotspot.yaw || 0) + 180) * Math.PI / 180;
       const pitch = (hotspot.pitch || 0) * Math.PI / 180;
 
       // Parse payload to check for ground flag or other settings
@@ -706,21 +818,18 @@ export default function CubeMapViewer({
 
       if (isGroundHotspot) {
         // Place on the floor plane - visible and clickable
-        // distance = 35; // Optimal distance for floor markers
-        // const groundPitch = -70 * Math.PI / 180; // Look down angle (70 degrees down)
-        // x = distance * Math.cos(groundPitch) * Math.sin(yaw);
-        // y = distance * Math.sin(groundPitch); // This will be negative (below eye level)
-        // z = distance * Math.cos(groundPitch) * Math.cos(yaw);
+        // Use cos/sin to match camera coordinate system
         distance = 45; // Place hotspots closer than the cube (which is at 50)
-        x = distance * Math.cos(pitch) * Math.sin(yaw);
+        x = distance * Math.cos(pitch) * Math.cos(yaw);
         y = distance * Math.sin(pitch);
-        z = distance * Math.cos(pitch) * Math.cos(yaw);
+        z = distance * Math.cos(pitch) * Math.sin(yaw);
       } else {
         // Regular floating hotspot
+        // Use cos/sin to match camera coordinate system
         distance = 45; // Place hotspots closer than the cube (which is at 50)
-        x = distance * Math.cos(pitch) * Math.sin(yaw);
+        x = distance * Math.cos(pitch) * Math.cos(yaw);
         y = distance * Math.sin(pitch);
-        z = distance * Math.cos(pitch) * Math.cos(yaw);
+        z = distance * Math.cos(pitch) * Math.sin(yaw);
       }
 
       // Helper to draw rounded rect for compatibility
@@ -984,7 +1093,25 @@ export default function CubeMapViewer({
         hotspotsRef.current.add(sprite);
       }
     });
-  }, [hotspots, highlightedHotspotId]);
+
+    // Preload all adjacent scenes level 1 tiles for instant transitions
+    // Level 1 is now 2x2 tiles (512px each) per face
+    const faces = ['front', 'back', 'left', 'right', 'top', 'bottom'];
+    hotspots.forEach(h => {
+      if (h.kind === 'navigation' && h.target_scene_id) {
+        faces.forEach(face => {
+          // Preload all 4 tiles (2x2) for each face
+          for (let y = 0; y < 2; y++) {
+            for (let x = 0; x < 2; x++) {
+              const tileUrl = `${R2_PUBLIC_URL}/scenes/${h.target_scene_id}/tiles/${face}_l1_${x}_${y}.jpg`;
+              const img = new Image();
+              img.src = tileUrl;
+            }
+          }
+        });
+      }
+    });
+  }, [hotspots, highlightedHotspotId, isLoading]);
 
   // Render overlays
   // Manual overlay rendering removed in favor of OverlayRenderer component
@@ -1019,7 +1146,8 @@ export default function CubeMapViewer({
           vector.sub(cameraRef.current.position).normalize();
 
           // Convert to spherical coordinates
-          const yaw = Math.atan2(vector.x, vector.z) * 180 / Math.PI;
+          // Use atan2(z, x) to match cos/sin coordinate system, subtract 180° for camera offset
+          const yaw = Math.atan2(vector.z, vector.x) * 180 / Math.PI - 180;
           const pitch = Math.asin(vector.y) * 180 / Math.PI;
 
           if (onHotspotCreate) {
@@ -1099,6 +1227,17 @@ export default function CubeMapViewer({
             hoveredObject.userData.targetGlow = 1;
             container.style.cursor = 'pointer';
             foundHoverable = true;
+
+            // Preload next scene tiles on hover for faster transitions
+            const hotspotData = hoveredObject.userData.hotspot;
+            if (hotspotData?.kind === 'navigation' && hotspotData?.target_scene_id) {
+              const faces = ['front', 'back', 'left', 'right', 'top', 'bottom'];
+              faces.forEach(face => {
+                const tileUrl = `${R2_PUBLIC_URL}/scenes/${hotspotData.target_scene_id}/tiles/${face}_l1_0_0.jpg`;
+                const img = new Image();
+                img.src = tileUrl;
+              });
+            }
           }
         }
 
@@ -1187,12 +1326,13 @@ export default function CubeMapViewer({
               if (hotspot.kind !== 'navigation') return;
 
               // Calculate 3D position of hotspot
-              const yawRad = (hotspot.yaw || 0) * Math.PI / 180;
+              // Add 180° and use cos/sin to match camera coordinate system
+              const yawRad = ((hotspot.yaw || 0) + 180) * Math.PI / 180;
               const pitchRad = (hotspot.pitch || 0) * Math.PI / 180;
               const distance = 45;
-              const hx = distance * Math.cos(pitchRad) * Math.sin(yawRad);
+              const hx = distance * Math.cos(pitchRad) * Math.cos(yawRad);
               const hy = distance * Math.sin(pitchRad);
-              const hz = distance * Math.cos(pitchRad) * Math.cos(yawRad);
+              const hz = distance * Math.cos(pitchRad) * Math.sin(yawRad);
 
               const hotspotVec = new THREE.Vector3(hx, hy, hz).normalize();
               const angle = ray.direction.angleTo(hotspotVec);
@@ -1211,102 +1351,176 @@ export default function CubeMapViewer({
 
         // 3. Action Logic
         if (targetHotspot) {
-          // Handle Navigation Hotspot (Smooth Animation)
+          // Handle Navigation Hotspot (Matterport-style smooth walking transition)
           if (targetHotspot.kind === 'navigation') {
             const hotspot = targetHotspot;
+            const targetSceneId = hotspot.target_scene_id;
 
             // Trigger Animation
             setIsTransitioning(true);
             setLoadingProgress(0);
 
+            // Start preloading target scene tiles immediately
+            let preloadComplete = false;
+            let animationComplete = false;
+
+            const checkAndNavigate = () => {
+              if (preloadComplete && animationComplete) {
+                console.log('[CubeMapViewer] Both preload and animation complete - switching scene');
+                isNavigatingRef.current = false;
+                controls.isUserInteracting = false;
+
+                // DON'T reset scale/fov here - keep old scene visible
+                // The new scene's applyAllTextures will handle the reset
+
+                // Store the direction we should face in the new scene
+                // Check for target_yaw/target_pitch in top-level fields OR in payload
+                let targetYaw = hotspot.target_yaw;
+                let targetPitch = hotspot.target_pitch;
+
+                // If not found in top-level, try to get from payload
+                if (targetYaw === undefined || targetPitch === undefined) {
+                  try {
+                    const payload = typeof hotspot.payload === 'string'
+                      ? JSON.parse(hotspot.payload)
+                      : hotspot.payload;
+                    if (payload) {
+                      if (targetYaw === undefined && payload.targetYaw !== undefined) {
+                        targetYaw = payload.targetYaw;
+                      }
+                      if (targetPitch === undefined && payload.targetPitch !== undefined) {
+                        targetPitch = payload.targetPitch;
+                      }
+                    }
+                  } catch (e) {
+                    // Ignore parse errors
+                  }
+                }
+
+                // Use target values if defined, otherwise continue facing hotspot direction
+                navigationTargetRef.current = {
+                  yaw: targetYaw !== undefined ? targetYaw : hotspot.yaw,
+                  pitch: targetPitch !== undefined ? targetPitch : 0
+                };
+                console.log('[CubeMapViewer] Set navigation target:', navigationTargetRef.current);
+
+                // Fire event to load new scene - old scene stays visible until new textures ready
+                if (onHotspotClick) onHotspotClick(hotspot);
+              }
+            };
+
+            // Start preloading
+            if (targetSceneId) {
+              console.log('[CubeMapViewer] Starting preload for scene:', targetSceneId);
+              preloadSceneTiles(targetSceneId).then(() => {
+                preloadComplete = true;
+                console.log('[CubeMapViewer] Preload complete for scene:', targetSceneId);
+                checkAndNavigate();
+              });
+            } else {
+              preloadComplete = true; // No target scene to preload
+            }
+
             // Store initial camera state
-            const startFov = cameraRef.current!.fov;
             const startScale = cubeRef.current?.scale.x || 1;
+            const startFov = cameraRef.current?.fov || 60;
             const startLon = controls.lon;
             const startLat = controls.lat;
 
-            // Calculate target direction
-            const yawRad = (hotspot.yaw || 0) * Math.PI / 180;
-            const pitchRad = (hotspot.pitch || 0) * Math.PI / 180;
-            const distance = 45;
-            const hx = distance * Math.cos(pitchRad) * Math.sin(yawRad);
-            const hy = distance * Math.sin(pitchRad);
-            const hz = distance * Math.cos(pitchRad) * Math.cos(yawRad);
+            // Get hotspot position (yaw/pitch) to rotate camera toward it
+            // Camera direction is theta = lon + 180, hotspot is at yaw + 180
+            // So we want lon = yaw for camera to face hotspot
+            const hotspotYaw = hotspot.yaw || 0;
+            const hotspotPitch = hotspot.pitch || 0;
 
-            let targetLon = Math.atan2(hx, hz) * 180 / Math.PI;
-            const targetLat = Math.atan2(hy, Math.sqrt(hx * hx + hz * hz)) * 180 / Math.PI;
-
-            // Limit rotation to avoid dizzying spins
-            const maxRotation = 30;
-            let lonDiff = targetLon - startLon;
-            while (lonDiff > 180) lonDiff -= 360;
-            while (lonDiff < -180) lonDiff += 360;
-
-            if (Math.abs(lonDiff) > maxRotation) {
-              lonDiff = lonDiff > 0 ? maxRotation : -maxRotation;
-            }
-            targetLon = startLon + lonDiff;
-
-            // Animation params
-            const moveDuration = 1500;
-            const startTime = Date.now();
             controls.isUserInteracting = true;
             isNavigatingRef.current = true;
 
-            // Determine final targets based on direction
-            let finalTargetLon = targetLon;
-            let finalTargetLat = targetLat;
-            let finalTargetFov = 20; // ZOOM IN effect
+            // Calculate shortest rotation path to hotspot
+            let deltaYaw = hotspotYaw - startLon;
+            while (deltaYaw > 180) deltaYaw -= 360;
+            while (deltaYaw < -180) deltaYaw += 360;
+            const deltaPitch = hotspotPitch - startLat;
 
-            const direction = hotspot.transition_direction || 'forward';
+            // Matterport-style navigation with two phases:
+            // Phase 1: Smooth rotation toward hotspot (if needed)
+            // Phase 2: Slow forward movement
+            const rotationDuration = Math.min(Math.abs(deltaYaw) * 6, 800); // Slower rotation
+            const moveDuration = 3000; // Slower, gentle forward movement
+            const startTime = Date.now();
 
-            if (direction === 'left') { finalTargetLon = startLon - 30; finalTargetFov = startFov; }
-            else if (direction === 'right') { finalTargetLon = startLon + 30; finalTargetFov = startFov; }
-            else if (direction === 'up') { finalTargetLat = startLat + 20; finalTargetFov = startFov; }
-            else if (direction === 'down') { finalTargetLat = startLat - 20; finalTargetFov = startFov; }
-            else if (direction === 'backward') { finalTargetLon = startLon + 180; finalTargetFov = 100; } // Zoom out for backward
+            // Easing functions
+            const easeOutQuart = (t: number) => 1 - Math.pow(1 - t, 4);
+            // Smooth constant speed with soft start/end
+            const easeInOutQuad = (t: number) => t < 0.5
+              ? 2 * t * t
+              : 1 - Math.pow(-2 * t + 2, 2) / 2;
 
             const animateToHotspot = () => {
               const elapsed = Date.now() - startTime;
-              const progress = Math.min(elapsed / moveDuration, 1);
-              const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
-              const easedProgress = easeInOutSine(progress);
+              const totalDuration = rotationDuration + moveDuration;
 
-              // Update View
-              controls.lon = startLon + (finalTargetLon - startLon) * easedProgress;
-              controls.lat = startLat + (finalTargetLat - startLat) * easedProgress;
+              // Phase 1: Rotation (first part of animation)
+              if (elapsed < rotationDuration) {
+                const rotProgress = Math.min(elapsed / rotationDuration, 1);
+                const easedRot = easeOutQuart(rotProgress);
 
-              if (cameraRef.current) {
-                cameraRef.current.fov = startFov + (finalTargetFov - startFov) * easedProgress;
-                cameraRef.current.updateProjectionMatrix();
-              }
+                // Smoothly rotate camera toward hotspot
+                controls.lon = startLon + deltaYaw * easedRot;
+                controls.lat = Math.max(-85, Math.min(85, startLat + deltaPitch * easedRot));
 
-              if (cubeRef.current && direction === 'forward') {
-                // Scale cube down to simulate moving closer
-                const targetScale = startScale * 0.6;
-                const scale = startScale + (targetScale - startScale) * easedProgress;
-                cubeRef.current.scale.set(scale, scale, scale);
-              }
-
-              setLoadingProgress(Math.floor(progress * 100));
-
-              if (progress < 1) {
                 requestAnimationFrame(animateToHotspot);
-              } else {
-                // Animation Done - Fire Event
-                if (onHotspotClick) onHotspotClick(hotspot);
+              }
+              // Phase 2: Gentle forward movement
+              else {
+                const moveElapsed = elapsed - rotationDuration;
+                const moveProgress = Math.min(moveElapsed / moveDuration, 1);
 
-                // Reset
-                isNavigatingRef.current = false;
-                if (cameraRef.current) {
-                  cameraRef.current.fov = 60;
+                // Smooth constant speed movement
+                const smoothProgress = easeInOutQuad(moveProgress);
+
+                // Keep camera pointed at hotspot
+                controls.lon = startLon + deltaYaw;
+                controls.lat = Math.max(-85, Math.min(85, startLat + deltaPitch));
+
+                if (cubeRef.current && cameraRef.current) {
+                  // Calculate direction toward hotspot for cube offset
+                  const theta = THREE.MathUtils.degToRad(hotspotYaw + 180);
+                  const dirX = Math.cos(theta);
+                  const dirZ = Math.sin(theta);
+
+                  // Move forward toward hotspot
+                  const moveDistance = 18 * smoothProgress;
+                  cubeRef.current.position.set(
+                    -dirX * moveDistance,
+                    0,
+                    -dirZ * moveDistance
+                  );
+
+                  // Scale down for forward motion feel
+                  const scaleTarget = 0.6;
+                  const scale = startScale + (scaleTarget - startScale) * smoothProgress;
+                  cubeRef.current.scale.set(scale, scale, scale);
+
+                  // FOV change based on current FOV - max 10, scales down if FOV is low
+                  const baseFovChange = 10;
+                  const fovChange = startFov < 60
+                    ? baseFovChange * (startFov / 60) // Scale down proportionally
+                    : baseFovChange;
+                  const fovTarget = startFov + fovChange;
+                  cameraRef.current.fov = startFov + (fovTarget - startFov) * smoothProgress;
                   cameraRef.current.updateProjectionMatrix();
                 }
-                if (cubeRef.current) cubeRef.current.scale.set(1, 1, 1);
-                controls.lon = 0;
-                controls.lat = 0;
-                controls.isUserInteracting = false;
-                setIsTransitioning(false);
+
+                if (moveProgress < 1) {
+                  requestAnimationFrame(animateToHotspot);
+                } else {
+                  // DON'T reset cube position here - keep forward position visible
+                  // The new scene's applyAllTextures will reset position and scale
+                  console.log('[CubeMapViewer] Animation complete, checking preload status');
+                  animationComplete = true;
+                  checkAndNavigate();
+                }
               }
             };
 
@@ -1335,24 +1549,20 @@ export default function CubeMapViewer({
       if (!cameraRef.current) return;
 
       const fov = cameraRef.current.fov + event.deltaY * 0.05;
-      cameraRef.current.fov = Math.max(10, Math.min(90, fov)); // Max 90 instead of 100
+      // Allow wider FOV at level 1 for better overview, min 10 for zoom in
+      const maxFov = currentLevel === 1 ? 120 : 100;
+      cameraRef.current.fov = Math.max(10, Math.min(maxFov, fov));
       cameraRef.current.updateProjectionMatrix();
 
       // Progressive loading based on zoom level - only upgrade, never downgrade quality
       if (manifest && manifest.levels.length > 0) {
-        let targetLevel = 0;
+        let targetLevel = 1; // Start at level 1 (level 0 is not generated)
 
-        // Determine target level based on FOV
-        if (cameraRef.current.fov <= 15) {
-          targetLevel = Math.min(4, manifest.levels.length - 1); // Extreme quality for maximum zoom
-        } else if (cameraRef.current.fov <= 25) {
-          targetLevel = Math.min(3, manifest.levels.length - 1); // Maximum quality
-        } else if (cameraRef.current.fov <= 40) {
-          targetLevel = Math.min(2, manifest.levels.length - 1); // High quality
-        } else if (cameraRef.current.fov <= 60) {
-          targetLevel = Math.min(1, manifest.levels.length - 1); // Medium quality
+        // Determine target level based on FOV (max level 2)
+        if (cameraRef.current.fov <= 40) {
+          targetLevel = 2; // High quality for zoom
         } else {
-          targetLevel = 0; // Base quality for wide view
+          targetLevel = 1; // Base quality for normal/wide view
         }
 
         // Only change level if we're upgrading quality or significantly zooming out
@@ -1384,7 +1594,7 @@ export default function CubeMapViewer({
       container.removeEventListener('pointerup', onPointerUp);
       container.removeEventListener('wheel', onWheel);
     };
-  }, [manifest, currentLevel, loadCubeMapLevel, isEditMode, hotspots, overlays, onHotspotClick, onHotspotCreate]);
+  }, [manifest, currentLevel, loadCubeMapLevel, isEditMode, hotspots, overlays, onHotspotClick, onHotspotCreate, preloadSceneTiles]);
 
   return (
     <div className="relative w-full h-full">
@@ -1446,11 +1656,7 @@ export default function CubeMapViewer({
         </div>
       </button> */}
 
-      {isLoading && !isNavigatingRef.current && !autoRotate && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-          <div className="text-white">Loading cube map...</div>
-        </div>
-      )}
+      {/* Loading indicator removed - current scene stays visible during transitions */}
 
       {!manifest && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
@@ -1475,7 +1681,7 @@ export default function CubeMapViewer({
         </div>
       )}
 
-      {isThreeInitialized && sceneRef.current && cameraRef.current && overlaysRef.current && (
+      {isThreeInitialized && !isLoading && sceneRef.current && cameraRef.current && overlaysRef.current && (
         <OverlayRenderer
           overlays={overlays}
           viewerWidth={viewerDimensions.width}

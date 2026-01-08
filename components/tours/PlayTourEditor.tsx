@@ -10,6 +10,8 @@ interface PlayTourEditorProps {
     currentYaw?: number;
     currentPitch?: number;
     currentFov?: number;
+    onPreviewScene?: (sceneId: string, yaw: number, pitch: number, fov: number) => void;
+    onPlaySceneAnimation?: (sceneId: string, startYaw: number, startPitch: number, startFov: number, endYaw: number, endPitch: number, endFov: number, duration: number, transitionDirection?: string) => void;
 }
 
 export default function PlayTourEditor({
@@ -17,7 +19,9 @@ export default function PlayTourEditor({
     scenes,
     currentYaw = 0,
     currentPitch = 0,
-    currentFov = 75
+    currentFov = 75,
+    onPreviewScene,
+    onPlaySceneAnimation
 }: PlayTourEditorProps) {
     const [playTours, setPlayTours] = useState<PlayTour[]>([]);
     const [selectedPlayTour, setSelectedPlayTour] = useState<PlayTour | null>(null);
@@ -302,11 +306,24 @@ export default function PlayTourEditor({
                                                     <span className="bg-purple-600 text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold">
                                                         {ps.sequence_order}
                                                     </span>
-                                                    <span className="text-xs font-bold text-gray-700 truncate max-w-[120px]">
+                                                    <span className="text-xs font-bold text-gray-700 truncate max-w-[100px]">
                                                         {scene?.name || 'Unknown Scene'}
                                                     </span>
                                                 </div>
-                                                <div className="flex gap-1">
+                                                <div className="flex gap-1 items-center">
+                                                    <button
+                                                        onClick={() => onPlaySceneAnimation?.(
+                                                            ps.scene_id,
+                                                            ps.start_yaw, ps.start_pitch, ps.start_fov,
+                                                            ps.end_yaw, ps.end_pitch, ps.end_fov,
+                                                            ps.move_duration,
+                                                            ps.transition_direction
+                                                        )}
+                                                        className="px-2 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-[10px] font-bold cursor-pointer flex items-center gap-1"
+                                                        title="Play camera animation with curve effect"
+                                                    >
+                                                        ▶ Play
+                                                    </button>
                                                     <button
                                                         onClick={() => handleUpdateSceneOrder(idx, 'up')}
                                                         disabled={idx === 0}
@@ -383,12 +400,21 @@ export default function PlayTourEditor({
                                                 <div className="space-y-2 pt-2 border-t border-gray-100">
                                                     <div className="flex justify-between items-center group/pos">
                                                         <span className="text-[10px] font-bold text-purple-700 uppercase">Start Position</span>
-                                                        <button
-                                                            onClick={() => handleCapturePosition(idx, 'start')}
-                                                            className="text-[10px] bg-purple-100 hover:bg-purple-200 text-purple-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
-                                                        >
-                                                            Capture Current
-                                                        </button>
+                                                        <div className="flex gap-1">
+                                                            <button
+                                                                onClick={() => onPreviewScene?.(ps.scene_id, ps.start_yaw, ps.start_pitch, ps.start_fov)}
+                                                                className="text-[10px] bg-green-100 hover:bg-green-200 text-green-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
+                                                                title="Preview start position"
+                                                            >
+                                                                ▶ View
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleCapturePosition(idx, 'start')}
+                                                                className="text-[10px] bg-purple-100 hover:bg-purple-200 text-purple-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
+                                                            >
+                                                                Capture
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                     <div className="grid grid-cols-3 gap-1 text-[10px] text-gray-600 bg-gray-50 p-2 rounded">
                                                         <div className="truncate">Y: {ps.start_yaw.toFixed(2)}</div>
@@ -400,12 +426,21 @@ export default function PlayTourEditor({
                                                 <div className="space-y-2">
                                                     <div className="flex justify-between items-center group/pos">
                                                         <span className="text-[10px] font-bold text-teal-700 uppercase">End Position</span>
-                                                        <button
-                                                            onClick={() => handleCapturePosition(idx, 'end')}
-                                                            className="text-[10px] bg-teal-100 hover:bg-teal-200 text-teal-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
-                                                        >
-                                                            Capture Current
-                                                        </button>
+                                                        <div className="flex gap-1">
+                                                            <button
+                                                                onClick={() => onPreviewScene?.(ps.scene_id, ps.end_yaw, ps.end_pitch, ps.end_fov)}
+                                                                className="text-[10px] bg-green-100 hover:bg-green-200 text-green-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
+                                                                title="Preview end position"
+                                                            >
+                                                                ▶ View
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleCapturePosition(idx, 'end')}
+                                                                className="text-[10px] bg-teal-100 hover:bg-teal-200 text-teal-700 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
+                                                            >
+                                                                Capture
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                     <div className="grid grid-cols-3 gap-1 text-[10px] text-gray-600 bg-gray-50 p-2 rounded">
                                                         <div className="truncate">Y: {ps.end_yaw.toFixed(2)}</div>
