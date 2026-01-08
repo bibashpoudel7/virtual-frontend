@@ -824,12 +824,23 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const handleCenterPlayClick = useCallback(() => {
     setShowControls(true);
     if (playTours.length > 0) {
+      setCurrentPlayTourSceneIndex(0);
       setIsPlayingTour(true);
       setHasPlayTourStarted(true);
+
+      // Force navigation to the first scene of the play tour
+      const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+      if (selectedTour && selectedTour.play_tour_scenes?.length > 0) {
+        const firstSceneId = selectedTour.play_tour_scenes[0].scene_id;
+        const sceneIndex = scenes.findIndex((s: Scene) => s.id === firstSceneId);
+        if (sceneIndex !== -1 && sceneIndex !== currentSceneIndex) {
+          handleSceneChange(sceneIndex);
+        }
+      }
     } else {
       setIsAutoplay(true);
     }
-  }, [playTours]);
+  }, [playTours, selectedPlayTourId, currentSceneIndex, scenes, handleSceneChange]);
 
   // Effect to log scene changes and hotspot/overlay data
   useEffect(() => {

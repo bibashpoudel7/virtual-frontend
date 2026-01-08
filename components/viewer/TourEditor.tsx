@@ -1,6 +1,6 @@
 'use client';
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Play, Pencil } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Pencil, Volume2, VolumeX, Maximize, Minimize, Settings, X, Share2 } from 'lucide-react';
 import CubeMapViewer from './CubeMapViewer';
 import OverlayEditor from '../overlays/OverlayEditor';
 import { Tour, Scene, Hotspot, Overlay, PlayTour } from '@/types/tour';
@@ -228,6 +228,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const [preloadedScenes, setPreloadedScenes] = useState<Set<string>>(new Set());
   const [showPauseOverlay, setShowPauseOverlay] = useState(false);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
+  const [hasStartedFullscreenPreview, setHasStartedFullscreenPreview] = useState(false);
 
   // Audio controls state
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -487,6 +488,32 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       setIsTransitioning(false);
     }, 1500);
   }, [currentSceneId, scenes, selectedPlayTourId, playTours]);
+
+  const handleCenterPlayClick = useCallback(() => {
+    setHasStartedFullscreenPreview(true);
+    if (playTours.length > 0) {
+      const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+      const isTourFinished = selectedTour && currentPlayTourSceneIndex >= (selectedTour.play_tour_scenes?.length || 0);
+
+      // Only reset to the beginning if the tour hasn't started yet or if it has already finished
+      if (!hasPlayTourStarted || isTourFinished) {
+        setCurrentPlayTourSceneIndex(0);
+        setHasPlayTourStarted(true);
+
+        // Force navigation to the first scene of the play tour
+        if (selectedTour && selectedTour.play_tour_scenes?.length > 0) {
+          const firstSceneId = selectedTour.play_tour_scenes[0].scene_id;
+          if (currentSceneId !== firstSceneId) {
+            handleSceneChange(firstSceneId);
+          }
+        }
+      }
+
+      setIsPlayingTour(true);
+    } else {
+      setIsAutoplay(true);
+    }
+  }, [playTours, selectedPlayTourId, currentSceneId, handleSceneChange, hasPlayTourStarted, currentPlayTourSceneIndex]);
 
   const handleOverlayPause = useCallback(() => {
     if (isPlayingTour) setIsPlayingTour(false);
@@ -983,12 +1010,18 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
     };
 
     if (isViewerFullscreen) {
+      // If the tour is already playing or auto-rotating, don't show the play button again
+      if (isPlayingTour || isAutoplay) {
+        setHasStartedFullscreenPreview(true);
+      }
       document.addEventListener('keydown', handleKeyDown);
       return () => {
         document.removeEventListener('keydown', handleKeyDown);
       };
+    } else {
+      setHasStartedFullscreenPreview(false);
     }
-  }, [isViewerFullscreen]);
+  }, [isViewerFullscreen, isPlayingTour, isAutoplay]);
 
   // Preload adjacent scenes for faster transitions
   useEffect(() => {
@@ -1415,8 +1448,8 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           isEditMode={isViewerFullscreen ? false : isEditMode}
           onHotspotCreate={handleHotspotCreate}
           onHotspotUpdate={updateHotspot}
-          hotspots={currentSceneHotspots}
-          overlays={currentSceneOverlays}
+          hotspots={isViewerFullscreen && !hasStartedFullscreenPreview ? [] : currentSceneHotspots}
+          overlays={isViewerFullscreen && !hasStartedFullscreenPreview ? [] : currentSceneOverlays}
           autoRotate={isAutoplay}
           highlightedHotspotId={editingHotspot}
           onOverlayPause={handleOverlayPause}
@@ -1449,69 +1482,62 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       {/* Fullscreen Mode UI Overlays */}
       {isViewerFullscreen ? (
         <div className="absolute inset-0 pointer-events-none">
-          {/* Top Right Controls */}
-          <div className="absolute top-4 right-4 z-60 pointer-events-auto">
-            <div className="bg-white rounded-lg shadow-lg p-2">
-              <div className="flex items-center gap-2">
-                {/* Audio Controls */}
-                {isClient && (
-                  <>
-                    <button
-                      onClick={toggleAudio}
-                      disabled={isAudioLoading}
-                      className={`p-2 rounded transition-colors flex items-center ${isAudioLoading
-                        ? 'bg-blue-100 text-blue-600 cursor-not-allowed'
-                        : isAudioPlaying
-                          ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
-                        }`}
-                      title={
-                        isAudioLoading
-                          ? 'Loading audio...'
-                          : isAudioPlaying
-                            ? 'Pause Background Audio'
-                            : 'Play Background Audio'
-                      }
-                    >
-                      {isAudioLoading ? '' : isAudioPlaying ? '⏸' : '🎵'}
-                      <span className="text-xs hidden sm:inline ml-1">
-                        {isAudioLoading ? 'Loading...' : 'Audio'}
-                      </span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setShowAudioSettings(true);
-                        setNewAudioUrl(tour.background_audio_url || '');
-                      }}
-                      disabled={isAudioLoading}
-                      className={`p-2 rounded transition-colors ${isAudioLoading
-                        ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer'
-                        }`}
-                      title="Audio Settings"
-                    >
-                      ⚙️
-                    </button>
-                  </>
-                )}
-
-                {/* Exit Fullscreen Toggle */}
-                <button
-                  onClick={toggleViewerFullscreen}
-                  className="p-2 hover:bg-gray-100 transition-colors rounded cursor-pointer flex items-center justify-center"
-                  title="Exit fullscreen (ESC)"
-                >
-                  <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+          {!hasStartedFullscreenPreview && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-auto z-70">
+              <button
+                onClick={handleCenterPlayClick}
+                className="bg-white/95 backdrop-blur-sm rounded-full p-6 hover:bg-white transition-all duration-300 shadow-2xl hover:scale-105 group cursor-pointer"
+              >
+                <Play className="w-12 h-12 text-gray-800 ml-1 group-hover:text-black transition-colors" />
+              </button>
             </div>
+          )}
+
+          {/* Top Right Controls */}
+          <div className={`absolute top-4 right-4 z-60 pointer-events-auto transition-opacity duration-300 flex gap-2 ${hasStartedFullscreenPreview ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+            {/* Audio Controls */}
+            {isClient && (
+              <button
+                onClick={toggleAudio}
+                disabled={isAudioLoading}
+                className={`backdrop-blur-sm text-white p-2 rounded-full transition-colors cursor-pointer ${isAudioLoading
+                  ? 'bg-blue-100 text-blue-600 cursor-not-allowed'
+                  : isAudioPlaying
+                    ? 'bg-green-600 hover:bg-green-700'
+                    : 'bg-black/50 hover:bg-black/70'
+                  }`}
+                title={
+                  isAudioLoading
+                    ? 'Loading audio...'
+                    : isAudioPlaying
+                      ? 'Mute Audio'
+                      : 'Play Audio'
+                }
+              >
+                {isAudioLoading ? (
+                  <div className="w-5 h-5 flex items-center justify-center">
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  </div>
+                ) : isAudioPlaying ? (
+                  <Volume2 className="w-5 h-5" />
+                ) : (
+                  <VolumeX className="w-5 h-5" />
+                )}
+              </button>
+            )}
+
+            {/* Exit Fullscreen Toggle */}
+            <button
+              onClick={toggleViewerFullscreen}
+              className="bg-black/50 backdrop-blur-sm text-white p-2 rounded-full hover:bg-black/70 transition-colors cursor-pointer"
+              title="Exit fullscreen (ESC)"
+            >
+              <Minimize className="w-5 h-5" />
+            </button>
           </div>
 
           {/* Bottom Left Controls */}
-          <div className="absolute bottom-6 left-6 z-30 pointer-events-auto">
+          <div className={`absolute bottom-6 left-6 z-30 pointer-events-auto transition-opacity duration-300 ${hasStartedFullscreenPreview ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
             <div className="flex items-center gap-4">
               {/* Navigation Controls */}
               {scenes.length > 1 && (
@@ -1562,25 +1588,27 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
             </div>
           </div>
 
-          <ProgressBar
-            scenes={playTourDisplayScenes || scenes}
-            currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
-            isAutoplay={isAutoplay || (!!selectedPlayTourId && isPlayingTour)}
-            segmentDuration={isPlayingTour && playTourDisplayScenes ? (playTourDisplayScenes[currentPlayTourSceneIndex]?.move_duration || 5000) : 12000}
-            isTransitioning={isTransitioning}
-            onSceneChange={(index) => {
-              if (selectedPlayTourId && playTourDisplayScenes) {
-                const targetStep = playTourDisplayScenes[index];
-                if (targetStep && targetStep.originalId) {
-                  handleSceneChange(targetStep.originalId);
-                  setCurrentPlayTourSceneIndex(index);
+          <div className={`transition-opacity duration-300 ${hasStartedFullscreenPreview ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+            <ProgressBar
+              scenes={playTourDisplayScenes || scenes}
+              currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
+              isAutoplay={isAutoplay || (!!selectedPlayTourId && isPlayingTour)}
+              segmentDuration={isPlayingTour && playTourDisplayScenes ? (playTourDisplayScenes[currentPlayTourSceneIndex]?.move_duration || 5000) : 12000}
+              isTransitioning={isTransitioning}
+              onSceneChange={(index) => {
+                if (selectedPlayTourId && playTourDisplayScenes) {
+                  const targetStep = playTourDisplayScenes[index];
+                  if (targetStep && targetStep.originalId) {
+                    handleSceneChange(targetStep.originalId);
+                    setCurrentPlayTourSceneIndex(index);
+                  }
+                } else {
+                  handleSceneChangeByIndex(index);
                 }
-              } else {
-                handleSceneChangeByIndex(index);
-              }
-            }}
-            isOverlayModalOpen={showOverlayDialog || showHotspotDialog || isInfoModalOpen}
-          />
+              }}
+              isOverlayModalOpen={showOverlayDialog || showHotspotDialog || isInfoModalOpen}
+            />
+          </div>
         </div>
       ) : (
         <>
