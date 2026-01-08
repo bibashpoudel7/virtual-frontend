@@ -350,11 +350,9 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         // Auto-select the first play tour if available
         if (tours && tours.length > 0) {
           setSelectedPlayTourId(tours[0].id);
-          // Auto-select the first scene of the play tour to ensure we start at the beginning
+          // Auto-select the first scene step of the play tour for the playback index, 
+          // but do NOT force a scene change in the viewer immediately.
           if (tours[0].play_tour_scenes && tours[0].play_tour_scenes.length > 0) {
-            // Note: Scenes are already sorted by the service
-            const firstScene = tours[0].play_tour_scenes[0];
-            setCurrentSceneId(firstScene.scene_id);
             setCurrentPlayTourSceneIndex(0);
           }
         }
@@ -2262,7 +2260,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
           {/* Hotspot creation dialog */}
           {showHotspotDialog && (
-            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
+            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]">
               <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
                 <h3 className="text-lg font-bold mb-4 text-gray-900">Create Hotspot</h3>
 
@@ -2518,7 +2516,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
           {/* Overlay Creation Dialog */}
           {showOverlayDialog && pendingOverlay && (
-            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
+            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]">
               <div className="bg-white rounded-lg max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto relative">
                 {/* Close Button - Top Right */}
                 <button
