@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+import Toast, { ToastType } from '../ui/Toast';
 import { Tour, Scene, PlayTour, PlayTourScene } from '@/types/tour';
 import { tourService } from '@/services/tourService';
 
@@ -36,6 +37,11 @@ export default function PlayTourEditor({
     const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
     const [draggedSceneIndex, setDraggedSceneIndex] = useState<number | null>(null);
     const [collapsedScenes, setCollapsedScenes] = useState<Set<string>>(new Set());
+
+    // Toast state
+    const [toastVisible, setToastVisible] = useState(false);
+    const [toastMessage, setToastMessage] = useState('');
+    const [toastType, setToastType] = useState<ToastType>('success');
 
     const toggleSceneCollapse = (sceneId: string) => {
         setCollapsedScenes(prev => {
@@ -179,7 +185,11 @@ export default function PlayTourEditor({
             setSaving(true);
             const updated = await tourService.updatePlayTour(selectedPlayTour.id, selectedPlayTour);
             setPlayTours(playTours.map(t => t.id === updated.id ? updated : t));
-            alert('Play Tour saved successfully');
+
+            // Show success toast instead of alert
+            setToastMessage('Play Tour saved successfully');
+            setToastType('success');
+            setToastVisible(true);
         } catch (err) {
             setError('Failed to save play tour');
         } finally {
@@ -535,6 +545,14 @@ export default function PlayTourEditor({
                     </div>
                 </div>
             )}
+
+            {/* Custom Toast Notification */}
+            <Toast
+                message={toastMessage}
+                type={toastType}
+                isVisible={toastVisible}
+                onClose={() => setToastVisible(false)}
+            />
         </div>
     );
 }
