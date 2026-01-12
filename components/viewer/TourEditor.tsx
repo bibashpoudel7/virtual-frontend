@@ -191,6 +191,40 @@ const ProgressBar = ({
   );
 };
 
+const calculateTransitionOffsets = (direction: string, progress: number) => {
+  // Use a smooth ease-out curve that doesn't return to zero
+  const curveProgress = 1 - Math.pow(1 - progress, 3); // Cubic ease-out
+  let yawOffset = 0;
+  let pitchOffset = 0;
+  let fovOffset = 0;
+
+  switch (direction) {
+    case 'up':
+      pitchOffset = 20 * curveProgress;   // Arc Up
+      fovOffset = -10 * curveProgress;    // Subtle Zoom In
+      break;
+    case 'down':
+      pitchOffset = -20 * curveProgress;  // Arc Down
+      fovOffset = 10 * curveProgress;     // Subtle Zoom Out
+      break;
+    case 'left':
+      yawOffset = -25 * curveProgress;    // Arc Left
+      break;
+    case 'right':
+      yawOffset = 25 * curveProgress;     // Arc Right
+      break;
+    case 'forward':
+      fovOffset = -25 * curveProgress;    // Significant Zoom In
+      break;
+    case 'backward':
+      fovOffset = 35 * curveProgress;     // Smooth zoom out (backward movement)
+      pitchOffset = -5 * curveProgress;   // Slight downward tilt for natural backward feel
+      break;
+  }
+
+  return { yawOffset, pitchOffset, fovOffset };
+};
+
 interface TourEditorProps {
   tour: Tour;
   scenes: Scene[];
@@ -412,30 +446,30 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         const progress = Math.min(elapsed / moveDuration, 1);
         const easedProgress = easeInOutCubic(progress);
 
-        // Calculate curve offset based on transition direction
+        // Transition Direction & Calculations
         const direction = pScene.transition_direction || 'forward';
-        let yawOffset = 0;
-        let pitchOffset = 0;
-        let fovOffset = 0;
 
-        if (direction !== 'forward') {
-          const curveProgress = Math.sin(progress * Math.PI);
-          if (direction === 'left') yawOffset = -30 * curveProgress;
-          else if (direction === 'right') yawOffset = 30 * curveProgress;
-          else if (direction === 'up') pitchOffset = 20 * curveProgress;
-          else if (direction === 'down') pitchOffset = -20 * curveProgress;
-          else if (direction === 'backward') {
-            fovOffset = 40 * curveProgress;
-            yawOffset = 180 * curveProgress;
-          }
-        }
+        // Calculate directional yaw difference
+        let startYawNorm = pScene.start_yaw % 360;
+        let endYawNorm = pScene.end_yaw % 360;
+        let yawDiff = endYawNorm - startYawNorm;
 
-        const currentYaw = pScene.start_yaw + (pScene.end_yaw - pScene.start_yaw) * easedProgress + yawOffset;
-        const currentPitch = pScene.start_pitch + (pScene.end_pitch - pScene.start_pitch) * easedProgress + pitchOffset;
+        // Standardize to -180 to 180 range
+        while (yawDiff > 180) yawDiff -= 360;
+        while (yawDiff < -180) yawDiff += 360;
+
+        // Force direction if specified
+        if (direction === 'left' && yawDiff > 0) yawDiff -= 360;
+        if (direction === 'right' && yawDiff < 0) yawDiff += 360;
+
+        // Use centralized offset calculation for enhanced intensities
+        const { yawOffset, pitchOffset, fovOffset } = calculateTransitionOffsets(direction, progress);
+
+        const currentYaw = startYawNorm + yawDiff * easedProgress + yawOffset;
+        const currentPitch = Math.max(-85, Math.min(85, pScene.start_pitch + (pScene.end_pitch - pScene.start_pitch) * easedProgress + pitchOffset));
         const currentFov = pScene.start_fov + (pScene.end_fov - pScene.start_fov) * easedProgress + fovOffset;
 
-        // Use state-based camera control to match public viewer behavior
-        // This ensures forcedCameraPosition prop is always accurate and prevents conflicts
+        // Use state-based camera control
         setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
 
         if (progress < 1) {
@@ -565,45 +599,28 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
         const easedProgress = easeInOutCubic(progress);
 
-        // Curve effect - camera arcs during movement (sine wave peaks at middle)
-        const curveAmount = Math.sin(progress * Math.PI);
+        // Calculate directional yaw difference
+        let startYawNorm = startYaw % 360;
+        let endYawNorm = endYaw % 360;
+        let yawDiff = endYawNorm - startYawNorm;
 
-        // Calculate curve offsets based on direction
-        let yawCurve = 0;
-        let pitchCurve = 0;
-        let fovCurve = 0;
+        // Standardize to -180 to 180 range
+        while (yawDiff > 180) yawDiff -= 360;
+        while (yawDiff < -180) yawDiff += 360;
 
-        switch (transitionDirection) {
-          case 'left':
-            yawCurve = -30 * curveAmount;
-            break;
-          case 'right':
-            yawCurve = 30 * curveAmount;
-            break;
-          case 'up':
-            pitchCurve = 20 * curveAmount;
-            break;
-          case 'down':
-            pitchCurve = -20 * curveAmount;
-            break;
-          case 'backward':
-            fovCurve = 40 * curveAmount;
-            yawCurve = 180 * curveAmount; // Also rotate 180 for backward
-            break;
-          default: // forward
-            // Small FOV change for forward feel
-            if (transitionDirection === 'forward') {
-              fovCurve = -5 * curveAmount;
-            }
-            break;
-        }
+        // Force direction if specified
+        if (transitionDirection === 'left' && yawDiff > 0) yawDiff -= 360;
+        if (transitionDirection === 'right' && yawDiff < 0) yawDiff += 360;
 
-        // Interpolate camera position with curve
-        const currentYaw = startYaw + (endYaw - startYaw) * easedProgress + yawCurve;
-        const currentPitch = Math.max(-85, Math.min(85, startPitch + (endPitch - startPitch) * easedProgress + pitchCurve));
-        const currentFov = startFov + (endFov - startFov) * easedProgress + fovCurve;
+        // Use centralized offset calculation for enhanced intensities
+        const { yawOffset, pitchOffset, fovOffset } = calculateTransitionOffsets(transitionDirection, progress);
 
-        // Use direct camera control (bypasses React state for smooth animation)
+        // Interpolate camera position
+        const currentYaw = startYawNorm + yawDiff * easedProgress + yawOffset;
+        const currentPitch = Math.max(-85, Math.min(85, startPitch + (endPitch - startPitch) * easedProgress + pitchOffset));
+        const currentFov = startFov + (endFov - startFov) * easedProgress + fovOffset;
+
+        // Use direct camera control
         if (cameraControlRef.current) {
           cameraControlRef.current.setCamera(currentYaw, currentPitch, currentFov);
         }
@@ -612,7 +629,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
           animationRef.current = requestAnimationFrame(animate);
         } else {
           animationRef.current = null;
-          // Ensure we land exactly on the end state
           if (cameraControlRef.current) {
             cameraControlRef.current.setCamera(endYaw, endPitch, endFov);
           }
@@ -1593,7 +1609,9 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               scenes={playTourDisplayScenes || scenes}
               currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
               isAutoplay={isAutoplay || (!!selectedPlayTourId && isPlayingTour)}
-              segmentDuration={isPlayingTour && playTourDisplayScenes ? (playTourDisplayScenes[currentPlayTourSceneIndex]?.move_duration || 5000) : 12000}
+              segmentDuration={isPlayingTour && playTourDisplayScenes ? 
+                ((playTourDisplayScenes[currentPlayTourSceneIndex]?.move_duration || 5000) + 
+                 (playTourDisplayScenes[currentPlayTourSceneIndex]?.wait_duration || 1000)) : 12000}
               isTransitioning={isTransitioning}
               onSceneChange={(index) => {
                 if (selectedPlayTourId && playTourDisplayScenes) {

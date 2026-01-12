@@ -9,6 +9,40 @@ import CubeMapViewer from '@/components/viewer/CubeMapViewer';
 import PlayTourOverlay from '@/components/tours/PlayTourOverlay';
 import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, X, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy } from 'lucide-react';
 
+const calculateTransitionOffsets = (direction: string, progress: number) => {
+  // Use a smooth ease-out curve that doesn't return to zero
+  const curveProgress = 1 - Math.pow(1 - progress, 3); // Cubic ease-out
+  let yawOffset = 0;
+  let pitchOffset = 0;
+  let fovOffset = 0;
+
+  switch (direction) {
+    case 'up':
+      pitchOffset = 20 * curveProgress;   // Arc Up
+      fovOffset = -10 * curveProgress;    // Subtle Zoom In
+      break;
+    case 'down':
+      pitchOffset = -20 * curveProgress;  // Arc Down
+      fovOffset = 10 * curveProgress;     // Subtle Zoom Out
+      break;
+    case 'left':
+      yawOffset = -25 * curveProgress;    // Arc Left
+      break;
+    case 'right':
+      yawOffset = 25 * curveProgress;     // Arc Right
+      break;
+    case 'forward':
+      fovOffset = -25 * curveProgress;    // Significant Zoom In
+      break;
+    case 'backward':
+      fovOffset = 35 * curveProgress;     // Smooth zoom out (backward movement)
+      pitchOffset = -5 * curveProgress;   // Slight downward tilt for natural backward feel
+      break;
+  }
+
+  return { yawOffset, pitchOffset, fovOffset };
+};
+
 // Share Modal Component
 const ShareModal = React.memo(({
   isOpen,
@@ -523,31 +557,25 @@ export default function PublicTourViewer() {
         // Calculate curve offset based on transition direction
         // This creates a smooth arc that peaks at 50% progress and returns to 0 at 100%
         const direction = pScene.transition_direction || 'forward';
-        let yawOffset = 0;
-        let pitchOffset = 0;
-        let fovOffset = 0;
 
-        if (direction !== 'forward') {
-          // Use sine wave for smooth curve: peaks at middle, returns to 0 at end
-          const curveProgress = Math.sin(progress * Math.PI);
+        // Use centralized offset calculation for enhanced intensities
+        const { yawOffset, pitchOffset, fovOffset } = calculateTransitionOffsets(direction, progress);
 
-          if (direction === 'left') {
-            yawOffset = -30 * curveProgress; // Arc 30° to the left
-          } else if (direction === 'right') {
-            yawOffset = 30 * curveProgress; // Arc 30° to the right
-          } else if (direction === 'up') {
-            pitchOffset = 20 * curveProgress; // Arc 20° upward
-          } else if (direction === 'down') {
-            pitchOffset = -20 * curveProgress; // Arc 20° downward
-          } else if (direction === 'backward') {
-            // Zoom out in the middle, then back in
-            fovOffset = 40 * curveProgress; // Increase FOV by up to 40°
-            yawOffset = 180 * curveProgress; // Also rotate 180° for backward effect
-          }
-        }
+        // Calculate directional yaw difference
+        let startYawNorm = pScene.start_yaw % 360;
+        let endYawNorm = pScene.end_yaw % 360;
+        let yawDiff = endYawNorm - startYawNorm;
 
-        const currentYaw = pScene.start_yaw + (pScene.end_yaw - pScene.start_yaw) * easedProgress + yawOffset;
-        const currentPitch = pScene.start_pitch + (pScene.end_pitch - pScene.start_pitch) * easedProgress + pitchOffset;
+        // Standardize to -180 to 180 range
+        while (yawDiff > 180) yawDiff -= 360;
+        while (yawDiff < -180) yawDiff += 360;
+
+        // Force direction if specified
+        if (direction === 'left' && yawDiff > 0) yawDiff -= 360;
+        if (direction === 'right' && yawDiff < 0) yawDiff += 360;
+
+        const currentYaw = startYawNorm + yawDiff * easedProgress + yawOffset;
+        const currentPitch = Math.max(-85, Math.min(85, pScene.start_pitch + (pScene.end_pitch - pScene.start_pitch) * easedProgress + pitchOffset));
         const currentFov = pScene.start_fov + (pScene.end_fov - pScene.start_fov) * easedProgress + fovOffset;
 
         setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
