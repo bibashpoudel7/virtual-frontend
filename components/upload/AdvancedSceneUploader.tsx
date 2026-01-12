@@ -3,9 +3,9 @@
 // frontend/components/upload/AdvancedSceneUploader.tsx
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { storageUploader } from '@/lib/storage-upload';
-import { 
-  Upload, X, CheckCircle, AlertCircle, Loader2, 
-  Image as ImageIcon, Grid3x3, CloudUpload, Save 
+import {
+  Upload, X, CheckCircle, AlertCircle, Loader2,
+  Image as ImageIcon, Grid3x3, CloudUpload, Save
 } from 'lucide-react';
 
 interface AdvancedSceneUploaderProps {
@@ -33,10 +33,10 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
   const [processedImage, setProcessedImage] = useState<Buffer | null>(null);
   const [tiles, setTiles] = useState<Map<string, Buffer>>(new Map());
   const [uploadedUrls, setUploadedUrls] = useState<Map<string, string>>(new Map());
-  
+
   // Persist state key for this scene
   const stateKey = `upload_state_${sceneId}`;
-  
+
   const [stages, setStages] = useState<ProcessingStage[]>(() => {
     const baseStages: ProcessingStage[] = [
       { id: 'select', name: 'Select Image', status: 'pending' },
@@ -45,22 +45,32 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       { id: 'upload', name: 'Upload to Storage', status: 'pending' },
       { id: 'save', name: 'Save to Database', status: 'pending' },
     ];
-    
+
     if (needsSceneCreation) {
       return [
         { id: 'scene', name: 'Create Scene', status: 'pending' },
         ...baseStages
       ];
     }
-    
+
     return baseStages;
   });
 
   const [currentStage, setCurrentStage] = useState<string>(needsSceneCreation ? 'scene' : 'select');
   const [uploadProgress, setUploadProgress] = useState<Map<string, number>>(new Map());
-  
+  const [totalFiles, setTotalFiles] = useState<number>(0);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
+  // Calculate overall progress
+  const overallProgress = (() => {
+    if (totalFiles === 0) return 0;
+    const progressValues = Array.from(uploadProgress.values());
+    const totalProgress = progressValues.reduce((acc, curr) => acc + curr, 0);
+    // Calculate progress as a percentage of the total number of files
+    return Math.round(totalProgress / totalFiles);
+  })();
+
   // Load persisted state on mount
   useEffect(() => {
     const savedState = localStorage.getItem(stateKey);
@@ -69,12 +79,12 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
         const state = JSON.parse(savedState);
         setCurrentStage(state.currentStage || 'select');
         setStages(state.stages || stages);
-        
+
         // Restore URLs if upload was completed
         if (state.uploadedUrls) {
           setUploadedUrls(new Map(Object.entries(state.uploadedUrls)));
         }
-        
+
         // Auto-continue if process was interrupted
         if (state.currentStage && state.currentStage !== 'select' && state.currentStage !== 'save') {
           console.log('Resuming upload from stage:', state.currentStage);
@@ -84,7 +94,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       }
     }
   }, [sceneId]);
-  
+
   // Save state to localStorage whenever it changes
   const saveState = useCallback(() => {
     const state = {
@@ -96,7 +106,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
     };
     localStorage.setItem(stateKey, JSON.stringify(state));
   }, [sceneId, currentStage, stages, uploadedUrls, stateKey]);
-  
+
   // Clear saved state when complete
   const clearSavedState = useCallback(() => {
     localStorage.removeItem(stateKey);
@@ -104,7 +114,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
 
   // Update stage status
   const updateStage = (stageId: string, status: ProcessingStage['status'], data?: any) => {
-    setStages(prev => prev.map(stage => 
+    setStages(prev => prev.map(stage =>
       stage.id === stageId ? { ...stage, status, data } : stage
     ));
   };
@@ -118,10 +128,10 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
     try {
       const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
       const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
-      
+
       const response = await fetch(`${backendUrl}tours/${tourId}/scenes`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         },
@@ -137,7 +147,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       });
 
       if (!response.ok) throw new Error('Failed to create scene');
-      
+
       const newScene = await response.json();
       setSceneId(newScene.id);
       updateStage('scene', 'complete', { sceneId: newScene.id });
@@ -158,7 +168,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
     setSelectedFile(file);
     updateStage('select', 'complete', { file });
     saveState();
-    
+
     // Create preview
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -167,7 +177,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       onPreviewReady?.(url);
     };
     reader.readAsDataURL(file);
-    
+
     setCurrentStage('process');
   }, []);
 
@@ -194,14 +204,14 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       }
 
       const result = await response.json();
-      
+
       // Convert base64 back to buffer
       const processed = Buffer.from(result.data, 'base64');
 
       setProcessedImage(processed);
-      updateStage('process', 'complete', { 
+      updateStage('process', 'complete', {
         size: result.size,
-        dimensions: result.dimensions 
+        dimensions: result.dimensions
       });
       setCurrentStage('tiles');
       saveState();
@@ -222,7 +232,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       // Create a file from the processed buffer
       const processedBlob = new Blob([new Uint8Array(processedImage)], { type: 'image/jpeg' });
       const processedFile = new File([processedBlob], 'processed.jpg', { type: 'image/jpeg' });
-      
+
       // Send to server for tile generation
       const formData = new FormData();
       formData.append('file', processedFile);
@@ -239,7 +249,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       }
 
       const result = await response.json();
-      
+
       // Convert base64 tiles back to buffers
       const tilesMap = new Map<string, Buffer>();
       for (const [key, base64] of Object.entries(result.tiles)) {
@@ -247,12 +257,12 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       }
 
       setTiles(tilesMap);
-      
+
       // Store the manifest if it's returned (for cube maps)
       if (result.manifest) {
         localStorage.setItem(`manifest_${sceneId}`, JSON.stringify(result.manifest));
       }
-      
+
       updateStage('tiles', 'complete', { count: result.count });
       setCurrentStage('upload');
       saveState();
@@ -272,7 +282,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
     try {
       // Prepare all files for batch upload
       const filesToUpload: Array<{ file: Buffer; key: string; contentType: string }> = [];
-      
+
       // Add main image
       const timestamp = Date.now();
       const mainKey = `scenes/${sceneId}/pano_${timestamp}.jpg`;
@@ -294,6 +304,9 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
         }
       }
 
+      setUploadProgress(new Map());
+      setTotalFiles(filesToUpload.length);
+
       // Upload all files in parallel using uploadMultiple
       const uploadedUrls = await storageUploader.uploadMultiple(
         filesToUpload,
@@ -311,7 +324,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       // Store URLs with correct keys
       const urls = new Map<string, string>();
       urls.set('main', uploadedUrls.get(mainKey) || '');
-      
+
       // Add tile URLs
       for (const [key, url] of uploadedUrls.entries()) {
         if (key.includes('/tiles/')) {
@@ -341,17 +354,17 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       // Get manifest from localStorage (stored by tile generation)
       let tilesManifest = null;
       const storedManifest = localStorage.getItem(`manifest_${sceneId}`);
-      
+
       if (storedManifest) {
         // Use the cube map manifest from the API
         tilesManifest = JSON.parse(storedManifest);
         console.log('Manifest from localStorage (before adding URLs):', JSON.stringify(tilesManifest, null, 2));
-        
+
         // Add URLs to the tiles in the manifest
         if (tilesManifest.type === 'cubemap') {
           // For cube maps, the tiles don't have URLs yet, we need to add them
-          const tilesWithUrls:any = [];
-          
+          const tilesWithUrls: any = [];
+
           Array.from(uploadedUrls.entries())
             .filter(([key]) => key !== 'main' && key !== 'preview.jpg')
             .forEach(([key, url]) => {
@@ -362,18 +375,18 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
                 const level = parseInt(match[2]);
                 const x = parseInt(match[3]);
                 const y = parseInt(match[4]);
-                
-                tilesWithUrls.push({ 
-                  face, 
-                  level, 
-                  x, 
-                  y, 
-                  key, 
-                  url 
+
+                tilesWithUrls.push({
+                  face,
+                  level,
+                  x,
+                  y,
+                  key,
+                  url
                 });
               }
             });
-          
+
           tilesManifest.tiles = tilesWithUrls;
           tilesManifest.preview = uploadedUrls.get('preview.jpg');
           console.log('Final manifest being saved to database:', JSON.stringify(tilesManifest, null, 2));
@@ -395,19 +408,19 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
           tiles: []
         };
       }
-      
+
       // Clean up localStorage
       localStorage.removeItem(`manifest_${sceneId}`);
 
       // Send URLs and manifest to backend for database storage
       const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
-      
+
       // Get auth token from localStorage or sessionStorage
       const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
-      
+
       const response = await fetch(`${backendUrl}scenes/${sceneId}/update-images`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         },
@@ -445,11 +458,11 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
     if (stage.status === 'processing') {
       return <Loader2 className="h-5 w-5 animate-spin" />;
     }
-    
+
     if (stage.status === 'complete') {
       return <CheckCircle className="h-5 w-5 text-green-500" />;
     }
-    
+
     if (stage.status === 'error') {
       return <AlertCircle className="h-5 w-5 text-red-500" />;
     }
@@ -521,7 +534,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
           );
       }
     }
-    
+
     return null;
   };
 
@@ -536,7 +549,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
             <X className="w-6 h-6 cursor-pointer" />
           </button>
         )}
-        
+
         <div className="mb-6 pr-10">
           <h2 className="text-2xl font-bold text-gray-900">Advanced 360° Image Upload</h2>
           <p className="text-gray-600 mt-2">Upload and process your 360° panoramic image</p>
@@ -568,9 +581,9 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
         {/* Preview */}
         {previewUrl && (
           <div className="mb-6">
-            <img 
-              src={previewUrl} 
-              alt="Preview" 
+            <img
+              src={previewUrl}
+              alt="Preview"
               className="w-full h-48 object-cover rounded-lg"
             />
             {selectedFile && (
@@ -584,15 +597,14 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
         {/* Processing Stages */}
         <div className="space-y-4">
           {stages.map((stage) => (
-            <div 
+            <div
               key={stage.id}
-              className={`p-4 border rounded-lg ${
-                stage.status === 'complete' ? 'border-green-500 bg-green-50' :
+              className={`p-4 border rounded-lg ${stage.status === 'complete' ? 'border-green-500 bg-green-50' :
                 stage.status === 'error' ? 'border-red-500 bg-red-50' :
-                stage.status === 'processing' ? 'border-blue-500 bg-blue-50' :
-                stage.status === 'skipped' ? 'border-gray-300 bg-gray-50' :
-                'border-gray-300'
-              }`}
+                  stage.status === 'processing' ? 'border-blue-500 bg-blue-50' :
+                    stage.status === 'skipped' ? 'border-gray-300 bg-gray-50' :
+                      'border-gray-300'
+                }`}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -602,7 +614,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
                   {stage.id === 'tiles' && <Grid3x3 className="h-5 w-5 text-gray-700" />}
                   {stage.id === 'upload' && <CloudUpload className="h-5 w-5 text-gray-700" />}
                   {stage.id === 'save' && <Save className="h-5 w-5 text-gray-700" />}
-                  
+
                   <div>
                     <h3 className="font-medium text-gray-900">{stage.name}</h3>
                     {stage.data && (
@@ -612,27 +624,47 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
                     )}
                   </div>
                 </div>
-                
+
                 {getStageAction(stage)}
               </div>
 
               {/* Upload Progress */}
               {stage.id === 'upload' && stage.status === 'processing' && (
-                <div className="mt-4 space-y-2">
-                  {Array.from(uploadProgress.entries()).map(([key, progress]) => (
-                    <div key={key}>
-                      <div className="flex justify-between text-sm text-gray-800">
-                        <span className="font-medium">{key}</span>
-                        <span className="font-medium">{progress}%</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div 
-                          className="bg-blue-600 h-2 rounded-full transition-all"
-                          style={{ width: `${progress}%` }}
-                        />
-                      </div>
+                <div className="mt-4 space-y-4">
+                  {/* Overall Progress */}
+                  <div className="p-3 bg-blue-100 rounded-lg border border-blue-200">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-bold text-blue-900">Overall Progress</span>
+                      <span className="text-sm font-bold text-blue-900">{overallProgress}%</span>
                     </div>
-                  ))}
+                    <div className="w-full bg-blue-200 rounded-full h-3">
+                      <div
+                        className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+                        style={{ width: `${overallProgress}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-blue-700 mt-2">
+                      Uploading {uploadProgress.size} files...
+                    </p>
+                  </div>
+
+                  {/* Individual Files Scrollable List */}
+                  <div className="max-h-60 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+                    {Array.from(uploadProgress.entries()).map(([key, progress]) => (
+                      <div key={key} className="bg-white p-2 rounded border border-gray-100 shadow-sm">
+                        <div className="flex justify-between text-xs text-gray-700 mb-1">
+                          <span className="font-medium truncate max-w-[200px]">{key}</span>
+                          <span className="font-medium">{progress}%</span>
+                        </div>
+                        <div className="w-full bg-gray-100 rounded-full h-1.5">
+                          <div
+                            className="bg-blue-500 h-1.5 rounded-full transition-all"
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
