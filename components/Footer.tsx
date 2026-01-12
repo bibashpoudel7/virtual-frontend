@@ -1,10 +1,28 @@
 import React from 'react';
-import { Facebook, Twitter, Instagram, Youtube, Mail, Phone, MapPin, ArrowRight } from 'lucide-react';
+import { Facebook, Twitter, Instagram, Youtube, Mail, Phone, MapPin, ArrowRight, type LucideIcon } from 'lucide-react';
 
-const Footer = () => {
+interface FooterLink {
+  name: string;
+  href: string;
+}
+
+interface FooterLinks {
+  company: FooterLink[];
+  services: FooterLink[];
+  support: FooterLink[];
+  resources: FooterLink[];
+}
+
+interface SocialLink {
+  name: string;
+  icon: LucideIcon;
+  href: string;
+}
+
+const Footer: React.FC = () => {
   const currentYear = new Date().getFullYear();
 
-  const footerLinks = {
+  const footerLinks: FooterLinks = {
     company: [
       { name: 'About Us', href: '/about' },
       { name: 'Careers', href: '/careers' },
@@ -32,7 +50,7 @@ const Footer = () => {
     ],
   };
 
-  const socialLinks = [
+  const socialLinks: SocialLink[] = [
     { name: 'Facebook', icon: Facebook, href: '#' },
     { name: 'Twitter', icon: Twitter, href: '#' },
     { name: 'Instagram', icon: Instagram, href: '#' },
@@ -46,7 +64,7 @@ const Footer = () => {
           <div className="lg:col-span-2">
             <h2 className="text-2xl font-bold text-white mb-4">VirtualTours</h2>
             <p className="text-gray-400 mb-4">
-              Experience the world from anywhere with our immersive virtual tours. 
+              Experience the world from anywhere with our immersive virtual tours.
               Explore destinations, events, and spaces like never before.
             </p>
             <div className="flex space-x-4 mb-6">

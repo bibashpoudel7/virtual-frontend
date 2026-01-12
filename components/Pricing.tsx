@@ -1,10 +1,33 @@
 import React, { useState } from 'react';
-import { Check, X, Star, TrendingUp, Users, Globe } from 'lucide-react';
+import { Check, X, Star, TrendingUp, Users, Globe, type LucideIcon } from 'lucide-react';
 
-const Pricing = () => {
-  const [billingPeriod, setBillingPeriod] = useState('monthly');
+interface PricingFeature {
+  name: string;
+  included: boolean;
+}
 
-  const plans = [
+interface PricingPlan {
+  name: string;
+  icon: LucideIcon;
+  description: string;
+  monthlyPrice: number;
+  yearlyPrice: number;
+  features: PricingFeature[];
+  buttonText: string;
+  buttonStyle: string;
+  popular: boolean;
+}
+
+interface TeamFeature {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+}
+
+const Pricing: React.FC = () => {
+  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'yearly'>('monthly');
+
+  const plans: PricingPlan[] = [
     {
       name: 'Starter',
       icon: Star,
@@ -22,7 +45,7 @@ const Pricing = () => {
         { name: 'Priority support', included: false },
       ],
       buttonText: 'Start Free Trial',
-      buttonStyle: 'bg-gray-800 hover:bg-gray-900',
+      buttonStyle: 'bg-gray-800 hover:bg-gray-900 cursor-pointer',
       popular: false,
     },
     {
@@ -42,7 +65,7 @@ const Pricing = () => {
         { name: 'Live chat support', included: false },
       ],
       buttonText: 'Start Free Trial',
-      buttonStyle: 'bg-indigo-600 hover:bg-indigo-700',
+      buttonStyle: 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer',
       popular: true,
     },
     {
@@ -62,12 +85,12 @@ const Pricing = () => {
         { name: 'Dedicated account manager', included: true },
       ],
       buttonText: 'Contact Sales',
-      buttonStyle: 'bg-gray-800 hover:bg-gray-900',
+      buttonStyle: 'bg-gray-800 hover:bg-gray-900 cursor-pointer',
       popular: false,
     },
   ];
 
-  const teamFeatures = [
+  const teamFeatures: TeamFeature[] = [
     {
       icon: Users,
       title: 'Team Collaboration',
@@ -85,11 +108,11 @@ const Pricing = () => {
     },
   ];
 
-  const currentPrice = (plan) => {
+  const currentPrice = (plan: PricingPlan) => {
     return billingPeriod === 'monthly' ? plan.monthlyPrice : plan.yearlyPrice;
   };
 
-  const savingsPercentage = (plan) => {
+  const savingsPercentage = (plan: PricingPlan) => {
     const yearlyCost = plan.yearlyPrice;
     const monthlyEquivalent = plan.monthlyPrice * 12;
     const savings = ((monthlyEquivalent - yearlyCost) / monthlyEquivalent) * 100;
@@ -110,21 +133,19 @@ const Pricing = () => {
           <div className="inline-flex items-center bg-white rounded-lg shadow-sm p-1">
             <button
               onClick={() => setBillingPeriod('monthly')}
-              className={`px-6 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
-                billingPeriod === 'monthly'
+              className={`px-6 py-2 rounded-md text-sm font-medium transition-all duration-200 cursor-pointer ${billingPeriod === 'monthly'
                   ? 'bg-indigo-600 text-white'
                   : 'text-gray-700 hover:text-gray-900'
-              }`}
+                }`}
             >
               Monthly
             </button>
             <button
               onClick={() => setBillingPeriod('yearly')}
-              className={`px-6 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
-                billingPeriod === 'yearly'
+              className={`px-6 py-2 rounded-md text-sm font-medium transition-all duration-200 cursor-pointer ${billingPeriod === 'yearly'
                   ? 'bg-indigo-600 text-white'
                   : 'text-gray-700 hover:text-gray-900'
-              }`}
+                }`}
             >
               Yearly
               <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
@@ -138,9 +159,8 @@ const Pricing = () => {
           {plans.map((plan) => (
             <div
               key={plan.name}
-              className={`relative bg-white rounded-2xl shadow-lg overflow-hidden transform transition-all duration-200 hover:scale-105 ${
-                plan.popular ? 'ring-2 ring-indigo-600' : ''
-              }`}
+              className={`relative bg-white rounded-2xl shadow-lg overflow-hidden transform transition-all duration-200 hover:scale-105 ${plan.popular ? 'ring-2 ring-indigo-600' : ''
+                }`}
             >
               {plan.popular && (
                 <div className="absolute top-0 right-0 bg-indigo-600 text-white px-3 py-1 text-sm font-medium rounded-bl-lg">
@@ -189,9 +209,8 @@ const Pricing = () => {
                           <X className="w-5 h-5 text-gray-300 mr-3 flex-shrink-0" />
                         )}
                         <span
-                          className={`text-sm ${
-                            feature.included ? 'text-gray-700' : 'text-gray-400'
-                          }`}
+                          className={`text-sm ${feature.included ? 'text-gray-700' : 'text-gray-400'
+                            }`}
                         >
                           {feature.name}
                         </span>

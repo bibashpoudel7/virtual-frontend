@@ -5,20 +5,46 @@ import Header from '../components/Header';
 import Footer from '../components/Footer';
 import Pricing from '../components/Pricing';
 import HomeTourViewer from '../components/HomeTourViewer';
-import { 
-  Play, 
-  Globe, 
-  Smartphone, 
-  Camera, 
-  Users, 
-  Shield, 
+import {
+  Play,
+  Globe,
+  Smartphone,
+  Camera,
+  Users,
+  Shield,
   ArrowRight,
   Star,
-  Zap
+  Zap,
+  type LucideIcon
 } from 'lucide-react';
 
-const HomePage = () => {
-  const features = [
+interface HomePageFeature {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+}
+
+interface Stat {
+  number: string;
+  label: string;
+}
+
+interface Testimonial {
+  name: string;
+  role: string;
+  content: string;
+  rating: number;
+  image: string;
+}
+
+interface UseCase {
+  title: string;
+  description: string;
+  icon: string;
+}
+
+const HomePage: React.FC = () => {
+  const features: HomePageFeature[] = [
     {
       icon: Camera,
       title: '360° Immersive Views',
@@ -51,14 +77,14 @@ const HomePage = () => {
     },
   ];
 
-  const stats = [
+  const stats: Stat[] = [
     { number: '10M+', label: 'Virtual Tours Taken' },
     { number: '150+', label: 'Countries Available' },
     { number: '98%', label: 'Customer Satisfaction' },
     { number: '24/7', label: 'Support Available' },
   ];
 
-  const testimonials = [
+  const testimonials: Testimonial[] = [
     {
       name: 'Sarah Johnson',
       role: 'Real Estate Agent',
@@ -82,7 +108,7 @@ const HomePage = () => {
     },
   ];
 
-  const useCases = [
+  const useCases: UseCase[] = [
     {
       title: 'Real Estate',
       description: 'Showcase properties to potential buyers anywhere in the world',
@@ -108,7 +134,7 @@ const HomePage = () => {
   return (
     <div className="min-h-screen bg-white">
       <Header />
-      
+
       <section className="relative bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 text-white">
         <div className="absolute inset-0 bg-black opacity-20"></div>
         <div className="relative container mx-auto px-4 sm:px-6 lg:px-8 py-24">
@@ -119,13 +145,13 @@ const HomePage = () => {
                 <span className="text-yellow-300"> Virtual Tours</span>
               </h1>
               <p className="text-xl mb-8 text-gray-100">
-                Experience immersive 360° tours from anywhere. Perfect for real estate, 
+                Experience immersive 360° tours from anywhere. Perfect for real estate,
                 tourism, education, and events. Start your journey today!
               </p>
               <div className="flex flex-col sm:flex-row gap-4 mb-8">
-                <button 
+                <button
                   onClick={() => window.location.href = '/showcase'}
-                  className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors duration-200 flex items-center justify-center gap-2"
+                  className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Play className="w-5 h-5" />
                   Browse Virtual Tours
@@ -149,7 +175,7 @@ const HomePage = () => {
                 <div>
                   <div className="flex text-yellow-300 mb-1">
                     {[...Array(5)].map((_, i) => (
-                      <Star key={i} className="w-4 h-4 fill-current" />
+                      <Star key={i} className="w-4 h-6 fill-current" />
                     ))}
                   </div>
                   <p className="text-sm text-gray-100">Trusted by 50,000+ users</p>
@@ -158,12 +184,6 @@ const HomePage = () => {
             </div>
             <div className="relative">
               <HomeTourViewer className="aspect-video shadow-2xl" />
-              {/* Only show outside badge when user is logged in */}
-              {/* {typeof window !== 'undefined' && (localStorage.getItem('accessToken') || localStorage.getItem('auth_token')) && (
-                <div className="absolute bottom-[-3rem] right-[-1.5rem] bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg font-bold shadow-lg">
-                  <span className="text-2xl">360°</span> Experience
-                </div>
-              )} */}
             </div>
           </div>
         </div>
@@ -195,7 +215,7 @@ const HomePage = () => {
           <div className="text-center mb-8">
             <button
               onClick={() => window.location.href = '/showcase'}
-              className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors duration-200 inline-flex items-center gap-2"
+              className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors duration-200 inline-flex items-center gap-2 cursor-pointer"
             >
               <Globe className="w-5 h-5" />
               View All Tours
@@ -215,7 +235,7 @@ const HomePage = () => {
                 <p className="text-gray-600 mb-4">Explore stunning real estate with immersive virtual tours</p>
                 <button
                   onClick={() => window.location.href = '/showcase'}
-                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1"
+                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1 cursor-pointer"
                 >
                   Explore <ArrowRight className="w-4 h-4" />
                 </button>
@@ -233,7 +253,7 @@ const HomePage = () => {
                 <p className="text-gray-600 mb-4">Visit amazing destinations from the comfort of your home</p>
                 <button
                   onClick={() => window.location.href = '/showcase'}
-                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1"
+                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1 cursor-pointer"
                 >
                   Discover <ArrowRight className="w-4 h-4" />
                 </button>
@@ -251,7 +271,7 @@ const HomePage = () => {
                 <p className="text-gray-600 mb-4">Preview venues for your special events and celebrations</p>
                 <button
                   onClick={() => window.location.href = '/showcase'}
-                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1"
+                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1 cursor-pointer"
                 >
                   Preview <ArrowRight className="w-4 h-4" />
                 </button>
@@ -363,9 +383,9 @@ const HomePage = () => {
             Join thousands of users creating amazing virtual experiences
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button 
+            <button
               onClick={() => window.location.href = '/showcase'}
-              className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors duration-200 flex items-center justify-center gap-2"
+              className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer"
             >
               Browse Virtual Tours
               <ArrowRight className="w-5 h-5" />
