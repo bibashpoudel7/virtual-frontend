@@ -38,7 +38,8 @@ const ProgressBar = ({
   isTransitioning,
   onSceneChange,
   isOverlayModalOpen = false,
-  segmentDuration = 12000
+  segmentDuration = 12000,
+  forcedProgress = 0
 }: {
   scenes: any[];
   currentSceneIndex: number;
@@ -47,12 +48,20 @@ const ProgressBar = ({
   onSceneChange: (index: number) => void;
   isOverlayModalOpen?: boolean;
   segmentDuration?: number;
+  forcedProgress?: number;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number | undefined>(undefined);
   const startTimeRef = useRef<number>(0);
-  const pausedProgressRef = useRef<number>(0);
+  const pausedProgressRef = useRef<number>(forcedProgress || 0);
   const lastSceneIndexRef = useRef<number>(currentSceneIndex);
+
+  // Sync with forced progress from parent
+  useEffect(() => {
+    if (forcedProgress > 0 && !isAutoplay) {
+      pausedProgressRef.current = forcedProgress;
+    }
+  }, [forcedProgress, isAutoplay]);
 
   useEffect(() => {
     if (lastSceneIndexRef.current !== currentSceneIndex) {
@@ -65,6 +74,9 @@ const ProgressBar = ({
     }
 
     if (isAutoplay && !isOverlayModalOpen) {
+      // If we have a forced progress (from parent resume), use it to calculate start time
+      // But only if we are just starting (current local progress matches forced)
+      // or if pausedProgressRef was set by the effect above
       startTimeRef.current = Date.now() - (pausedProgressRef.current * segmentDuration);
 
       const updateProgress = () => {
@@ -100,7 +112,7 @@ const ProgressBar = ({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen, segmentDuration]);
+  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen, segmentDuration, forcedProgress]);
 
   if (scenes.length <= 1) return null;
 
@@ -1626,6 +1638,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                 ((playTourDisplayScenes[currentPlayTourSceneIndex]?.move_duration || 5000) +
                   (playTourDisplayScenes[currentPlayTourSceneIndex]?.wait_duration || 1000)) : 12000}
               isTransitioning={isTransitioning}
+              forcedProgress={playTourProgressRef.current}
               onSceneChange={(index) => {
                 if (selectedPlayTourId && playTourDisplayScenes) {
                   const targetStep = playTourDisplayScenes[index];
