@@ -293,6 +293,8 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
   const [hasPlayTourStarted, setHasPlayTourStarted] = useState(false);
 
   const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const playTourProgressRef = useRef<number>(0);
+  const playTourLastSceneIndexRef = useRef<number>(0);
 
 
   const playTourDisplayScenes = useMemo(() => {
@@ -427,12 +429,19 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       setCurrentSceneIndex(sceneIndex);
     }
 
+    // Reset progress if scene changed
+    if (playTourLastSceneIndexRef.current !== currentPlayTourSceneIndex) {
+      playTourProgressRef.current = 0;
+      playTourLastSceneIndexRef.current = currentPlayTourSceneIndex;
+    }
+
     // Wait for scene to load, then animate camera
     timeoutId = setTimeout(() => {
       if (isCleanedUp) return;
 
-      const startTime = Date.now();
       const moveDuration = pScene.move_duration || 5000;
+      // Calculate start time based on saved progress to allow resuming
+      const startTime = Date.now() - (playTourProgressRef.current * moveDuration);
       const waitDuration = pScene.wait_duration || 1000;
 
       const easeInOutCubic = (t: number) => {
@@ -444,6 +453,10 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / moveDuration, 1);
+
+        // Save progress for resume functionality
+        playTourProgressRef.current = progress;
+
         const easedProgress = easeInOutCubic(progress);
 
         // Transition Direction & Calculations
@@ -1609,9 +1622,9 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               scenes={playTourDisplayScenes || scenes}
               currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
               isAutoplay={isAutoplay || (!!selectedPlayTourId && isPlayingTour)}
-              segmentDuration={isPlayingTour && playTourDisplayScenes ? 
-                ((playTourDisplayScenes[currentPlayTourSceneIndex]?.move_duration || 5000) + 
-                 (playTourDisplayScenes[currentPlayTourSceneIndex]?.wait_duration || 1000)) : 12000}
+              segmentDuration={isPlayingTour && playTourDisplayScenes ?
+                ((playTourDisplayScenes[currentPlayTourSceneIndex]?.move_duration || 5000) +
+                  (playTourDisplayScenes[currentPlayTourSceneIndex]?.wait_duration || 1000)) : 12000}
               isTransitioning={isTransitioning}
               onSceneChange={(index) => {
                 if (selectedPlayTourId && playTourDisplayScenes) {

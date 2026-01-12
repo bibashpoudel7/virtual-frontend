@@ -393,6 +393,8 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const autoplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const playTourProgressRef = useRef<number>(0);
+  const playTourLastSceneIndexRef = useRef<number>(0);
 
   // Fetch tours on component mount
   useEffect(() => {
@@ -614,12 +616,19 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       setCurrentSceneIndex(sceneIndex);
     }
 
+    // Reset progress if scene changed
+    if (playTourLastSceneIndexRef.current !== currentPlayTourSceneIndex) {
+      playTourProgressRef.current = 0;
+      playTourLastSceneIndexRef.current = currentPlayTourSceneIndex;
+    }
+
     // Wait for scene to load, then animate camera
     timeoutId = setTimeout(() => {
       if (isCleanedUp) return;
 
-      const startTime = Date.now();
       const moveDuration = pScene.move_duration || 5000;
+      // Calculate start time based on saved progress to allow resuming
+      const startTime = Date.now() - (playTourProgressRef.current * moveDuration);
       const waitDuration = pScene.wait_duration || 1000;
 
       const easeInOutCubic = (t: number) => {
@@ -631,6 +640,10 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
 
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / moveDuration, 1);
+
+        // Save progress for resume functionality
+        playTourProgressRef.current = progress;
+
         const easedProgress = easeInOutCubic(progress);
 
         // Calculate curve offset based on transition direction
