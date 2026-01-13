@@ -95,11 +95,16 @@ export default function CubeMapViewer({
 
   const isAutoRotatingRef = useRef(isAutoRotating);
   const autoRotateRef = useRef(autoRotate);
+  const isTransitioningRef = useRef(isTransitioning);
 
   // Sync refs with state/props
   useEffect(() => {
     isAutoRotatingRef.current = isAutoRotating;
   }, [isAutoRotating]);
+
+  useEffect(() => {
+    isTransitioningRef.current = isTransitioning;
+  }, [isTransitioning]);
 
   useEffect(() => {
     autoRotateRef.current = autoRotate;
@@ -564,8 +569,9 @@ export default function CubeMapViewer({
         cubeRef.current.scale.set(1, 1, 1);
       }
 
-      // Reset camera FOV to scene default after animation
-      if (cameraRef.current) {
+      // Reset camera FOV to scene default ONLY if transitioning to new scene
+      // This prevents "zooming out" when just loading higher res tiles during zoom
+      if (cameraRef.current && isTransitioningRef.current) {
         const targetFov = currentScene.fov || 60;
         cameraRef.current.fov = targetFov;
         cameraRef.current.updateProjectionMatrix();
@@ -1581,8 +1587,15 @@ export default function CubeMapViewer({
       if (manifest && manifest.levels.length > 0) {
         let targetLevel = 1; // Start at level 1 (level 0 is not generated)
 
-        // Determine target level based on FOV (max level 2)
-        if (cameraRef.current.fov <= 40) {
+        // Determine target level based on FOV (support up to Level 3)
+        // Level 3 (4096px) for extreme zoom
+        // Level 2 (2048px) for high zoom
+        // Level 1 (1024px) for wide view
+        if (cameraRef.current.fov <= 20) {
+          // Only use level 3 if it exists in manifest
+          const hasLevel3 = manifest.levels.some(l => l.level === 3);
+          targetLevel = hasLevel3 ? 3 : 2;
+        } else if (cameraRef.current.fov <= 40) {
           targetLevel = 2; // High quality for zoom
         } else {
           targetLevel = 1; // Base quality for normal/wide view
@@ -1591,17 +1604,12 @@ export default function CubeMapViewer({
         // Only change level if we're upgrading quality or significantly zooming out
         if (targetLevel > currentLevel) {
           // Upgrade quality
-
           loadCubeMapLevel(targetLevel);
           setCurrentLevel(targetLevel);
         } else if (targetLevel < currentLevel && cameraRef.current.fov > 75) {
           // Only downgrade when significantly zoomed out to save memory
-
           loadCubeMapLevel(targetLevel);
           setCurrentLevel(targetLevel);
-        } else if (targetLevel === currentLevel) {
-          // Already at correct level
-
         }
       }
     };
