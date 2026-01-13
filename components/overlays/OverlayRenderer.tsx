@@ -758,58 +758,150 @@ export default function OverlayRenderer({
       }
     }
 
-    // Calculate tooltip position relative to icon with proper spacing for each type
-    let tooltipLeft = iconScreenPosition.x - tooltipWidth / 2;
-    // Base anchor point is ABOVE the icon
-    let tooltipAnchorY = iconScreenPosition.y - arrowSize - 10;
-    let arrowDirection = 'down';
+    // Estimate total tooltip height and width
+    // Content height (video/image)
+    const contentHeight = payload.height ? parseInt(payload.height, 10) : (hoveredOverlay.kind === 'text' ? 100 : 200);
+    const chromeBufferHeight = hoveredOverlay.kind === 'text' ? 120 : 300;
+    const estimatedHeight = contentHeight + chromeBufferHeight;
+    const estimatedWidth = tooltipWidth;
 
-    const estimatedHeight = payload.height ? parseInt(payload.height) : (hoveredOverlay.kind === 'text' ? 150 : 350);
-    const spaceAbove = tooltipAnchorY;
+    // Get viewport dimensions
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
 
-    let isFlipped = false;
-
-    // Vertical adjustments - Flip if not enough space above
-    if (spaceAbove < estimatedHeight + 20) {
-      // Show below icon
-      tooltipAnchorY = iconScreenPosition.y + arrowSize + 10;
-      isFlipped = true;
-      arrowDirection = 'up';
-    } else {
-      arrowDirection = 'down';
-    }
-
-    // Horizontal adjustments
+    // Define spacing constants
+    const gap = 40;
     const screenPadding = 20;
-    if (tooltipLeft < screenPadding) {
-      tooltipLeft = screenPadding;
-    } else if (tooltipLeft + tooltipWidth > window.innerWidth - screenPadding) {
-      tooltipLeft = window.innerWidth - tooltipWidth - screenPadding;
+
+    // Calculate available space in all 4 directions
+    const spaceTop = iconScreenPosition.y - estimatedHeight - gap - screenPadding;
+    const spaceBottom = viewportHeight - (iconScreenPosition.y + estimatedHeight + gap + screenPadding);
+    const spaceLeft = iconScreenPosition.x - estimatedWidth - gap - screenPadding;
+    const spaceRight = viewportWidth - (iconScreenPosition.x + estimatedWidth + gap + screenPadding);
+
+    // Determine best position
+    let bestPosition: 'top' | 'bottom' | 'left' | 'right' = 'top';
+
+    // Priority: Top -> Bottom -> Right -> Left
+    if (spaceTop > 0) {
+      bestPosition = 'top';
+    } else if (spaceBottom > 0) {
+      bestPosition = 'bottom';
+    } else if (spaceRight > 0) {
+      bestPosition = 'right';
+    } else if (spaceLeft > 0) {
+      bestPosition = 'left';
+    } else {
+      // If none fit perfectly, pick the one with maximum space
+      const spaces = [
+        { pos: 'top', space: spaceTop },
+        { pos: 'bottom', space: spaceBottom },
+        { pos: 'right', space: spaceRight },
+        { pos: 'left', space: spaceLeft }
+      ];
+      spaces.sort((a, b) => b.space - a.space); // Sort descending
+      bestPosition = spaces[0].pos as any;
     }
 
-    // Calculate arrow position relative to icon position
-    const arrowLeft = Math.max(
-      arrowSize,
-      Math.min(
-        tooltipWidth - arrowSize,
-        iconScreenPosition.x - tooltipLeft
-      )
-    );
+    // Calculate coordinates based on best position
+    let finalLeft = 0;
+    let finalTop = 0;
+    let arrowStyle = {};
+
+    switch (bestPosition) {
+      case 'top':
+        finalLeft = iconScreenPosition.x - estimatedWidth / 2;
+        finalTop = iconScreenPosition.y - gap;
+        arrowStyle = {
+          bottom: '-6px',
+          left: '50%',
+          transform: 'translateX(-50%) rotate(45deg)'
+        };
+        break;
+      case 'bottom':
+        finalLeft = iconScreenPosition.x - estimatedWidth / 2;
+        finalTop = iconScreenPosition.y + gap;
+        arrowStyle = {
+          top: '-6px',
+          left: '50%',
+          transform: 'translateX(-50%) rotate(45deg)'
+        };
+        break;
+      case 'left':
+        finalLeft = iconScreenPosition.x - estimatedWidth - gap;
+        finalTop = iconScreenPosition.y - estimatedHeight / 2;
+        arrowStyle = {
+          right: '-6px',
+          top: '50%',
+          transform: 'translateY(-50%) rotate(45deg)'
+        };
+        break;
+      case 'right':
+        finalLeft = iconScreenPosition.x + gap;
+        finalTop = iconScreenPosition.y - estimatedHeight / 2;
+        arrowStyle = {
+          left: '-6px',
+          top: '50%',
+          transform: 'translateY(-50%) rotate(45deg)'
+        };
+        break;
+    }
+
+    // Horizontal clamping for Top/Bottom positions
+    if (bestPosition === 'top' || bestPosition === 'bottom') {
+      if (finalLeft < screenPadding) finalLeft = screenPadding;
+      if (finalLeft + estimatedWidth > viewportWidth - screenPadding) {
+        finalLeft = viewportWidth - estimatedWidth - screenPadding;
+      }
+    }
+    // Vertical clamping for Left/Right positions
+    if (bestPosition === 'left' || bestPosition === 'right') {
+      if (finalTop < screenPadding) finalTop = screenPadding;
+      if (finalTop + estimatedHeight > viewportHeight - screenPadding) {
+        finalTop = viewportHeight - estimatedHeight - screenPadding;
+      }
+    }
+
+    // Calculate Arrow Position relative to tooltip box (for clamped situations)
+    // This allows the arrow to stay pointing at the icon even if the box shifted
+    if (bestPosition === 'top' || bestPosition === 'bottom') {
+      let arrowLeftPos = iconScreenPosition.x - finalLeft;
+      // Clamp arrow to be within the box (with rounded corner buffer)
+      arrowLeftPos = Math.max(12, Math.min(estimatedWidth - 12, arrowLeftPos));
+      arrowStyle = { ...arrowStyle, left: `${arrowLeftPos}px`, transform: 'translateX(-50%) rotate(45deg)' };
+    } else {
+      let arrowTopPos = iconScreenPosition.y - finalTop;
+      arrowTopPos = Math.max(12, Math.min(estimatedHeight - 12, arrowTopPos));
+      arrowStyle = { ...arrowStyle, top: `${arrowTopPos}px`, transform: 'translateY(-50%) rotate(45deg)' };
+    }
+
 
     return (
       <div
         className="fixed pointer-events-auto z-[400] overlay-tooltip"
         style={{
-          left: tooltipLeft,
-          top: tooltipAnchorY,
-          width: tooltipWidth,
+          left: finalLeft,
+          top: finalTop,
+          width: estimatedWidth,
           maxWidth: '90vw',
-          transform: isFlipped ? 'none' : 'translateY(-100%)'
+          transform: bestPosition === 'top' ? 'translateY(-100%)' :
+            bestPosition === 'left' ? 'translateY(0)' : // Left/Right centered vertically by logic above
+              'none' // Bottom and Right use default
         }}
         onMouseEnter={handleModalHover}
         onMouseLeave={handleModalHoverEnd}
         data-sidebar="true"
       >
+        {/* Arrow pointing to the icon - Outside overflow container to prevent clipping */}
+        <div
+          className="absolute w-3 h-3 border-l border-t z-50"
+          style={{
+            backgroundColor: '#0a0a0a',
+            borderColor: '#1f1f1f',
+            ...arrowStyle
+          }}
+        />
+
         <div
           className="text-white rounded-lg shadow-2xl relative border overflow-y-auto overflow-x-hidden"
           style={{
@@ -819,18 +911,6 @@ export default function OverlayRenderer({
             maxHeight: '600px'
           }}
         >
-          {/* Arrow pointing to the icon */}
-          <div
-            className="absolute w-3 h-3 transform rotate-45 border-l border-t"
-            style={{
-              backgroundColor: '#0a0a0a',
-              borderColor: '#1f1f1f',
-              [arrowDirection === 'up' ? 'top' : 'bottom']: '-6px',
-              left: `${arrowLeft}px`,
-              transform: 'translateX(-50%) rotate(45deg)'
-            }}
-          />
-
           {/* Header with icon and title - like reference screenshot */}
           <div className="flex items-center gap-3 px-4 py-3">
             {/* Enhanced icon based on overlay type */}
@@ -898,10 +978,25 @@ export default function OverlayRenderer({
                     <img
                       src={payload.imageUrl}
                       alt={payload.alt || 'Overlay image'}
-                      className="object-cover rounded w-full"
+                      className={`object-cover rounded w-full ${payload.clickable ? 'cursor-pointer hover:opacity-95 transition-opacity' : ''}`}
                       style={{
                         height: payload.height ? `${payload.height}px` : 'auto',
                         maxHeight: payload.height ? 'none' : '180px' // Remove cap if custom height
+                      }}
+                      onClick={(e) => {
+                        if (payload.clickable) {
+                          e.stopPropagation(); // Prevent opening the expanded modal if clicking the link
+                          const url = payload.clickUrl || payload.imageUrl;
+                          if (url) {
+                            const formatUrl = (url: string) => {
+                              if (!url) return '';
+                              if (url.startsWith('http://') || url.startsWith('https://')) return url;
+                              return `https://${url}`;
+                            };
+                            const formattedUrl = formatUrl(url);
+                            window.open(formattedUrl, '_blank', 'noopener,noreferrer');
+                          }
+                        }
                       }}
                       onError={(e) => {
                         e.currentTarget.src = '/placeholder-image.jpg';
@@ -910,7 +1005,7 @@ export default function OverlayRenderer({
                   </div>
                 )}
                 {payload.description && (
-                  <p className="text-gray-300 text-sm leading-relaxed mb-2">
+                  <p className="text-gray-300 text-sm leading-relaxed mb-2 whitespace-pre-wrap max-h-[120px] overflow-y-auto pr-2">
                     {payload.description}
                   </p>
                 )}
@@ -980,7 +1075,7 @@ export default function OverlayRenderer({
 
                 {/* Video Description */}
                 {payload.description && (
-                  <p className="text-gray-300 text-sm leading-relaxed mb-2">
+                  <p className="text-gray-300 text-sm leading-relaxed mb-2 whitespace-pre-wrap max-h-[120px] overflow-y-auto pr-2">
                     {payload.description}
                   </p>
                 )}
@@ -1029,54 +1124,7 @@ export default function OverlayRenderer({
           </div>
         </div>
 
-        {/* Enhanced Arrow pointing to overlay icon */}
-        {arrowDirection === 'down' ? (
-          <div
-            className="absolute top-full"
-            style={{
-              left: `${arrowLeft}px`,
-              transform: 'translateX(-50%)'
-            }}
-          >
-            <div
-              style={{
-                width: 0,
-                height: 0,
-                borderLeftWidth: `${arrowSize}px`,
-                borderRightWidth: `${arrowSize}px`,
-                borderTopWidth: `${arrowSize}px`,
-                borderStyle: 'solid',
-                borderLeftColor: 'transparent',
-                borderRightColor: 'transparent',
-                borderTopColor: '#0a0a0a', // Match tooltip background
-                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'
-              }}
-            ></div>
-          </div>
-        ) : (
-          <div
-            className="absolute bottom-full"
-            style={{
-              left: `${arrowLeft}px`,
-              transform: 'translateX(-50%)'
-            }}
-          >
-            <div
-              style={{
-                width: 0,
-                height: 0,
-                borderLeftWidth: `${arrowSize}px`,
-                borderRightWidth: `${arrowSize}px`,
-                borderBottomWidth: `${arrowSize}px`,
-                borderStyle: 'solid',
-                borderLeftColor: 'transparent',
-                borderRightColor: 'transparent',
-                borderBottomColor: '#0a0a0a',
-                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'
-              }}
-            ></div>
-          </div>
-        )}
+
       </div>
     );
   };
@@ -1117,7 +1165,7 @@ export default function OverlayRenderer({
         <>
           {/* Right Sidebar - positioned absolutely, doesn't interfere with canvas */}
           <div
-            className="fixed top-0 right-0 w-96 h-full bg-white shadow-2xl overflow-y-auto z-[500] pointer-events-auto"
+            className="fixed top-0 right-0 w-96 h-full bg-white shadow-2xl overflow-hidden z-[500] pointer-events-auto"
             data-sidebar="true"
           >
             {/* Close button - top right with dark color */}
@@ -1148,7 +1196,7 @@ export default function OverlayRenderer({
         <>
           {/* Floating overlay panel - positioned fixed to viewport, not blocking main content */}
           <div
-            className="fixed bottom-4 right-4 w-96 max-w-[calc(100vw-2rem)] bg-white shadow-2xl border border-gray-200 rounded-lg z-[500] pointer-events-auto max-h-[70vh] overflow-y-auto"
+            className="fixed bottom-8 right-4 w-96 max-w-[calc(100vw-2rem)] bg-white shadow-2xl border border-gray-200 rounded-lg z-[500] pointer-events-auto max-h-[80vh] overflow-y-auto"
             data-sidebar="true"
           >
             {/* Close button - top right */}
@@ -1194,7 +1242,22 @@ export default function OverlayRenderer({
             <img
               src={payload.imageUrl}
               alt={payload.alt || 'Overlay image'}
-              className="w-full h-48 object-cover rounded-lg"
+              className={`w-full h-48 object-cover rounded-lg ${payload.clickable ? 'cursor-pointer hover:opacity-95 transition-opacity' : ''}`}
+              onClick={() => {
+                if (payload.clickable) {
+                  const url = payload.clickUrl || payload.imageUrl;
+                  if (url) {
+                    // Start absolute URLs with https/http
+                    const formatUrl = (url: string) => {
+                      if (!url) return '';
+                      if (url.startsWith('http://') || url.startsWith('https://')) return url;
+                      return `https://${url}`;
+                    };
+                    const formattedUrl = formatUrl(url);
+                    window.open(formattedUrl, '_blank', 'noopener,noreferrer');
+                  }
+                }
+              }}
               onError={(e) => {
                 e.currentTarget.src = '/placeholder-image.jpg';
               }}
@@ -1306,8 +1369,8 @@ export default function OverlayRenderer({
 
         {/* Description - NOW directly below title */}
         {payload.description && (
-          <div className="mb-6">
-            <p className="text-gray-700 leading-relaxed text-lg font-medium">
+          <div className="mb-6 max-h-[200px] overflow-y-auto pr-2">
+            <p className="text-gray-700 leading-relaxed text-lg font-medium whitespace-pre-wrap">
               {payload.description}
             </p>
           </div>
