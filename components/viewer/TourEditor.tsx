@@ -1658,7 +1658,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
         <>
           {/* Sidebar Toggle Button - Only show when sidebar is closed */}
           {!sidebarOpen && (
-            <div className="absolute left-2 top-2 z-40">
+            <div className="absolute left-2 top-2 z-40 flex items-center gap-2">
               <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
                 className="bg-white rounded-lg shadow-lg p-3 hover:bg-gray-50 transition-colors cursor-pointer"
@@ -1676,6 +1676,23 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               </button>
             </div>
           )}
+
+          {/* Play Tours Button - Always visible, slides with sidebar */}
+          <div className={`absolute top-2 z-40 transition-all duration-300 ${sidebarOpen ? 'left-80 ml-4' : 'left-16 ml-2'
+            }`}>
+            <button
+              onClick={() => {
+                setEditPanel('playTours');
+                // Ensure plain edit mode is off so the bottom panel doesn't pop up
+                setIsEditMode(false);
+              }}
+              className="flex items-center gap-2 bg-white rounded-lg shadow-lg px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer"
+              title="Manage Play Tours"
+            >
+              <span className="text-xl">🎬</span>
+              <span className="font-semibold text-gray-800">Play Tours</span>
+            </button>
+          </div>
 
           {/* Left Sidebar - Scene Navigation */}
           <div className={`absolute left-0 top-0 bottom-0 z-50 transition-all duration-300 ease-in-out ${sidebarOpen ? 'w-80 opacity-100' : 'w-0 opacity-0 pointer-events-none'
@@ -1825,7 +1842,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
 
             {/* Full Editor Panel (when open) */}
             <div
-              className={`bg-white rounded-lg shadow-xl p-4 transition-all duration-300 transform origin-bottom ${isEditMode
+              className={`bg-white rounded-lg shadow-xl p-4 transition-all duration-300 transform origin-bottom ${isEditMode && editPanel !== 'playTours'
                 ? 'opacity-100 translate-y-0 scale-100'
                 : 'opacity-0 translate-y-8 scale-95 pointer-events-none absolute bottom-0 left-0'
                 }`}
@@ -1862,15 +1879,6 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                     }`}
                 >
                   ✨ Overlays
-                </button>
-                <button
-                  onClick={() => setEditPanel('playTours')}
-                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border-2 ${editPanel === 'playTours'
-                    ? 'bg-purple-600 text-white border-purple-600 shadow-md'
-                    : 'bg-white text-gray-700 border-gray-200 hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700'
-                    }`}
-                >
-                  🎬 Play Tours
                 </button>
               </div>
 
@@ -2625,7 +2633,7 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
             </div>
           )}
           {/* Play Tours Editor - Rendered outside of bottom controls for proper positioning */}
-          {isEditMode && editPanel === 'playTours' && (
+          {editPanel === 'playTours' && (
             <div className="fixed top-0 left-0 bottom-0 z-50 animate-in slide-in-from-left duration-300">
               <div className="flex bg-white h-full relative shadow-2xl">
                 <div className="w-[400px] h-full overflow-y-auto bg-white border-r border-gray-200">
@@ -2637,7 +2645,10 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                     currentFov={currentCamera.fov}
                     onPreviewScene={handlePreviewScene}
                     onPlaySceneAnimation={handlePlaySceneAnimation}
-                    onClose={() => setEditPanel('hotspots')}
+                    onClose={() => {
+                      setEditPanel('hotspots');
+                      setIsEditMode(false);
+                    }}
                   />
                 </div>
               </div>
