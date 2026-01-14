@@ -10,11 +10,12 @@ export interface Tour extends BaseModel {
   name: string;
   user_id?: string;
   property_id?: string;
-  property_name?: string; // Added property name
+  property_name?: string;
   autoplay_json?: string;
   background_audio_url?: string;
   is_published: boolean;
-  autoplay_enabled?: boolean;
+  is_featured_on_homepage: boolean;
+  autoplay_enabled: boolean;
   is_paid?: boolean;
   source?: string;
   default_fov: number;

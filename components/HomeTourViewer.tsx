@@ -414,12 +414,14 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         const toursData = await tourService.listTours();
 
         if (toursData && toursData.length > 0) {
-          // Select the first tour
-          const firstTour = toursData[0];
-          setCurrentTour(firstTour);
+          // Select the featured tour, or fall back to the first one
+          const featuredTour = toursData.find(t => t.is_featured_on_homepage);
+          const activeTour = featuredTour || toursData[0];
 
-          // Fetch scenes for the first tour
-          const scenesData = await tourService.getScenes(firstTour.id);
+          setCurrentTour(activeTour);
+
+          // Fetch scenes for the active tour
+          const scenesData = await tourService.getScenes(activeTour.id);
           setScenes(scenesData || []);
 
           // Fetch hotspots and overlays for all scenes
@@ -447,7 +449,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
             const [hotspotsArrays, overlaysArrays, playToursData] = await Promise.all([
               Promise.all(allHotspotsPromises),
               Promise.all(allOverlaysPromises),
-              tourService.listPlayTours(firstTour.id)
+              tourService.listPlayTours(activeTour.id)
             ]);
 
             // Sort play tour scenes by sequence order

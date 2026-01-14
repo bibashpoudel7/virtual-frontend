@@ -250,6 +250,19 @@ class TourService {
     });
   }
 
+  async toggleFeaturedStatus(tourId: string, isFeatured: boolean): Promise<any> {
+    return this.fetchWithAuth(`tours/${tourId}/feature`, {
+      method: 'PUT',
+      body: JSON.stringify({ is_featured_on_homepage: isFeatured }),
+    });
+  }
+
+  async getFeaturedTour(): Promise<Tour | null> {
+    const tours = await this.listTours();
+    return tours.find(t => t.is_featured_on_homepage) || null;
+  }
+
+
   async updateTourAudio(tourId: string, audioUrl: string, currentTour: Tour): Promise<Tour> {
     // Send the complete tour object with updated audio URL
     const updateData = {

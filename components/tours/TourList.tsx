@@ -46,9 +46,9 @@ export default function TourList() {
         console.error('Error parsing user data:', error);
       }
     }
-    
+
     loadTours();
-    
+
     // Auto-refresh when user returns to tab (visibility change)
     const handleVisibilityChange = () => {
       if (!document.hidden) {
@@ -56,9 +56,9 @@ export default function TourList() {
         loadTours();
       }
     };
-    
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
+
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
@@ -71,17 +71,17 @@ export default function TourList() {
         setLoading(true);
       }
       setError(null);
-      
+
       // Skip cache if force refresh is requested or if we have no cached data
       if (!forceRefresh && tours.length === 0) {
         // Check if we have cached data
         const cacheKey = 'tours_cache';
         const cacheTimeKey = 'tours_cache_time';
         const cacheExpiry = 2 * 60 * 1000;
-        
+
         const cachedData = localStorage.getItem(cacheKey);
         const cacheTime = localStorage.getItem(cacheTimeKey);
-        
+
         // Use cached data if it's fresh (less than 2 minutes old)
         if (cachedData && cacheTime) {
           const isDataFresh = Date.now() - parseInt(cacheTime) < cacheExpiry;
@@ -89,17 +89,17 @@ export default function TourList() {
             const parsedData = JSON.parse(cachedData);
             setTours(parsedData);
             setLoading(false);
-            
+
             // Still fetch fresh data in background for next time
             fetchFreshData(true); // Silent background refresh
             return;
           }
         }
       }
-      
+
       // Fetch fresh data
       await fetchFreshData();
-      
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tours');
       setLoading(false);
@@ -109,7 +109,7 @@ export default function TourList() {
   const fetchFreshData = async (silent = false) => {
     try {
       const data = await tourService.listTours();
-      
+
       // Handle null or empty response
       if (!data || data === null) {
         setTours([]);
@@ -118,10 +118,10 @@ export default function TourList() {
         localStorage.removeItem('tours_cache_time');
         return;
       }
-      
+
       // Ensure data is an array
       const toursArray = Array.isArray(data) ? data : [];
-      
+
       // Fetch scene count for each tour with better error handling
       const toursWithSceneCounts = await Promise.allSettled(
         toursArray.map(async (tour): Promise<TourWithSceneCount> => {
@@ -134,7 +134,7 @@ export default function TourList() {
           }
         })
       );
-      
+
       // Extract successful results
       const successfulTours: TourWithSceneCount[] = [];
       toursWithSceneCounts.forEach(result => {
@@ -142,9 +142,9 @@ export default function TourList() {
           successfulTours.push(result.value);
         }
       });
-      
+
       setTours(successfulTours);
-      
+
       // Only cache if we have valid data
       if (successfulTours.length > 0) {
         localStorage.setItem('tours_cache', JSON.stringify(successfulTours));
@@ -154,7 +154,7 @@ export default function TourList() {
         localStorage.removeItem('tours_cache');
         localStorage.removeItem('tours_cache_time');
       }
-      
+
     } catch (err) {
       console.error('Error fetching tours:', err);
       // Clear cache on error to prevent stale data
@@ -174,7 +174,7 @@ export default function TourList() {
   const toggleVisibilityDropdown = (tourId: string, event: React.MouseEvent) => {
     event.stopPropagation();
     event.preventDefault();
-    
+
     setVisibilityDropdowns(prev => {
       const newSet = new Set(prev);
       if (newSet.has(tourId)) {
@@ -191,16 +191,16 @@ export default function TourList() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      
+
       // Only close dropdown if clicking outside dropdown container AND not on delete button
       const isInsideDropdown = target.closest('.dropdown-container');
       const isDeleteButton = target.closest('[data-delete-button]');
-      
+
       if (!isInsideDropdown && !isDeleteButton) {
         setVisibilityDropdowns(new Set());
       }
     };
-    
+
     // Use mousedown instead of click to prevent conflicts
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -209,17 +209,17 @@ export default function TourList() {
   // Superadmin-only function to change tour publication status
   const changePublishStatus = async (tourId: string, newStatus: boolean, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent card click
-    
+
     if (userRole !== '1') {
       toast.error('Only superadmins can change publication status');
       return;
     }
-    
+
     // Close dropdown
     setVisibilityDropdowns(new Set());
-    
+
     setUpdatingTours(prev => new Set(prev).add(tourId));
-    
+
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}tours/${tourId}/publish`, {
         method: 'PUT',
@@ -231,26 +231,59 @@ export default function TourList() {
           is_published: newStatus
         }),
       });
-      
+
       if (!response.ok) {
         throw new Error('Failed to update publication status');
       }
-      
+
       // Update the tour in the local state
-      setTours(prevTours => 
-        prevTours.map(tour => 
-          tour.id === tourId 
+      setTours(prevTours =>
+        prevTours.map(tour =>
+          tour.id === tourId
             ? { ...tour, is_published: newStatus }
             : tour
         )
       );
-      
+
       // Show success toast
       toast.success(`Tour ${newStatus ? 'published' : 'unpublished'} successfully!`);
-      
+
     } catch (error) {
       console.error('Error updating publication status:', error);
       toast.error('Failed to update publication status');
+    }
+  };
+
+  // Toggle featured status for homepage
+  const handleToggleFeatured = async (tourId: string, currentStatus: boolean, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent card click
+
+    // Only superadmins or tour owners can feature tours (logic handled in backend too)
+    setUpdatingTours(prev => new Set(prev).add(tourId));
+
+    try {
+      const newStatus = !currentStatus;
+      await tourService.toggleFeaturedStatus(tourId, newStatus);
+
+      // Update the tours in state
+      setTours(prevTours =>
+        prevTours.map(tour => {
+          if (tour.id === tourId) {
+            return { ...tour, is_featured_on_homepage: newStatus };
+          }
+          // If we just featured a tour, unfeature all others locally (since backend only allows one)
+          if (newStatus && tour.is_featured_on_homepage) {
+            return { ...tour, is_featured_on_homepage: false };
+          }
+          return tour;
+        })
+      );
+
+      toast.success(newStatus ? 'Tour featured on homepage!' : 'Tour unfeatured from homepage');
+
+    } catch (error) {
+      console.error('Error toggling featured status:', error);
+      toast.error('Failed to update featured status');
     } finally {
       setUpdatingTours(prev => {
         const newSet = new Set(prev);
@@ -260,14 +293,15 @@ export default function TourList() {
     }
   };
 
+
   // Function to open delete modal (for superadmins and tour owners)
   const openDeleteModal = (tourId: string, tourName: string, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent card click
     event.preventDefault(); // Prevent any default behavior
-    
+
     // Close any open dropdowns first
     setVisibilityDropdowns(new Set());
-    
+
     setDeleteModal({
       open: true,
       tourId,
@@ -279,9 +313,9 @@ export default function TourList() {
   // Function to confirm delete tour (for superadmins and tour owners)
   const confirmDeleteTour = async () => {
     if (!deleteModal.tourId) return;
-    
+
     setDeleteModal(prev => ({ ...prev, isLoading: true }));
-    
+
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}tours/${deleteModal.tourId}`, {
         method: 'DELETE',
@@ -289,7 +323,7 @@ export default function TourList() {
           'Authorization': `Bearer ${localStorage.getItem('accessToken') || localStorage.getItem('auth_token')}`,
         },
       });
-      
+
       if (!response.ok) {
         // Try to get error message from response
         let errorMessage = 'Failed to delete tour';
@@ -302,13 +336,13 @@ export default function TourList() {
         }
         throw new Error(errorMessage);
       }
-      
+
       // Remove the tour from the local state
       setTours(prevTours => prevTours.filter(tour => tour.id !== deleteModal.tourId));
-      
+
       // Show success toast
       toast.success(`Tour "${deleteModal.tourName}" deleted successfully!`);
-      
+
       // Close modal
       setDeleteModal({
         open: false,
@@ -316,13 +350,13 @@ export default function TourList() {
         tourName: '',
         isLoading: false
       });
-      
+
     } catch (error) {
       console.error('Error deleting tour:', error);
-      
+
       // Show error toast
       toast.error(error instanceof Error ? error.message : 'Failed to delete tour');
-      
+
       setDeleteModal(prev => ({ ...prev, isLoading: false }));
     }
   };
@@ -330,7 +364,7 @@ export default function TourList() {
   // Close delete modal
   const closeDeleteModal = () => {
     if (deleteModal.isLoading) return; // Prevent closing while deleting
-    
+
     setDeleteModal({
       open: false,
       tourId: null,
@@ -346,7 +380,7 @@ export default function TourList() {
           <h2 className="text-3xl font-bold text-gray-900 mb-2">Virtual Tours</h2>
           <p className="text-gray-600">Manage your virtual tour collection</p>
         </div>
-        
+
         {/* Skeleton Loading */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[...Array(6)].map((_, index) => (
@@ -414,6 +448,8 @@ export default function TourList() {
     );
   }
   if (error) return <div className="p-4 text-red-500">Error: {error}</div>;
+  // Determine if any tour is explicitly featured
+  const isNoTourFeatured = tours.every(t => !t.is_featured_on_homepage);
 
   return (
     <div className="p-6">
@@ -453,7 +489,7 @@ export default function TourList() {
                   <Icon icon="eos-icons:loading" className="w-8 h-8 text-blue-600" />
                 </div>
               )}
-              
+
               {/* Header Section - Fixed Height */}
               <div className="p-5 pb-4">
                 <div className="flex items-start justify-between mb-3">
@@ -466,20 +502,19 @@ export default function TourList() {
                       </p>
                     )}
                   </div>
-                  
+
                   {/* Right side - Status and Actions */}
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {/* Status Badge */}
-                    <span 
-                      className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
-                        tour.is_published
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${tour.is_published
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-yellow-100 text-yellow-800'
+                        }`}
                     >
                       {tour.is_published ? 'Published' : 'Draft'}
                     </span>
-                    
+
                     {/* Actions for Superadmins and Tour Owners */}
                     {(userRole === '1' || tour.user_id === currentUserId) && (
                       <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
@@ -494,19 +529,18 @@ export default function TourList() {
                             >
                               <Icon icon="material-symbols:visibility-outline" className="w-4 h-4" />
                             </button>
-                            
+
                             {/* Dropdown Menu */}
                             {visibilityDropdowns.has(tour.id) && (
-                              <div 
+                              <div
                                 className="absolute right-0 top-full mt-2 bg-white border border-gray-200 rounded-lg shadow-xl z-50 min-w-[140px] overflow-hidden"
                                 style={{ position: 'absolute', zIndex: 9999 }}
                               >
                                 <button
                                   onClick={(e) => changePublishStatus(tour.id, true, e)}
                                   disabled={tour.is_published}
-                                  className={`w-full px-4 py-3 text-left text-sm hover:bg-gray-50 flex items-center gap-3 transition-colors ${
-                                    tour.is_published ? 'text-gray-400 cursor-not-allowed bg-gray-50' : 'text-green-700 hover:bg-green-50 cursor-pointer'
-                                  }`}
+                                  className={`w-full px-4 py-3 text-left text-sm hover:bg-gray-50 flex items-center gap-3 transition-colors ${tour.is_published ? 'text-gray-400 cursor-not-allowed bg-gray-50' : 'text-green-700 hover:bg-green-50 cursor-pointer'
+                                    }`}
                                 >
                                   <Icon icon="material-symbols:visibility" className="w-4 h-4" />
                                   Published
@@ -516,9 +550,8 @@ export default function TourList() {
                                 <button
                                   onClick={(e) => changePublishStatus(tour.id, false, e)}
                                   disabled={!tour.is_published}
-                                  className={`w-full px-4 py-3 text-left text-sm hover:bg-gray-50 flex items-center gap-3 transition-colors ${
-                                    !tour.is_published ? 'text-gray-400 cursor-not-allowed bg-gray-50' : 'text-yellow-700 hover:bg-yellow-50 cursor-pointer'
-                                  }`}
+                                  className={`w-full px-4 py-3 text-left text-sm hover:bg-gray-50 flex items-center gap-3 transition-colors ${!tour.is_published ? 'text-gray-400 cursor-not-allowed bg-gray-50' : 'text-yellow-700 hover:bg-yellow-50 cursor-pointer'
+                                    }`}
                                 >
                                   <Icon icon="material-symbols:visibility-off" className="w-4 h-4" />
                                   Draft
@@ -528,8 +561,25 @@ export default function TourList() {
                             )}
                           </div>
                         )}
-                        
+
                         {/* Delete Button - For both Superadmins and Tour Owners */}
+                        <button
+                          onClick={(e) => handleToggleFeatured(tour.id, tour.is_featured_on_homepage, e)}
+                          disabled={updatingTours.has(tour.id)}
+                          className={`p-1.5 rounded-md transition-all cursor-pointer hover:scale-110 ${(tour.is_featured_on_homepage || (isNoTourFeatured && tours[0]?.id === tour.id))
+                            ? 'bg-yellow-100 text-yellow-600 shadow-sm'
+                            : 'bg-gray-50 text-gray-400 hover:bg-yellow-50 hover:text-yellow-500'
+                            }`}
+                          title={(tour.is_featured_on_homepage || (isNoTourFeatured && tours[0]?.id === tour.id)) ? "Unfeature from homepage" : "Feature on homepage"}
+                        >
+                          <Icon
+                            icon={(tour.is_featured_on_homepage || (isNoTourFeatured && tours[0]?.id === tour.id)) ? "material-symbols:star" : "material-symbols:star-outline"}
+                            className="w-4 h-4"
+                          />
+                        </button>
+
+                        {/* Delete Button - For both Superadmins and Tour Owners */}
+
                         <button
                           onClick={(e) => openDeleteModal(tour.id, tour.name, e)}
                           className="p-1.5 rounded-md bg-red-50 text-red-600 hover:bg-red-100 hover:scale-105 transition-all cursor-pointer"
@@ -615,7 +665,7 @@ export default function TourList() {
           ))}
         </div>
       )}
-      
+
       {/* Delete Modal */}
       <DeleteModal
         open={deleteModal.open}
