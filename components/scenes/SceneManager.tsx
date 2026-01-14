@@ -21,7 +21,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null);
   const [showUploader, setShowUploader] = useState(false);
   const [showInlineCreation, setShowInlineCreation] = useState(false);
-  const [tempPreviewUrl, setTempPreviewUrl] = useState<string | null>(null); 
+  const [tempPreviewUrl, setTempPreviewUrl] = useState<string | null>(null);
   const [newSceneName, setNewSceneName] = useState('');
   const [newSceneType, setNewSceneType] = useState<'360' | 'image' | 'video'>('360');
   const [error, setError] = useState<string | null>(null);
@@ -57,32 +57,6 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
     isLoading: false
   });
 
-  // Fetch hotspots and overlays for a scene
-  const fetchSceneDetails = async (scene: Scene) => {
-    try {
-      const [hotspots, overlays] = await Promise.all([
-        tourService.listHotspots(scene.id),
-        tourService.listOverlays(scene.id)
-      ]);
-      
-      const updatedScene = {
-        ...scene,
-        hotspots: hotspots || [],
-        overlays: overlays || []
-      };
-      
-      // Update the scene in the scenes array
-      const updatedScenes = scenes?.map(s => 
-        s.id === scene.id ? updatedScene : s
-      ) || [];
-      onSceneUpdate?.(updatedScenes);
-      
-      return updatedScene;
-    } catch (error) {
-      console.error('Failed to fetch scene details:', error);
-      return scene;
-    }
-  };
 
   // Get current user ID and check tour ownership for delete permissions
   useEffect(() => {
@@ -97,13 +71,13 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
         const user = JSON.parse(userData);
         const userId = user.id || user.user_id || null;
         const role = user.roles?.toString() || user.role?.toString() || null;
-        
+
         setCurrentUserId(userId);
         setUserRole(role);
 
         // Check if user is superadmin
         const isSuperadmin = role === '1';
-        
+
         if (isSuperadmin) {
           setTourOwnership({ isOwner: true, isSuperadmin: true, loading: false });
           return;
@@ -127,51 +101,12 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
     checkTourOwnership();
   }, [tourId]);
 
-  // Fetch hotspots and overlays for all scenes when scenes change
-  useEffect(() => {
-    const fetchAllSceneDetails = async () => {
-      if (!scenes || scenes.length === 0) return;
-      
-      // Only fetch for scenes that don't have hotspots/overlays data yet
-      const scenesToUpdate = scenes.filter(scene => 
-        !scene.hotspots || !scene.overlays
-      );
-      
-      if (scenesToUpdate.length === 0) return;
-      
-      try {
-        const updatedScenes = await Promise.all(
-          scenes.map(async (scene) => {
-            if (!scene.hotspots || !scene.overlays) {
-              const [hotspots, overlays] = await Promise.all([
-                tourService.listHotspots(scene.id),
-                tourService.listOverlays(scene.id)
-              ]);
-              
-              return {
-                ...scene,
-                hotspots: hotspots || [],
-                overlays: overlays || []
-              };
-            }
-            return scene;
-          })
-        );
-        
-        onSceneUpdate?.(updatedScenes);
-      } catch (error) {
-        console.error('Failed to fetch scene details:', error);
-      }
-    };
-
-    fetchAllSceneDetails();
-  }, [scenes?.length]); // Only run when scenes array length changes
 
   const handleSceneClick = async (scene: Scene) => {
     setSelectedScene(scene);
     setShowUploader(false);
-    setShowInlineCreation(false); 
-    setTempPreviewUrl(null); 
+    setShowInlineCreation(false);
+    setTempPreviewUrl(null);
     setEditedValues({
       yaw: scene.yaw || 0,
       pitch: scene.pitch || 0,
@@ -179,12 +114,6 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
       order: scene.order || 1,
       type: scene.type || '360'
     });
-    
-    // Fetch hotspots and overlays for this scene if not already loaded
-    if (!scene.hotspots || !scene.overlays || scene.hotspots.length === 0 && scene.overlays.length === 0) {
-      const updatedScene = await fetchSceneDetails(scene);
-      setSelectedScene(updatedScene);
-    }
   };
 
 
@@ -197,7 +126,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
     try {
       setIsCreating(true);
       setError(null);
-      
+
       const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
       const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
 
@@ -256,7 +185,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
   const openDeleteModal = (sceneId: string, sceneName: string, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent scene selection
     event.preventDefault();
-    
+
     setDeleteModal({
       open: true,
       sceneId,
@@ -268,26 +197,26 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
   // Function to confirm delete scene
   const confirmDeleteScene = async () => {
     if (!deleteModal.sceneId) return;
-    
+
     setDeleteModal(prev => ({ ...prev, isLoading: true }));
-    
+
     try {
       await tourService.deleteScene(deleteModal.sceneId);
-      
+
       // Remove the scene from the local state
       const updatedScenes = scenes?.filter(scene => scene.id !== deleteModal.sceneId) || [];
       onSceneUpdate?.(updatedScenes);
-      
+
       // If the deleted scene was selected, clear selection
       if (selectedScene?.id === deleteModal.sceneId) {
         setSelectedScene(null);
         setShowUploader(false);
         setShowInlineCreation(false);
       }
-      
+
       // Show success toast
       toast.success(`Scene "${deleteModal.sceneName}" deleted successfully!`);
-      
+
       // Close modal
       setDeleteModal({
         open: false,
@@ -295,7 +224,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
         sceneName: '',
         isLoading: false
       });
-      
+
     } catch (error) {
       console.error('Error deleting scene:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to delete scene');
@@ -306,7 +235,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
   // Close delete modal
   const closeDeleteModal = () => {
     if (deleteModal.isLoading) return; // Prevent closing while deleting
-    
+
     setDeleteModal({
       open: false,
       sceneId: null,
@@ -515,16 +444,15 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
                     <div className="text-xs text-green-600 mt-1">✓ Has image</div>
                   )}
                 </div>
-                
+
                 {/* Delete button - show always for selected scene, on hover for others */}
                 {(tourOwnership.isOwner || tourOwnership.isSuperadmin) && !tourOwnership.loading && (
                   <button
                     onClick={(e) => openDeleteModal(scene.id, scene.name, e)}
-                    className={`absolute top-2 right-2 p-1 rounded bg-red-50 text-red-600 hover:bg-red-100 transition-opacity cursor-pointer ${
-                      selectedScene?.id === scene.id 
+                    className={`absolute top-2 right-2 p-1 rounded bg-red-50 text-red-600 hover:bg-red-100 transition-opacity cursor-pointer ${selectedScene?.id === scene.id
                         ? 'opacity-100' // Always visible for selected scene
                         : 'opacity-0 group-hover:opacity-100' // Show on hover for non-selected scenes
-                    }`}
+                      }`}
                     title="Delete scene"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -703,7 +631,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
                         onChange={(e) => {
                           const newValue = parseFloat(e.target.value);
                           handleValueChange('yaw', newValue);
-                          debouncedSave(); 
+                          debouncedSave();
                         }}
                         onMouseUp={immediateSave}
                         onTouchEnd={immediateSave}
@@ -737,7 +665,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
                         onChange={(e) => {
                           const newValue = parseFloat(e.target.value);
                           handleValueChange('pitch', newValue);
-                          debouncedSave(); 
+                          debouncedSave();
                         }}
                         onMouseUp={immediateSave}
                         onTouchEnd={immediateSave}
@@ -806,7 +734,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
                         <button
                           onClick={() => {
                             setShowUploader(true);
-                            setTempPreviewUrl(null); 
+                            setTempPreviewUrl(null);
                           }}
                           className="mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
                         >
@@ -849,11 +777,11 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
                       );
                       onSceneUpdate?.(updatedScenes);
                       setSelectedScene(updatedScene);
-                      setTempPreviewUrl(null); 
+                      setTempPreviewUrl(null);
                       setShowUploader(false);
                     }}
                     onCancel={() => {
-                      setTempPreviewUrl(null); 
+                      setTempPreviewUrl(null);
                       setShowUploader(false);
                     }}
                   />
@@ -880,12 +808,12 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
                     </div>
-                    
+
                     {/* Title and Description */}
                     <div>
                       <h3 className="text-xl font-semibold text-gray-900 mb-2">No Scenes Yet</h3>
                       <p className="text-gray-600 mb-6 leading-relaxed">
-                        Start building your virtual tour by creating your first scene. 
+                        Start building your virtual tour by creating your first scene.
                         Upload 360° panoramic images to create immersive experiences for your visitors.
                       </p>
                     </div>
@@ -912,11 +840,11 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
                     </div>
-                    
+
                     <div className='mb-8'>
                       <h3 className="text-lg font-medium text-gray-900 mb-2">No Scene Selected</h3>
                       <p className="text-gray-600 text-sm leading-relaxed">
-                        Select a scene from the left panel to view and edit its details, 
+                        Select a scene from the left panel to view and edit its details,
                         adjust viewing angles, or upload new images.
                       </p>
                     </div>
@@ -929,7 +857,7 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
 
 
       </div>
-      
+
       {/* Delete Modal */}
       <DeleteModal
         open={deleteModal.open}
