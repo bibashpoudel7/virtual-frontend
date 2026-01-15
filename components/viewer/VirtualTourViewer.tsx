@@ -527,6 +527,9 @@ export default function VirtualTourViewer({
     return <TourEditor 
       tour={tour} 
       scenes={scenes}
+      currentPage={1}
+      totalPages={1}
+      onPageChange={() => {}}
     />;
   }
 

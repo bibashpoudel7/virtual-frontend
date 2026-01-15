@@ -2,7 +2,7 @@
 
 // frontend/app/tours/[id]/page.tsx
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import SceneManager from '@/components/scenes/SceneManager';
 import TourEditor from '@/components/viewer/TourEditor';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
@@ -11,57 +11,88 @@ import { tourService } from '@/services/tourService';
 export default function TourDetailsPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const tourId = params.id as string;
 
   const [tour, setTour] = useState<Tour | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [selectedScene, setSelectedScene] = useState<Scene>();
-  const [activeTab, setActiveTab] = useState<'scenes' | 'viewer'>('scenes');  // Default to scenes tab
+
+  // Derive active tab from URL query param, default to 'scenes'
+  const activeTab = (searchParams.get('tab') === 'viewer' ? 'viewer' : 'scenes') as 'scenes' | 'viewer';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalScenes, setTotalScenes] = useState(0);
+
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     fetchTourData();
+    fetchScenes(1); // Load first page initially
   }, [tourId]);
-
-  useEffect(() => {
-    if (selectedScene && scenes.length > 0) {
-      const updatedSelectedScene = scenes.find(s => s.id === selectedScene.id);
-      if (updatedSelectedScene) {
-        setSelectedScene(updatedSelectedScene);
-      }
-    }
-  }, [scenes]);
 
   const fetchTourData = async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      // Fetch tour details
       const tourData = await tourService.getTour(tourId);
       setTour(tourData);
-      
-      // Fetch scenes for this tour
-      const scenesData = await tourService.getScenes(tourId);
-      setScenes(scenesData);
-      
-      // Select first scene by default
-      if (scenesData.length > 0) {
-        setSelectedScene(scenesData[0]);
-        
-        // Smart tab selection: if any scene has an image, default to viewer, otherwise scenes
-        const hasSceneWithImage = scenesData.some(scene => 
-          scene.src_original_url || scene.tiles_manifest
-        );
-        if (hasSceneWithImage) {
-          setActiveTab('viewer');
-        }
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tour data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchScenes = async (page: number, append: boolean = false) => {
+    try {
+      if (append) setLoadingMore(true);
+      else setLoading(true);
+
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+      const separator = baseUrl.endsWith('/') ? '' : '/';
+      const sceneLimit = 10;
+
+      const response = await fetch(`${baseUrl}${separator}tours/${tourId}/scenes?page=${page}&limit=${sceneLimit}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+        }
+      });
+      const data = await response.json();
+
+      if (data.statusCode !== 200) {
+        throw new Error(data.message || 'Failed to fetch scenes');
+      }
+
+      const scenesData = data.datas || [];
+
+      if (append) {
+        // Only append if these scenes aren't already in the list
+        setScenes(prev => {
+          const existingIds = new Set(prev.map(s => s.id));
+          const newScenes = scenesData.filter((s: Scene) => !existingIds.has(s.id));
+          return [...prev, ...newScenes];
+        });
+      } else {
+        setScenes(scenesData);
+      }
+
+      setTotalScenes(data.total || 0);
+      setTotalPages(Math.ceil((data.total || 0) / sceneLimit));
+      setCurrentPage(page);
+
+      // Select first scene by default if no scene selected
+      if (page === 1 && scenesData.length > 0 && !selectedScene) {
+        setSelectedScene(scenesData[0]);
+      }
+    } catch (err) {
+      console.error('Fetch scenes error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load scenes');
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
     }
   };
 
@@ -81,7 +112,7 @@ export default function TourDetailsPage() {
     setSelectedScene(scene);
     // Switch to viewer tab when a scene is selected
     if (activeTab === 'scenes') {
-      setActiveTab('viewer');
+      router.push(`/admin/tours/${tourId}?tab=viewer`);
     }
   };
 
@@ -176,7 +207,7 @@ export default function TourDetailsPage() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => setActiveTab('viewer')}
+                onClick={() => router.push(`/admin/tours/${tourId}?tab=viewer`)}
                 className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 cursor-pointer"
               >
                 Open Viewer
@@ -196,22 +227,20 @@ export default function TourDetailsPage() {
         <div className="px-4">
           <nav className="flex space-x-8">
             <button
-              onClick={() => setActiveTab('scenes')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm cursor-pointer ${
-                activeTab === 'scenes'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
-              }`}
+              onClick={() => router.push(`/admin/tours/${tourId}?tab=scenes`)}
+              className={`py-4 px-1 border-b-2 font-medium text-sm cursor-pointer ${activeTab === 'scenes'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
+                }`}
             >
               Scene Management ({scenes.length})
             </button>
             <button
-              onClick={() => setActiveTab('viewer')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm cursor-pointer ${
-                activeTab === 'viewer'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
-              } ${scenes.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+              onClick={() => router.push(`/admin/tours/${tourId}?tab=viewer`)}
+              className={`py-4 px-1 border-b-2 font-medium text-sm cursor-pointer ${activeTab === 'viewer'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
+                } ${scenes.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
               disabled={scenes.length === 0}
             >
               Viewer & Editor
@@ -225,7 +254,7 @@ export default function TourDetailsPage() {
         {/* Tab Content */}
         <div className={activeTab === 'viewer' ? "" : "flex-1 flex flex-col"}>
           {activeTab === 'scenes' && (
-            <div className="max-w-7xl mx-auto w-full p-6 bg-white rounded-lg shadow m-4">
+            <div className="max-w-7xl mx-auto w-full bg-white rounded-lg shadow mt-2 p-6 pb-0">
               <div className="mb-4">
                 <h2 className="text-lg font-semibold mb-2 text-gray-900">Scene Management</h2>
                 <p className="text-sm text-gray-700">
@@ -237,6 +266,10 @@ export default function TourDetailsPage() {
                 scenes={scenes}
                 onSceneUpdate={(updatedScenes) => setScenes(updatedScenes)}
                 isActive={activeTab === 'scenes'}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={(page) => fetchScenes(page, true)}
+                loadingMore={loadingMore}
               />
             </div>
           )}
@@ -253,15 +286,19 @@ export default function TourDetailsPage() {
                     <strong>Controls:</strong> Drag to rotate • Scroll to zoom • Shift+Click to add hotspot (in edit mode)
                   </div>
                 </div>
-                <div className="relative overflow-hidden" style={{ 
+                <div className="relative overflow-hidden" style={{
                   height: 'min(900px, calc(100vh - 250px))',
                   minHeight: '700px'
                 }}>
-                <TourEditor
-                  tour={tour}
-                  scenes={scenes}
-                  onTourUpdate={handleTourUpdate}
-                />
+                  <TourEditor
+                    tour={tour}
+                    scenes={scenes}
+                    onTourUpdate={handleTourUpdate}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={(page) => fetchScenes(page, true)}
+                    loadingMore={loadingMore}
+                  />
                 </div>
               </div>
             </div>
@@ -278,7 +315,7 @@ export default function TourDetailsPage() {
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No Scenes Available</h3>
                 <p className="text-gray-600 mb-6">Create your first scene to start building your virtual tour.</p>
                 <button
-                  onClick={() => setActiveTab('scenes')}
+                  onClick={() => router.push(`/admin/tours/${tourId}?tab=scenes`)}
                   className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
                 >
                   Create Your First Scene
@@ -289,7 +326,7 @@ export default function TourDetailsPage() {
         </div>
 
         {/* Help Section */}
-          {/* {activeTab !== 'preview' && (
+        {/* {activeTab !== 'preview' && (
           <div className="mt-8 bg-blue-50 rounded-lg p-6">
             <h3 className="font-semibold text-blue-900 mb-2">Quick Tips:</h3>
             <ul className="text-sm text-blue-800 space-y-1">
@@ -319,7 +356,7 @@ export default function TourDetailsPage() {
             </ul>
           </div>
         )} */}
-        
+
         {activeTab === 'scenes' && (
           <div className="mt-8 bg-blue-50 rounded-lg p-6">
             <h3 className="font-semibold text-blue-900 mb-2">Quick Tips:</h3>

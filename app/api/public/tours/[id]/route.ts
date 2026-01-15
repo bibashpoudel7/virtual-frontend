@@ -27,7 +27,8 @@ export async function GET(
     const tour = await tourResponse.json();
 
     // Fetch scenes for this tour using public endpoint
-    const scenesResponse = await fetch(`${backendUrl}tours/${tourId}/scenes/public`, {
+    // Request a large limit to get all scenes for the full tour viewer
+    const scenesResponse = await fetch(`${backendUrl}tours/${tourId}/scenes/public?limit=500`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -36,7 +37,8 @@ export async function GET(
 
     let scenes = [];
     if (scenesResponse.ok) {
-      scenes = await scenesResponse.json();
+      const data = await scenesResponse.json();
+      scenes = data.datas || [];
     }
 
     // Fetch play tours for this tour
@@ -52,61 +54,10 @@ export async function GET(
       playTours = await playToursResponse.json();
     }
 
-    // Fetch hotspots and overlays for each scene using public endpoint
-    const scenesWithHotspotsAndOverlays = await Promise.all(
-      scenes.map(async (scene: any) => {
-        try {
-          // Fetch hotspots
-          const hotspotsResponse = await fetch(
-            `${backendUrl}scenes/${scene.id}/hotspots/public`,
-            {
-              method: 'GET',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-            }
-          );
-
-          let hotspots = [];
-          if (hotspotsResponse.ok) {
-            hotspots = await hotspotsResponse.json();
-          }
-
-          // Fetch overlays
-          const overlaysResponse = await fetch(
-            `${backendUrl}scenes/${scene.id}/overlays/public`,
-            {
-              method: 'GET',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-            }
-          );
-
-          let overlays = [];
-          if (overlaysResponse.ok) {
-            overlays = await overlaysResponse.json();
-          }
-
-          return {
-            ...scene,
-            hotspots,
-            overlays
-          };
-        } catch (error) {
-          console.error(`Error fetching hotspots/overlays for scene ${scene.id}:`, error);
-          return {
-            ...scene,
-            hotspots: [],
-            overlays: []
-          };
-        }
-      })
-    );
 
     return NextResponse.json({
       tour,
-      scenes: scenesWithHotspotsAndOverlays,
+      scenes: scenes,
       playTours
     });
   } catch (error) {

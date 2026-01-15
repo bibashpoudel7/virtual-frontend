@@ -416,73 +416,52 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         if (toursData && toursData.length > 0) {
           // Select the featured tour, or fall back to the first one
           const featuredTour = toursData.find(t => t.is_featured_on_homepage);
-          const activeTour = featuredTour || toursData[0];
+          const selectedTour = featuredTour || toursData[0];
 
-          setCurrentTour(activeTour);
 
-          // Fetch scenes for the active tour
-          const scenesData = await tourService.getScenes(activeTour.id);
-          setScenes(scenesData || []);
+          // Fetch the FULL tour details to ensure we have background_audio_url
+          const fullTourData = await tourService.getTour(selectedTour.id);
+          setCurrentTour(fullTourData);
 
-          // Fetch hotspots and overlays for all scenes
-          if (scenesData && scenesData.length > 0) {
-            const allHotspotsPromises = scenesData.map(async (scene: Scene) => {
-              try {
-                const sceneHotspots = await tourService.listHotspots(scene.id);
-                return sceneHotspots || [];
-              } catch (error) {
-                console.error(`Error fetching hotspots for scene ${scene.id}:`, error);
-                return [];
-              }
-            });
+          // Fetch all scenes for the active tour for the full tour viewer
+          const scenesData = await tourService.getAllScenes(fullTourData.id);
+          const validScenesData = scenesData || [];
+          setScenes(validScenesData);
 
-            const allOverlaysPromises = scenesData.map(async (scene: Scene) => {
-              try {
-                const sceneOverlays = await tourService.listOverlays(scene.id);
-                return sceneOverlays || [];
-              } catch (error) {
-                console.error(`Error fetching overlays for scene ${scene.id}:`, error);
-                return [];
-              }
-            });
+          // Extract hotspots and overlays from the preloaded scenes data
+          // This avoids dozens of N+1 API calls since the backend now preloads this data
+          const preloadedHotspots = validScenesData.flatMap((s: Scene) => s.hotspots || []);
+          const preloadedOverlays = validScenesData.flatMap((s: Scene) => s.overlays || []);
 
-            const [hotspotsArrays, overlaysArrays, playToursData] = await Promise.all([
-              Promise.all(allHotspotsPromises),
-              Promise.all(allOverlaysPromises),
-              tourService.listPlayTours(activeTour.id)
-            ]);
+          setAllHotspots(preloadedHotspots);
+          setAllOverlays(preloadedOverlays);
 
-            // Sort play tour scenes by sequence order
-            const finalPlayTours = (playToursData || []).map((pt: any) => {
-              if (pt.play_tour_scenes) {
-                return {
-                  ...pt,
-                  play_tour_scenes: [...pt.play_tour_scenes].sort((a: any, b: any) => (a.sequence_order || 0) - (b.sequence_order || 0))
-                };
-              }
-              return pt;
-            });
+          const playToursData = await tourService.listPlayTours(fullTourData.id);
 
-            setPlayTours(finalPlayTours);
-            if (finalPlayTours.length > 0) {
-              setSelectedPlayTourId(finalPlayTours[0].id);
+          // Sort play tour scenes by sequence order
+          const finalPlayTours = (playToursData || []).map((pt: any) => {
+            if (pt.play_tour_scenes) {
+              return {
+                ...pt,
+                play_tour_scenes: [...pt.play_tour_scenes].sort((a: any, b: any) => (a.sequence_order || 0) - (b.sequence_order || 0))
+              };
+            }
+            return pt;
+          });
 
-              // Find the index of the first scene of the first play tour in the scenes array
-              const firstPlayTour = finalPlayTours[0];
-              if (firstPlayTour.play_tour_scenes && firstPlayTour.play_tour_scenes.length > 0) {
-                const firstSceneId = firstPlayTour.play_tour_scenes[0].scene_id;
-                const sceneIndex = (scenesData || []).findIndex((s: Scene) => s.id === firstSceneId);
-                if (sceneIndex !== -1) {
-                  setCurrentSceneIndex(sceneIndex);
-                }
+          setPlayTours(finalPlayTours);
+          if (finalPlayTours.length > 0) {
+            setSelectedPlayTourId(finalPlayTours[0].id);
+
+            // Find the index of the first scene of the first play tour in the scenes array
+            const firstPlayTour = finalPlayTours[0];
+            if (firstPlayTour.play_tour_scenes && firstPlayTour.play_tour_scenes.length > 0) {
+              const firstSceneId = firstPlayTour.play_tour_scenes[0].scene_id;
+              const sceneIndex = validScenesData.findIndex((s: Scene) => s.id === firstSceneId);
+              if (sceneIndex !== -1) {
+                setCurrentSceneIndex(sceneIndex);
               }
             }
-
-            const flattenedHotspots = hotspotsArrays.flat();
-            const flattenedOverlays = overlaysArrays.flat();
-
-            setAllHotspots(flattenedHotspots);
-            setAllOverlays(flattenedOverlays);
           }
         } else {
           setError('No tours available');
@@ -984,6 +963,11 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
 
   // Initialize background audio
   useEffect(() => {
+    // Don't initialize audio until tour is loaded
+    if (!currentTour) {
+      return;
+    }
+
     // Clean up any existing audio first
     if (audioRef.current) {
       audioRef.current.pause();
@@ -1019,7 +1003,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         audioRef.current = null;
       }
     };
-  }, [currentTour?.background_audio_url]);
+  }, [currentTour?.id, currentTour?.background_audio_url]);
 
   // Extract audio from sharing services for tour-specific audio
   const extractTourAudio = async (audioUrl: string) => {
@@ -1028,18 +1012,18 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       const result = await response.json();
 
       if (result.success && result.audioUrl) {
-        loadTourAudio(result.audioUrl);
+        loadTourAudio(result.audioUrl, false);
       } else {
-        loadTourAudio(audioUrl);
+        loadTourAudio(audioUrl, false);
       }
     } catch (error) {
-      console.error('Tour audio extraction error:', error);
-      loadTourAudio(audioUrl);
+      console.error('[HomeTourViewer Audio] Extraction error:', error);
+      loadTourAudio(audioUrl, false);
     }
   };
 
   // Load tour-specific audio
-  const loadTourAudio = (audioUrl: string) => {
+  const loadTourAudio = (audioUrl: string, isCustomAttempt: boolean = false) => {
     const audio = new Audio(audioUrl);
     audio.loop = true;
     audio.volume = 0.5; // Set default volume to 50%
@@ -1051,7 +1035,11 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     });
 
     audio.addEventListener('error', (e) => {
+      console.error('[HomeTourViewer Audio] Failed to load audio:', audioUrl, e);
       setAudioError('Failed to load tour background audio');
+
+      // Don't fall back to default audio - just keep the audio controls disabled
+      // This matches the TourEditor behavior where custom audio is always respected
     });
 
     audio.addEventListener('play', () => setIsAudioPlaying(true));

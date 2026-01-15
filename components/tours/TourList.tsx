@@ -122,26 +122,11 @@ export default function TourList() {
       // Ensure data is an array
       const toursArray = Array.isArray(data) ? data : [];
 
-      // Fetch scene count for each tour with better error handling
-      const toursWithSceneCounts = await Promise.allSettled(
-        toursArray.map(async (tour): Promise<TourWithSceneCount> => {
-          try {
-            const scenes = await tourService.getScenes(tour.id);
-            return { ...tour, sceneCount: scenes.length };
-          } catch (err) {
-            console.warn(`Failed to fetch scenes for tour ${tour.id}:`, err);
-            return { ...tour, sceneCount: 0 };
-          }
-        })
-      );
-
-      // Extract successful results
-      const successfulTours: TourWithSceneCount[] = [];
-      toursWithSceneCounts.forEach(result => {
-        if (result.status === 'fulfilled') {
-          successfulTours.push(result.value);
-        }
-      });
+      // Map tours and extract scene count from tour_scenes array populated by backend
+      const successfulTours: TourWithSceneCount[] = toursArray.map(tour => ({
+        ...tour,
+        sceneCount: tour.tour_scenes?.length || 0
+      }));
 
       setTours(successfulTours);
 
@@ -257,6 +242,11 @@ export default function TourList() {
   // Toggle featured status for homepage
   const handleToggleFeatured = async (tourId: string, currentStatus: boolean, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent card click
+
+    // If the tour is already featured, do nothing (prevent accidental unfeaturing)
+    if (currentStatus) {
+      return;
+    }
 
     // Only superadmins or tour owners can feature tours (logic handled in backend too)
     setUpdatingTours(prev => new Set(prev).add(tourId));

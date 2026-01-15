@@ -392,6 +392,7 @@ export default function OverlayRenderer({
     startX: 0,
     startY: 0
   });
+  const lastVideoIdsRef = useRef<string>('');
 
   useEffect(() => {
     if (!scene || !overlayGroup) {
@@ -427,18 +428,26 @@ export default function OverlayRenderer({
       });
     });
 
-    // Initialize video states in one go
-    const newVideoStates = new Map<string, { isVideoPlaying: boolean; hasStartedPlaying: boolean }>();
-    overlays.forEach(overlay => {
-      if (overlay.kind === 'video' && overlay.id) {
-        newVideoStates.set(overlay.id, {
-          isVideoPlaying: false,
-          hasStartedPlaying: false
-        });
+    // Initialize video states only if video overlays have changed
+    const videoOverlays = overlays.filter(o => o.kind === 'video' && o.id);
+    const newVideoIds = videoOverlays.map(o => o.id).sort().join(',');
+
+    if (newVideoIds !== lastVideoIdsRef.current) {
+      lastVideoIdsRef.current = newVideoIds;
+
+      const newVideoStates = new Map<string, { isVideoPlaying: boolean; hasStartedPlaying: boolean }>();
+      videoOverlays.forEach(overlay => {
+        if (overlay.id) {
+          newVideoStates.set(overlay.id, {
+            isVideoPlaying: false,
+            hasStartedPlaying: false
+          });
+        }
+      });
+
+      if (newVideoStates.size > 0 || videoStates.size > 0) {
+        setVideoStates(newVideoStates);
       }
-    });
-    if (newVideoStates.size > 0) {
-      setVideoStates(newVideoStates);
     }
 
     // Ensure the overlay group itself is visible

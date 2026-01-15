@@ -167,8 +167,19 @@ class TourService {
   }
 
   // Scene management
-  async getScenes(tourId: string): Promise<Scene[]> {
-    return this.fetchWithAuth(`tours/${tourId}/scenes`);
+  async getScenes(tourId: string, page: number = 1, limit: number = 10): Promise<Scene[]> {
+    const response = await this.fetchWithAuth(`tours/${tourId}/scenes?page=${page}&limit=${limit}`);
+    // If response is the new standardized format, return .datas
+    if (response && response.datas && Array.isArray(response.datas)) {
+      return response.datas;
+    }
+    // Fallback for old format or unexpected structure
+    return Array.isArray(response) ? response : (response?.scenes || []);
+  }
+
+  // Get all scenes for a tour
+  async getAllScenes(tourId: string): Promise<Scene[]> {
+    return this.getScenes(tourId, 1, 500);
   }
 
   async createScene(tourId: string, scene: Partial<Scene>): Promise<Scene> {

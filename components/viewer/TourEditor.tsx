@@ -241,9 +241,21 @@ interface TourEditorProps {
   tour: Tour;
   scenes: Scene[];
   onTourUpdate?: (updatedTour: Tour) => void;
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  loadingMore?: boolean;
 }
 
-export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorProps) {
+export default function TourEditor({
+  tour,
+  scenes,
+  onTourUpdate,
+  currentPage,
+  totalPages,
+  onPageChange,
+  loadingMore
+}: TourEditorProps) {
   const [currentSceneId, setCurrentSceneId] = useState(scenes[0]?.id || '');
   const [currentSceneIndex, setCurrentSceneIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -360,22 +372,13 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
       if (!tour.id) return;
 
       try {
-        // Load all hotspots for the entire tour
-        const allTourHotspots = await HotspotsAPI.getTourHotspots(tour.id);
-        setHotspots(allTourHotspots);
+        // Extract hotspots and overlays from the preloaded scenes prop
+        // The scenes prop comes from TourDetailsPage which preloads this data via the backend
+        const allHotspots: Hotspot[] = scenes.flatMap(scene => scene.hotspots || []);
+        const allOverlays: Overlay[] = scenes.flatMap(scene => scene.overlays || []);
 
-        // Load overlays for all scenes
-        const allOverlays: Overlay[] = [];
-        for (const scene of scenes) {
-          try {
-            const sceneOverlays = await tourService.listOverlays(scene.id);
-            allOverlays.push(...sceneOverlays);
-          } catch (err) {
-            console.warn(`Failed to load overlays for scene ${scene.id}:`, err);
-          }
-        }
+        setHotspots(allHotspots);
         setOverlays(allOverlays);
-
         setError(null);
       } catch (err) {
         console.error('Failed to load hotspots and overlays:', err);
@@ -1704,27 +1707,29 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
                       <h3 className="text-lg font-semibold text-gray-900">Scenes</h3>
-                      {/* Close Sidebar Button - Top Right */}
-                      <button
-                        onClick={() => setSidebarOpen(false)}
-                        className="p-2 hover:bg-gray-100 bg-gray-50 rounded-lg transition-colors shadow-sm"
-                        title="Close sidebar"
-                      >
-                        <svg
-                          className="w-5 h-5 text-gray-700 hover:text-gray-800 cursor-pointer"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
+                      <div className="flex items-center gap-2">
+                        <div className="text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded font-medium">
+                          {scenes.length} scenes
+                        </div>
+                        {/* Close Sidebar Button - Top Right */}
+                        <button
+                          onClick={() => setSidebarOpen(false)}
+                          className="p-2 hover:bg-gray-100 bg-gray-50 rounded-lg transition-colors shadow-sm"
+                          title="Close sidebar"
                         >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-between mt-2">
-                      <p className="text-sm text-gray-600 whitespace-nowrap">Click to navigate between scenes</p>
-                      <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded ml-3">
-                        {scenes.length} scenes
+                          <svg
+                            className="w-5 h-5 text-gray-700 hover:text-gray-800 cursor-pointer"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
                       </div>
+                    </div>
+                    <div className="mt-1">
+                      <p className="text-sm text-gray-500">Click to navigate between scenes</p>
                     </div>
 
                     {/* Status Indicators */}
@@ -1749,7 +1754,17 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
               </div>
 
               {/* Scenes List */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div
+                className="flex-1 overflow-y-auto p-4 space-y-3"
+                onScroll={(e) => {
+                  const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+                  if (scrollHeight - scrollTop <= clientHeight + 50) {
+                    if (currentPage < totalPages && !loadingMore) {
+                      onPageChange(currentPage + 1);
+                    }
+                  }
+                }}
+              >
                 {scenes.map((scene, index) => (
                   <div
                     key={scene.id}
@@ -1819,6 +1834,12 @@ export default function TourEditor({ tour, scenes, onTourUpdate }: TourEditorPro
                     </div>
                   </div>
                 ))}
+
+                {loadingMore && (
+                  <div className="py-4 flex justify-center">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

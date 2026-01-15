@@ -393,6 +393,100 @@ export default function PublicTourViewer() {
 
   const tourId = params.id as string;
 
+  // Load default audio with extraction
+  const loadDefaultAudio = async () => {
+    const defaultAudioUrl = 'https://audio.com/saransh-pachhai/audio/niya-a-bloom-vlog-no-copyright-music';
+
+    try {
+      console.log('Loading default audio from audio.com...');
+      // Extract direct audio URL from audio.com for default audio
+      const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(defaultAudioUrl)}`);
+      const result = await response.json();
+
+      if (result.success && result.audioUrl) {
+        console.log('Default audio extraction successful');
+        const audio = new Audio(result.audioUrl);
+        audio.loop = true;
+        audio.volume = 0.3; // Lower volume for default audio
+        audio.muted = true;
+        audio.crossOrigin = 'anonymous';
+
+        audio.addEventListener('canplay', () => {
+          console.log('Default background audio loaded successfully');
+        });
+
+        audio.addEventListener('error', (e) => {
+          console.log('Default audio playback error, using visual-only toggle');
+        });
+
+        audio.addEventListener('play', () => setIsAudioPlaying(true));
+        audio.addEventListener('pause', () => setIsAudioPlaying(false));
+
+        audioRef.current = audio;
+        setIsAudioMuted(true);
+        setIsAudioPlaying(false);
+      } else {
+        console.warn('Default audio extraction failed, using visual-only toggle');
+        setIsAudioMuted(true);
+        setIsAudioPlaying(false);
+      }
+    } catch (error) {
+      console.error('Default audio extraction error:', error);
+      setIsAudioMuted(true);
+      setIsAudioPlaying(false);
+    }
+  };
+
+  // Load tour-specific audio
+  const loadTourAudio = (audioUrl: string, isCustomAttempt: boolean = false) => {
+    console.log('[TourViewer Audio] Loading tour audio:', audioUrl);
+    const audio = new Audio(audioUrl);
+    audio.loop = true;
+    audio.volume = 0.5; // Set default volume to 50%
+    audio.muted = true; // Start muted
+    audio.crossOrigin = 'anonymous';
+
+    audio.addEventListener('canplay', () => {
+      console.log('[TourViewer Audio] Audio ready to play:', audioUrl);
+      setAudioError(null);
+    });
+
+    audio.addEventListener('error', (e) => {
+      console.error('[TourViewer Audio] Failed to load audio:', audioUrl, e);
+      setAudioError('Failed to load tour background audio');
+
+      // Don't fall back to default audio - just keep the audio controls disabled
+      // This matches the TourEditor behavior where custom audio is always respected
+    });
+
+    audio.addEventListener('play', () => setIsAudioPlaying(true));
+    audio.addEventListener('pause', () => setIsAudioPlaying(false));
+
+    audioRef.current = audio;
+    setIsAudioMuted(true);
+    setIsAudioPlaying(false);
+  };
+
+  // Extract audio from sharing services for tour-specific audio
+  const extractTourAudio = async (audioUrl: string) => {
+    try {
+      console.log('[TourViewer Audio] Attempting to extract audio from:', audioUrl);
+      const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(audioUrl)}`);
+      const result = await response.json();
+
+      if (result.success && result.audioUrl) {
+        console.log('[TourViewer Audio] Extraction successful, loading:', result.audioUrl);
+        loadTourAudio(result.audioUrl, false);
+      } else {
+        console.warn('[TourViewer Audio] Extraction failed, falling back to original URL');
+        loadTourAudio(audioUrl, false);
+      }
+    } catch (error) {
+      console.error('[TourViewer Audio] Extraction error:', error);
+      loadTourAudio(audioUrl, false);
+    }
+  };
+
   useEffect(() => {
     if (!tourId) {
       setError('Tour ID is required');
@@ -947,6 +1041,11 @@ export default function PublicTourViewer() {
 
   // Initialize background audio
   useEffect(() => {
+    // Don't initialize audio until tour is loaded
+    if (!tour) {
+      return;
+    }
+
     // Clean up any existing audio first
     if (audioRef.current) {
       audioRef.current.pause();
@@ -954,21 +1053,21 @@ export default function PublicTourViewer() {
     }
 
     if (tour?.background_audio_url && tour.background_audio_url.trim() !== '') {
-      console.log('Loading tour-specific audio:', tour.background_audio_url);
+      const audioUrl = tour.background_audio_url;
 
       // Check if it's a sharing service URL that needs extraction
-      const isFileSharing = (tour.background_audio_url.includes('jumpshare.com') && tour.background_audio_url.includes('/share/')) ||
-        (tour.background_audio_url.includes('audio.com') && tour.background_audio_url.includes('/audio/')) ||
-        (tour.background_audio_url.includes('soundcloud.com') && tour.background_audio_url.includes('/tracks/')) ||
-        (tour.background_audio_url.includes('dropbox.com') && tour.background_audio_url.includes('/s/')) ||
-        (tour.background_audio_url.includes('drive.google.com') && tour.background_audio_url.includes('/file/d/'));
+      const isFileSharing = (audioUrl.includes('jumpshare.com') && audioUrl.includes('/share/')) ||
+        (audioUrl.includes('audio.com') && audioUrl.includes('/audio/')) ||
+        (audioUrl.includes('soundcloud.com') && audioUrl.includes('/tracks/')) ||
+        (audioUrl.includes('dropbox.com') && audioUrl.includes('/s/')) ||
+        (audioUrl.includes('drive.google.com') && audioUrl.includes('/file/d/'));
 
       if (isFileSharing) {
         // Extract audio URL for sharing services
-        extractTourAudio(tour.background_audio_url);
+        extractTourAudio(audioUrl);
       } else {
         // Direct audio URL
-        loadTourAudio(tour.background_audio_url);
+        loadTourAudio(audioUrl);
       }
     } else {
       // No tour-specific audio, load default audio
@@ -982,115 +1081,22 @@ export default function PublicTourViewer() {
         audioRef.current = null;
       }
     };
-  }, [tour?.background_audio_url]);
+  }, [tour?.id, tour?.background_audio_url]);
 
-  // Extract audio from sharing services for tour-specific audio
-  const extractTourAudio = async (audioUrl: string) => {
-    try {
-      console.log('Extracting tour audio from sharing service:', audioUrl);
-      const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(audioUrl)}`);
-      const result = await response.json();
 
-      if (result.success && result.audioUrl) {
-        console.log('Tour audio extraction successful');
-        loadTourAudio(result.audioUrl);
-      } else {
-        console.warn('Tour audio extraction failed, trying direct URL');
-        loadTourAudio(audioUrl);
-      }
-    } catch (error) {
-      console.error('Tour audio extraction error:', error);
-      loadTourAudio(audioUrl);
-    }
-  };
-
-  // Load tour-specific audio
-  const loadTourAudio = (audioUrl: string) => {
-    console.log('Loading tour audio:', audioUrl);
-    const audio = new Audio(audioUrl);
-    audio.loop = true;
-    audio.volume = 0.5; // Set default volume to 50%
-    audio.muted = true; // Start muted
-    audio.crossOrigin = 'anonymous';
-
-    audio.addEventListener('canplay', () => {
-      console.log('Tour background audio loaded successfully');
-      setAudioError(null);
-    });
-
-    audio.addEventListener('error', (e) => {
-      console.error('Tour background audio error:', e);
-      setAudioError('Failed to load tour background audio');
-    });
-
-    audio.addEventListener('play', () => setIsAudioPlaying(true));
-    audio.addEventListener('pause', () => setIsAudioPlaying(false));
-
-    audioRef.current = audio;
-    setIsAudioMuted(true);
-    setIsAudioPlaying(false);
-  };
-
-  // Load default audio with extraction (same as TourEditor)
-  const loadDefaultAudio = async () => {
-    const defaultAudioUrl = 'https://audio.com/saransh-pachhai/audio/niya-a-bloom-vlog-no-copyright-music';
-
-    try {
-      console.log('Loading default audio from audio.com...');
-      // Extract direct audio URL from audio.com for default audio
-      const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(defaultAudioUrl)}`);
-      const result = await response.json();
-
-      if (result.success && result.audioUrl) {
-        console.log('Default audio extraction successful');
-        const audio = new Audio(result.audioUrl);
-        audio.loop = true;
-        audio.volume = 0.3; // Lower volume for default audio
-        audio.muted = true;
-        audio.crossOrigin = 'anonymous';
-
-        audio.addEventListener('canplay', () => {
-          console.log('Default background audio loaded successfully');
-        });
-
-        audio.addEventListener('error', (e) => {
-          console.log('Default audio playback error, using visual-only toggle');
-        });
-
-        audio.addEventListener('play', () => setIsAudioPlaying(true));
-        audio.addEventListener('pause', () => setIsAudioPlaying(false));
-
-        audioRef.current = audio;
-        setIsAudioMuted(true);
-        setIsAudioPlaying(false);
-      } else {
-        console.warn('Default audio extraction failed, using visual-only toggle');
-        setIsAudioMuted(true);
-        setIsAudioPlaying(false);
-      }
-    } catch (error) {
-      console.error('Default audio extraction error:', error);
-      setIsAudioMuted(true);
-      setIsAudioPlaying(false);
-    }
-  };
 
   // Audio control functions - Single toggle button (works even without audio)
   const toggleAudio = useCallback(() => {
-    console.log('Audio toggle clicked', { isAudioPlaying, isAudioMuted, audioRef: !!audioRef.current });
-
     if (audioRef.current) {
       // If we have actual audio
       if (isAudioPlaying && !isAudioMuted) {
         // If playing and not muted, pause and mute
-        console.log('Pausing and muting audio');
         audioRef.current.pause();
         audioRef.current.muted = true;
         setIsAudioMuted(true);
         setIsAudioPlaying(false);
       } else {
         // If paused or muted, play and unmute
-        console.log('Playing and unmuting audio');
         audioRef.current.muted = false;
         setIsAudioMuted(false);
         audioRef.current.play().then(() => {
@@ -1104,7 +1110,6 @@ export default function PublicTourViewer() {
       }
     } else {
       // No actual audio, just toggle the visual state for demo
-      console.log('No audio ref, toggling visual state');
       if (isAudioPlaying) {
         setIsAudioPlaying(false);
         setIsAudioMuted(true);

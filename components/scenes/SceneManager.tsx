@@ -8,16 +8,31 @@ import SimplePanoramaPreview from './SimplePanoramaPreview';
 import DeleteModal from '@/components/modals/DeleteModal';
 import { toast } from 'react-toastify';
 import { tourService } from '@/services/tourService';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface SceneManagerProps {
   tourId: string;
   scenes: Scene[];
   onSceneUpdate?: (scenes: Scene[]) => void;
   handleSceneAdded?: (scene: Scene) => void;
-  isActive?: boolean; // Track if this tab is active
+  isActive?: boolean;
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  loadingMore?: boolean;
 }
 
-export default function SceneManager({ tourId, scenes, onSceneUpdate, handleSceneAdded, isActive = true }: SceneManagerProps) {
+export default function SceneManager({
+  tourId,
+  scenes,
+  onSceneUpdate,
+  handleSceneAdded,
+  isActive = true,
+  currentPage,
+  totalPages,
+  onPageChange,
+  loadingMore
+}: SceneManagerProps) {
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null);
   const [showUploader, setShowUploader] = useState(false);
   const [showInlineCreation, setShowInlineCreation] = useState(false);
@@ -409,8 +424,18 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
           border-radius: 4px;
         }
       `}</style>
-      <div className="flex h-full">
-        <div className="w-1/3 border-r p-4 overflow-y-auto">
+      <div className="flex overflow-hidden" style={{ height: 'calc(100vh - 380px)', minHeight: '500px' }}>
+        <div
+          className="w-1/3 border-r p-4 overflow-y-auto bg-gray-50/30"
+          onScroll={(e) => {
+            const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+            if (scrollHeight - scrollTop <= clientHeight + 50) {
+              if (currentPage < totalPages && !loadingMore) {
+                onPageChange(currentPage + 1);
+              }
+            }
+          }}
+        >
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Scenes</h3>
             <button
@@ -450,8 +475,8 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
                   <button
                     onClick={(e) => openDeleteModal(scene.id, scene.name, e)}
                     className={`absolute top-2 right-2 p-1 rounded bg-red-50 text-red-600 hover:bg-red-100 transition-opacity cursor-pointer ${selectedScene?.id === scene.id
-                        ? 'opacity-100' // Always visible for selected scene
-                        : 'opacity-0 group-hover:opacity-100' // Show on hover for non-selected scenes
+                      ? 'opacity-100' // Always visible for selected scene
+                      : 'opacity-0 group-hover:opacity-100' // Show on hover for non-selected scenes
                       }`}
                     title="Delete scene"
                   >
@@ -463,9 +488,15 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
               </div>
             ))}
           </div>
+
+          {loadingMore && (
+            <div className="py-4 flex justify-center">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+            </div>
+          )}
         </div>
 
-        <div className="flex-1 p-4">
+        <div className="flex-1 p-6 overflow-y-auto">
           {showInlineCreation ? (
             <div className="space-y-6">
               <div>
@@ -856,14 +887,15 @@ export default function SceneManager({ tourId, scenes, onSceneUpdate, handleScen
         </div>
 
 
-      </div>
+      </div >
 
       {/* Delete Modal */}
-      <DeleteModal
+      < DeleteModal
         open={deleteModal.open}
         isLoading={deleteModal.isLoading}
         title="Delete Scene"
-        message={`Are you sure you want to delete "${deleteModal.sceneName}"? This action cannot be undone and will permanently remove the scene and all its associated hotspots and overlays.`}
+        message={`Are you sure you want to delete "${deleteModal.sceneName}"? This action cannot be undone and will permanently remove the scene and all its associated hotspots and overlays.`
+        }
         onConfirm={confirmDeleteScene}
         onCancel={closeDeleteModal}
       />

@@ -9,7 +9,7 @@ export async function POST(
   try {
     const { id: tourId } = await params;
     const token = request.headers.get('Authorization')?.split('Bearer ')[1];
-    
+
     if (!token) {
       return NextResponse.json(
         { error: 'Authentication required' },
@@ -18,7 +18,7 @@ export async function POST(
     }
 
     const body = await request.json();
-    
+
     // Validate required fields
     if (!body.kind || !body.scene_id || body.yaw === undefined || body.pitch === undefined) {
       return NextResponse.json(
@@ -56,7 +56,7 @@ export async function POST(
         error: errorText,
         requestData: hotspotData
       });
-      
+
       let errorMessage = 'Failed to create hotspot';
       try {
         const errorData = JSON.parse(errorText);
@@ -64,7 +64,7 @@ export async function POST(
       } catch {
         errorMessage = errorText || errorMessage;
       }
-      
+
       return NextResponse.json(
         { error: errorMessage },
         { status: response.status }
@@ -74,7 +74,7 @@ export async function POST(
     const createdHotspot = await response.json();
 
     return NextResponse.json({ hotspot: createdHotspot });
-    
+
   } catch (error) {
     console.error('Hotspot creation error:', error);
     return NextResponse.json(
@@ -91,7 +91,7 @@ export async function GET(
   try {
     const { id: tourId } = await params;
     const token = request.headers.get('Authorization')?.split('Bearer ')[1];
-    
+
     if (!token) {
       return NextResponse.json(
         { error: 'Authentication required' },
@@ -100,7 +100,7 @@ export async function GET(
     }
 
     // Get all hotspots for the tour by fetching scenes first
-    const scenesResponse = await fetch(`${BACKEND_URL}tours/${tourId}/scenes`, {
+    const scenesResponse = await fetch(`${BACKEND_URL}tours/${tourId}/scenes?limit=500`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -115,31 +115,14 @@ export async function GET(
       );
     }
 
-    const scenes = await scenesResponse.json();
-    
-    // Fetch hotspots for each scene
-    const allHotspots = [];
-    for (const scene of scenes) {
-      try {
-        const hotspotsResponse = await fetch(`${BACKEND_URL}scenes/${scene.id}/hotspots`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-        });
+    const responseData = await scenesResponse.json();
+    const scenes = responseData.datas || [];
 
-        if (hotspotsResponse.ok) {
-          const sceneHotspots = await hotspotsResponse.json();
-          allHotspots.push(...sceneHotspots);
-        }
-      } catch (error) {
-        console.error(`Error fetching hotspots for scene ${scene.id}:`, error);
-      }
-    }
+    // Extract hotspots from preloaded scenes
+    const allHotspots = scenes.flatMap((scene: any) => scene.hotspots || []);
 
     return NextResponse.json({ hotspots: allHotspots });
-    
+
   } catch (error) {
     console.error('Error fetching tour hotspots:', error);
     return NextResponse.json(
