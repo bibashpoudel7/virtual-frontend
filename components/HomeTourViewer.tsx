@@ -582,6 +582,14 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
 
     if (currentPlayTourSceneIndex >= selectedTour.play_tour_scenes.length) {
       setIsPlayingTour(false);
+      // Auto-mute audio when play tour finishes and reset to beginning
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0; // Reset audio to start
+        audioRef.current.muted = true;
+        setIsAudioMuted(true);
+        setIsAudioPlaying(false);
+      }
       return;
     }
 

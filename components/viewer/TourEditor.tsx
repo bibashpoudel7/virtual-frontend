@@ -428,6 +428,14 @@ export default function TourEditor({
 
     if (currentPlayTourSceneIndex >= selectedTour.play_tour_scenes.length) {
       setIsPlayingTour(false);
+      // Auto-mute audio when play tour finishes and reset to beginning
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0; // Reset audio to start
+        audioRef.current.muted = true;
+        setIsAudioMuted(true);
+        setIsAudioPlaying(false);
+      }
       return;
     }
 
@@ -1340,6 +1348,11 @@ export default function TourEditor({
       if (isAudioPlaying) {
         audioRef.current.pause();
       } else {
+        // Unmute if muted before playing
+        if (audioRef.current.muted) {
+          audioRef.current.muted = false;
+          setIsAudioMuted(false);
+        }
         audioRef.current.play().catch((err: any) => {
           console.error('Failed to play audio:', err);
           setAudioError(`Failed to play audio: ${err.message}. Click to try again.`);
