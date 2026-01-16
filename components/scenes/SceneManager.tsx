@@ -18,7 +18,9 @@ interface SceneManagerProps {
   isActive?: boolean;
   currentPage: number;
   totalPages: number;
+  totalScenes: number;
   onPageChange: (page: number) => void;
+  onRefresh?: () => void;
   loadingMore?: boolean;
 }
 
@@ -30,7 +32,9 @@ export default function SceneManager({
   isActive = true,
   currentPage,
   totalPages,
+  totalScenes,
   onPageChange,
+  onRefresh,
   loadingMore
 }: SceneManagerProps) {
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null);
@@ -41,6 +45,10 @@ export default function SceneManager({
   const [newSceneType, setNewSceneType] = useState<'360' | 'image' | 'video'>('360');
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState('');
+  const [draggedScene, setDraggedScene] = useState<Scene | null>(null);
+  const [dragOverScene, setDragOverScene] = useState<Scene | null>(null);
   const [editedValues, setEditedValues] = useState<{ yaw: number, pitch: number, fov: number, order: number, type: string }>({
     yaw: 0,
     pitch: 0,
@@ -161,7 +169,7 @@ export default function SceneManager({
           yaw: 0,
           pitch: 0,
           fov: 75,
-          order: (scenes?.length || 0) + 1,
+          order: totalScenes + 1,
           priority: 1
         })
       });
@@ -174,9 +182,15 @@ export default function SceneManager({
 
       const newScene = await response.json();
 
-      // Add to scenes list and select it
-      const updatedScenes = [...(scenes || []), newScene];
-      onSceneUpdate?.(updatedScenes);
+      // Refresh the scene list from server to get correct ordering
+      if (onRefresh) {
+        onRefresh();
+      } else {
+        // Fallback: Add to scenes list and sort by order
+        const updatedScenes = [...(scenes || []), newScene].sort((a, b) => a.order - b.order);
+        onSceneUpdate?.(updatedScenes);
+      }
+      
       handleSceneAdded?.(newScene);
 
       // Select the new scene and show uploader
@@ -257,6 +271,99 @@ export default function SceneManager({
       sceneName: '',
       isLoading: false
     });
+  };
+
+  // Drag and drop handlers for reordering
+  const handleDragStart = (e: React.DragEvent, scene: Scene) => {
+    setDraggedScene(scene);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, scene: Scene) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverScene(scene);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverScene(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetScene: Scene) => {
+    e.preventDefault();
+    setDragOverScene(null);
+
+    if (!draggedScene || draggedScene.id === targetScene.id) {
+      setDraggedScene(null);
+      return;
+    }
+
+    try {
+      // Create a copy of scenes array
+      const reorderedScenes = [...scenes];
+      const draggedIndex = reorderedScenes.findIndex(s => s.id === draggedScene.id);
+      const targetIndex = reorderedScenes.findIndex(s => s.id === targetScene.id);
+
+      // Remove dragged scene and insert at target position
+      const [removed] = reorderedScenes.splice(draggedIndex, 1);
+      reorderedScenes.splice(targetIndex, 0, removed);
+
+      // Update order numbers based on new positions
+      const scenesToUpdate = reorderedScenes.map((scene, index) => ({
+        ...scene,
+        order: index + 1
+      }));
+
+      // Update UI immediately for better UX
+      onSceneUpdate?.(scenesToUpdate);
+
+      // Update all affected scenes in the backend
+      const token = localStorage.getItem('accessToken');
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+      const separator = baseUrl.endsWith('/') ? '' : '/';
+
+      // Find scenes whose order actually changed by comparing with original
+      const scenesWithChangedOrder = scenesToUpdate.filter(updatedScene => {
+        const originalScene = scenes.find(s => s.id === updatedScene.id);
+        return originalScene && originalScene.order !== updatedScene.order;
+      });
+
+      console.log('Updating scenes:', scenesWithChangedOrder.map(s => ({ id: s.id, name: s.name, oldOrder: scenes.find(os => os.id === s.id)?.order, newOrder: s.order })));
+
+      // Update only scenes with changed order
+      const updatePromises = scenesWithChangedOrder.map(scene =>
+        fetch(`${baseUrl}${separator}scenes/${scene.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(scene)
+        }).then(async (response) => {
+          if (!response.ok) {
+            const error = await response.text();
+            console.error(`Failed to update scene ${scene.name}:`, error);
+            throw new Error(`Failed to update scene ${scene.name}`);
+          }
+          return response.json();
+        })
+      );
+
+      await Promise.all(updatePromises);
+      toast.success('Scene order updated successfully!');
+    } catch (error) {
+      console.error('Failed to reorder scenes:', error);
+      toast.error('Failed to update scene order');
+      // Revert on error
+      onRefresh?.();
+    } finally {
+      setDraggedScene(null);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedScene(null);
+    setDragOverScene(null);
   };
 
   // Update edited values when selected scene changes
@@ -424,7 +531,7 @@ export default function SceneManager({
           border-radius: 4px;
         }
       `}</style>
-      <div className="flex overflow-hidden" style={{ height: 'calc(100vh - 380px)', minHeight: '500px' }}>
+      <div className="flex overflow-hidden" style={{ height: 'calc(100vh - 320px)', minHeight: '600px' }}>
         <div
           className="w-1/3 border-r p-4 overflow-y-auto bg-gray-50/30"
           onScroll={(e) => {
@@ -436,7 +543,7 @@ export default function SceneManager({
             }
           }}
         >
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-2">
             <h3 className="text-lg font-semibold text-gray-900">Scenes</h3>
             <button
               className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
@@ -450,17 +557,37 @@ export default function SceneManager({
               Add Scene
             </button>
           </div>
+          <p className="text-xs text-gray-500 mb-4 flex items-center gap-1">
+            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z"></path>
+            </svg>
+            Drag and drop scenes to reorder them
+          </p>
 
           <div className="space-y-2">
             {scenes?.map((scene) => (
               <div
                 key={scene.id}
-                className={`p-3 rounded cursor-pointer transition-colors relative group ${selectedScene?.id === scene.id
+                draggable
+                onDragStart={(e) => handleDragStart(e, scene)}
+                onDragOver={(e) => handleDragOver(e, scene)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, scene)}
+                onDragEnd={handleDragEnd}
+                className={`p-3 rounded cursor-move transition-all relative group ${selectedScene?.id === scene.id
                   ? 'bg-blue-100 border-blue-500 border'
                   : 'bg-gray-50 hover:bg-gray-100'
+                  } ${draggedScene?.id === scene.id ? 'opacity-50' : ''} ${dragOverScene?.id === scene.id ? 'border-2 border-blue-400 border-dashed' : ''
                   }`}
               >
-                <div onClick={() => handleSceneClick(scene)} className="flex-1">
+                {/* Drag handle icon */}
+                <div className="absolute left-1 top-1/2 transform -translate-y-1/2 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z"></path>
+                  </svg>
+                </div>
+                
+                <div onClick={() => handleSceneClick(scene)} className="flex-1 pl-4">
                   <div className="font-medium text-gray-900">{scene.name}</div>
                   <div className="text-sm text-gray-700">
                     Type: {scene.type} | Order: {scene.order}
@@ -579,7 +706,107 @@ export default function SceneManager({
           ) : selectedScene ? (
             <div className="space-y-6">
               <div>
-                <h3 className="text-xl font-semibold mb-4 text-gray-900">{selectedScene.name}</h3>
+                {/* Editable Scene Name */}
+                {isEditingName ? (
+                  <div className="mb-4 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={editedName}
+                      onChange={(e) => setEditedName(e.target.value)}
+                      onKeyDown={async (e) => {
+                        if (e.key === 'Enter') {
+                          // Save on Enter
+                          if (editedName.trim() && editedName !== selectedScene.name) {
+                            try {
+                              const token = localStorage.getItem('accessToken');
+                              const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+                              const separator = baseUrl.endsWith('/') ? '' : '/';
+                              
+                              const response = await fetch(`${baseUrl}${separator}scenes/${selectedScene.id}`, {
+                                method: 'PUT',
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  'Authorization': `Bearer ${token}`
+                                },
+                                body: JSON.stringify({
+                                  ...selectedScene,
+                                  name: editedName.trim()
+                                })
+                              });
+
+                              if (response.ok) {
+                                const updatedScene = { ...selectedScene, name: editedName.trim() };
+                                setSelectedScene(updatedScene);
+                                const updatedScenes = scenes.map(s =>
+                                  s.id === selectedScene.id ? updatedScene : s
+                                );
+                                onSceneUpdate?.(updatedScenes);
+                              }
+                            } catch (error) {
+                              console.error('Failed to update scene name:', error);
+                            }
+                          }
+                          setIsEditingName(false);
+                        } else if (e.key === 'Escape') {
+                          // Cancel on Escape
+                          setIsEditingName(false);
+                          setEditedName(selectedScene.name);
+                        }
+                      }}
+                      onBlur={async () => {
+                        // Save on blur
+                        if (editedName.trim() && editedName !== selectedScene.name) {
+                          try {
+                            const token = localStorage.getItem('accessToken');
+                            const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+                            const separator = baseUrl.endsWith('/') ? '' : '/';
+                            
+                            const response = await fetch(`${baseUrl}${separator}scenes/${selectedScene.id}`, {
+                              method: 'PUT',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`
+                              },
+                              body: JSON.stringify({
+                                ...selectedScene,
+                                name: editedName.trim()
+                              })
+                            });
+
+                            if (response.ok) {
+                              const updatedScene = { ...selectedScene, name: editedName.trim() };
+                              setSelectedScene(updatedScene);
+                              const updatedScenes = scenes.map(s =>
+                                s.id === selectedScene.id ? updatedScene : s
+                              );
+                              onSceneUpdate?.(updatedScenes);
+                            }
+                          } catch (error) {
+                            console.error('Failed to update scene name:', error);
+                          }
+                        }
+                        setIsEditingName(false);
+                      }}
+                      autoFocus
+                      className="flex-1 text-xl font-semibold px-2 py-1 border-2 border-blue-500 rounded text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <span className="text-xs text-gray-500">Press Enter to save, Esc to cancel</span>
+                  </div>
+                ) : (
+                  <h3 
+                    className="text-xl font-semibold mb-4 text-gray-900 cursor-pointer hover:text-blue-600 inline-flex items-center gap-2 group"
+                    onClick={() => {
+                      setIsEditingName(true);
+                      setEditedName(selectedScene.name);
+                    }}
+                    title="Click to edit scene name"
+                  >
+                    {selectedScene.name}
+                    <svg className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </h3>
+                )}
 
                 {/* Interactive 360° Preview */}
                 {(selectedScene.src_original_url || tempPreviewUrl) && (

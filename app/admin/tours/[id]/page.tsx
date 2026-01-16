@@ -20,13 +20,14 @@ export default function TourDetailsPage() {
 
   // Derive active tab from URL query param, default to 'scenes'
   const activeTab = (searchParams.get('tab') === 'viewer' ? 'viewer' : 'scenes') as 'scenes' | 'viewer';
-  const [loading, setLoading] = useState(true);
+  const [tourLoading, setTourLoading] = useState(true);
+  const [scenesLoading, setScenesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalScenes, setTotalScenes] = useState(0);
-
   const [loadingMore, setLoadingMore] = useState(false);
+  const loading = tourLoading || scenesLoading;
 
   useEffect(() => {
     fetchTourData();
@@ -35,21 +36,21 @@ export default function TourDetailsPage() {
 
   const fetchTourData = async () => {
     try {
-      setLoading(true);
+      setTourLoading(true);
       setError(null);
       const tourData = await tourService.getTour(tourId);
       setTour(tourData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tour data');
     } finally {
-      setLoading(false);
+      setTourLoading(false);
     }
   };
 
   const fetchScenes = async (page: number, append: boolean = false) => {
     try {
       if (append) setLoadingMore(true);
-      else setLoading(true);
+      else setScenesLoading(true);
 
       const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
       const separator = baseUrl.endsWith('/') ? '' : '/';
@@ -91,7 +92,7 @@ export default function TourDetailsPage() {
       console.error('Fetch scenes error:', err);
       setError(err instanceof Error ? err.message : 'Failed to load scenes');
     } finally {
-      setLoading(false);
+      setScenesLoading(false);
       setLoadingMore(false);
     }
   };
@@ -99,6 +100,8 @@ export default function TourDetailsPage() {
   const handleSceneAdded = async (scene: Scene) => {
     setScenes([...scenes, scene]);
     setSelectedScene(scene);
+    // Update total count when a new scene is added
+    setTotalScenes(prev => prev + 1);
   };
 
   const handleSceneDeleted = async (sceneId: string) => {
@@ -106,6 +109,8 @@ export default function TourDetailsPage() {
     if (selectedScene?.id === sceneId) {
       setSelectedScene(scenes[0] || null);
     }
+    // Update total count when a scene is deleted
+    setTotalScenes(prev => Math.max(0, prev - 1));
   };
 
   const handleSceneSelected = (scene: Scene) => {
@@ -233,7 +238,7 @@ export default function TourDetailsPage() {
                 : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
                 }`}
             >
-              Scene Management ({scenes.length})
+              Scene Management ({totalScenes})
             </button>
             <button
               onClick={() => router.push(`/admin/tours/${tourId}?tab=viewer`)}
@@ -264,10 +269,22 @@ export default function TourDetailsPage() {
               <SceneManager
                 tourId={tourId}
                 scenes={scenes}
-                onSceneUpdate={(updatedScenes) => setScenes(updatedScenes)}
+                onSceneUpdate={(updatedScenes) => {
+                  // Check if a scene was added (length increased)
+                  if (updatedScenes.length > scenes.length) {
+                    setTotalScenes(prev => prev + 1);
+                  }
+                  // Check if a scene was deleted (length decreased)
+                  else if (updatedScenes.length < scenes.length) {
+                    setTotalScenes(prev => Math.max(0, prev - 1));
+                  }
+                  setScenes(updatedScenes);
+                }}
+                onRefresh={() => fetchScenes(1, false)}
                 isActive={activeTab === 'scenes'}
                 currentPage={currentPage}
                 totalPages={totalPages}
+                totalScenes={totalScenes}
                 onPageChange={(page) => fetchScenes(page, true)}
                 loadingMore={loadingMore}
               />
