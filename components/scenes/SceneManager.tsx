@@ -157,6 +157,23 @@ export default function SceneManager({
         throw new Error('Authentication required. Please log in.');
       }
 
+      // Fetch ALL scenes to get the correct max order number
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+      const separator = baseUrl.endsWith('/') ? '' : '/';
+      const allScenesResponse = await fetch(`${baseUrl}${separator}tours/${tourId}/scenes?page=1&limit=1000`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const allScenesData = await allScenesResponse.json();
+      const allScenes = allScenesData.datas || [];
+
+      // Calculate the next order number by finding the max order across ALL scenes
+      const maxOrder = allScenes.length > 0
+        ? Math.max(...allScenes.map((s: Scene) => s.order || 0))
+        : 0;
+      const nextOrder = maxOrder + 1;
+
       const response = await fetch(`${backendUrl}tours/${tourId}/scenes`, {
         method: 'POST',
         headers: {
@@ -169,7 +186,7 @@ export default function SceneManager({
           yaw: 0,
           pitch: 0,
           fov: 75,
-          order: totalScenes + 1,
+          order: nextOrder,
           priority: 1
         })
       });
@@ -190,7 +207,7 @@ export default function SceneManager({
         const updatedScenes = [...(scenes || []), newScene].sort((a, b) => a.order - b.order);
         onSceneUpdate?.(updatedScenes);
       }
-      
+
       handleSceneAdded?.(newScene);
 
       // Select the new scene and show uploader
@@ -230,11 +247,71 @@ export default function SceneManager({
     setDeleteModal(prev => ({ ...prev, isLoading: true }));
 
     try {
+      const token = localStorage.getItem('accessToken');
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+      const separator = baseUrl.endsWith('/') ? '' : '/';
+
+      // First, fetch ALL scenes for this tour (not just the current page)
+      const allScenesResponse = await fetch(`${baseUrl}${separator}tours/${tourId}/scenes?page=1&limit=1000`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const allScenesData = await allScenesResponse.json();
+      const allScenes = allScenesData.datas || [];
+
+      // Delete the scene
       await tourService.deleteScene(deleteModal.sceneId);
 
-      // Remove the scene from the local state
-      const updatedScenes = scenes?.filter(scene => scene.id !== deleteModal.sceneId) || [];
-      onSceneUpdate?.(updatedScenes);
+      // Remove the deleted scene and reorder ALL remaining scenes
+      const filteredScenes = allScenes.filter((scene: Scene) => scene.id !== deleteModal.sceneId);
+
+      // Reorder scenes to fill gaps (1, 2, 3, 4, ... without gaps)
+      const reorderedScenes = filteredScenes
+        .sort((a: Scene, b: Scene) => a.order - b.order)
+        .map((scene: Scene, index: number) => ({
+          ...scene,
+          order: index + 1
+        }));
+
+      // Find scenes whose order changed
+      const scenesWithChangedOrder = reorderedScenes.filter((updatedScene: Scene) => {
+        const originalScene = filteredScenes.find((s: Scene) => s.id === updatedScene.id);
+        return originalScene && originalScene.order !== updatedScene.order;
+      });
+
+      // Update only scenes with changed order in the backend
+      if (scenesWithChangedOrder.length > 0) {
+        const updatePromises = scenesWithChangedOrder.map((scene: Scene) =>
+          fetch(`${baseUrl}${separator}scenes/${scene.id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(scene)
+          }).then(async (response) => {
+            if (!response.ok) {
+              const error = await response.text();
+              console.error(`Failed to update scene ${scene.name}:`, error);
+            }
+            return response.ok;
+          })
+        );
+
+        await Promise.all(updatePromises);
+      }
+
+      // Update the local scenes list with only the scenes from the current page
+      const updatedLocalScenes = reorderedScenes.filter((scene: Scene) =>
+        scenes?.some(s => s.id === scene.id)
+      );
+      onSceneUpdate?.(updatedLocalScenes);
+
+      // Refresh to get the correct data from server
+      if (onRefresh) {
+        onRefresh();
+      }
 
       // If the deleted scene was selected, clear selection
       if (selectedScene?.id === deleteModal.sceneId) {
@@ -586,7 +663,7 @@ export default function SceneManager({
                     <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z"></path>
                   </svg>
                 </div>
-                
+
                 <div onClick={() => handleSceneClick(scene)} className="flex-1 pl-4">
                   <div className="font-medium text-gray-900">{scene.name}</div>
                   <div className="text-sm text-gray-700">
@@ -721,7 +798,7 @@ export default function SceneManager({
                               const token = localStorage.getItem('accessToken');
                               const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
                               const separator = baseUrl.endsWith('/') ? '' : '/';
-                              
+
                               const response = await fetch(`${baseUrl}${separator}scenes/${selectedScene.id}`, {
                                 method: 'PUT',
                                 headers: {
@@ -760,7 +837,7 @@ export default function SceneManager({
                             const token = localStorage.getItem('accessToken');
                             const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
                             const separator = baseUrl.endsWith('/') ? '' : '/';
-                            
+
                             const response = await fetch(`${baseUrl}${separator}scenes/${selectedScene.id}`, {
                               method: 'PUT',
                               headers: {
@@ -793,7 +870,7 @@ export default function SceneManager({
                     <span className="text-xs text-gray-500">Press Enter to save, Esc to cancel</span>
                   </div>
                 ) : (
-                  <h3 
+                  <h3
                     className="text-xl font-semibold mb-4 text-gray-900 cursor-pointer hover:text-blue-600 inline-flex items-center gap-2 group"
                     onClick={() => {
                       setIsEditingName(true);
