@@ -26,6 +26,7 @@ interface CubeMapViewerProps {
   forcedCameraPosition?: { yaw: number; pitch: number; fov: number } | null;
   isPlaybackMode?: boolean;
   cameraControlRef?: React.MutableRefObject<{ setCamera: (yaw: number, pitch: number, fov: number) => void } | null>;
+  preloadSceneIds?: string[];
 }
 
 
@@ -47,6 +48,7 @@ export default function CubeMapViewer({
   forcedCameraPosition = null,
   isPlaybackMode = false,
   cameraControlRef,
+  preloadSceneIds = [],
 }: CubeMapViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -470,28 +472,29 @@ export default function CubeMapViewer({
             const img = new Image();
             img.crossOrigin = 'anonymous';
 
-            img.onload = () => {
-              tileImages.set(tileKey, img);
-              loadedCount++;
-              if (loadedCount === totalTiles) {
-                console.log(`[CubeMapViewer] Preloaded all ${totalTiles} tiles for scene ${targetSceneId}`);
-                preloadedTilesRef.current.set(targetSceneId, tileImages);
-                preloadingPromiseRef.current.delete(targetSceneId);
-                resolve(true);
-              }
-            };
-
-            img.onerror = () => {
-              loadedCount++;
-              console.warn(`[CubeMapViewer] Failed to preload tile: ${tileUrl}`);
-              if (loadedCount === totalTiles) {
-                preloadedTilesRef.current.set(targetSceneId, tileImages);
-                preloadingPromiseRef.current.delete(targetSceneId);
-                resolve(true); // Still resolve even with some failures
-              }
-            };
-
+            // Use decode() to force off-main-thread decoding (solves the "micro-lag" on render)
             img.src = tileUrl;
+            img.decode()
+              .then(() => {
+                tileImages.set(tileKey, img);
+                loadedCount++;
+                if (loadedCount === totalTiles) {
+                  console.log(`[CubeMapViewer] Preloaded and decoded all ${totalTiles} tiles for scene ${targetSceneId}`);
+                  preloadedTilesRef.current.set(targetSceneId, tileImages);
+                  preloadingPromiseRef.current.delete(targetSceneId);
+                  resolve(true);
+                }
+              })
+              .catch((err) => {
+                loadedCount++;
+                console.warn(`[CubeMapViewer] Failed to preload/decode tile: ${tileUrl}`, err);
+                // Still resolve even with some failures to prevent hanging
+                if (loadedCount === totalTiles) {
+                  preloadedTilesRef.current.set(targetSceneId, tileImages);
+                  preloadingPromiseRef.current.delete(targetSceneId);
+                  resolve(true);
+                }
+              });
           }
         }
       });
@@ -1141,6 +1144,16 @@ export default function CubeMapViewer({
       }
     });
   }, [hotspots, highlightedHotspotId, isLoading]);
+
+  // Handle external preloading requests (e.g. from Play Tour)
+  useEffect(() => {
+    if (preloadSceneIds && preloadSceneIds.length > 0) {
+      console.log('[CubeMapViewer] Processing external preload request for scenes:', preloadSceneIds);
+      preloadSceneIds.forEach(id => {
+        preloadSceneTiles(id);
+      });
+    }
+  }, [preloadSceneIds, preloadSceneTiles]);
 
   // Render overlays
   // Manual overlay rendering removed in favor of OverlayRenderer component

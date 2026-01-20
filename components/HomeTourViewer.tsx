@@ -189,7 +189,8 @@ const ProgressBar = React.memo(({
   isTransitioning,
   onSceneChange,
   isOverlayModalOpen = false,
-  segmentDuration = 12000 // Default 12s
+  segmentDuration = 12000, // Default 12s
+  restartTrigger
 }: {
   scenes: any[];
   currentSceneIndex: number;
@@ -198,19 +199,25 @@ const ProgressBar = React.memo(({
   onSceneChange: (index: number) => void;
   isOverlayModalOpen?: boolean;
   segmentDuration?: number;
+  restartTrigger?: number;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number | undefined>(undefined);
   const startTimeRef = useRef<number>(0);
   const pausedProgressRef = useRef<number>(0); // Track progress when paused
   const lastSceneIndexRef = useRef<number>(currentSceneIndex);
+  const prevRestartTriggerRef = useRef<number>(restartTrigger || 0);
 
   // Direct DOM manipulation for smooth progress without React re-renders
   useEffect(() => {
-    // Reset progress when scene changes
-    if (lastSceneIndexRef.current !== currentSceneIndex) {
+    // Reset progress when scene changes or restart is triggered
+    if (lastSceneIndexRef.current !== currentSceneIndex || (restartTrigger !== undefined && prevRestartTriggerRef.current !== restartTrigger)) {
       pausedProgressRef.current = 0;
       lastSceneIndexRef.current = currentSceneIndex;
+      if (restartTrigger !== undefined) {
+        prevRestartTriggerRef.current = restartTrigger;
+        startTimeRef.current = Date.now(); // Reset start time for immediate restart
+      }
     }
 
     if (isTransitioning || scenes.length <= 1) {
@@ -257,7 +264,7 @@ const ProgressBar = React.memo(({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen, segmentDuration]);
+  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen, segmentDuration, restartTrigger]);
 
   if (scenes.length <= 1) return null;
 
@@ -380,6 +387,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [isOverlayModalOpen, setIsOverlayModalOpen] = useState(false);
   const [showPauseOverlay, setShowPauseOverlay] = useState(false);
+  const [restartTrigger, setRestartTrigger] = useState(0);
 
   // Play Tour state
   const [playTours, setPlayTours] = useState<any[]>([]);
@@ -393,8 +401,10 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const autoplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const playTourProgressRef = useRef<number>(0);
   const playTourLastSceneIndexRef = useRef<number>(0);
+  const playTourRestartTriggerRef = useRef<number>(0);
 
   // Fetch tours on component mount
   useEffect(() => {
@@ -507,7 +517,10 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   }, [selectedPlayTourId, playTours, currentPlayTourSceneIndex]);
 
   const handleSceneChange = useCallback((index: number, immediate: boolean = false) => {
-    if (index === currentSceneIndex) return;
+    if (index === currentSceneIndex) {
+      setRestartTrigger(prev => prev + 1);
+      return;
+    }
 
     // Sync Play Tour progress bar if expected scene is in the current tour
     if (selectedPlayTourId) {
@@ -570,6 +583,77 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     };
   }, [isAutoplay, currentSceneIndex, scenes.length, isTransitioning, isOverlayModalOpen, handleSceneChange]);
 
+  // Calculate scenes to preload (tiles)
+  const preloadSceneIds = React.useMemo(() => {
+    const ids: string[] = [];
+
+    // 1. Play Tour - Look ahead 2 scenes
+    if (isPlayingTour && selectedPlayTourId) {
+      const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+      if (selectedTour && selectedTour.play_tour_scenes) {
+        // Next scene
+        const nextPtScene = selectedTour.play_tour_scenes[currentPlayTourSceneIndex + 1];
+        if (nextPtScene) ids.push(nextPtScene.scene_id);
+
+        // Second next scene
+        const secondPtScene = selectedTour.play_tour_scenes[currentPlayTourSceneIndex + 2];
+        if (secondPtScene) ids.push(secondPtScene.scene_id);
+      }
+    }
+    // 2. Standard sequential
+    else if (scenes.length > 0) {
+      const nextIndex = (currentSceneIndex + 1) % scenes.length;
+      if (scenes[nextIndex]) ids.push(scenes[nextIndex].id);
+    }
+
+    return ids;
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, currentSceneIndex, scenes]);
+
+  // Optimize image preloading to prevent lag during transitions
+  useEffect(() => {
+    if (scenes.length === 0) return;
+
+    const preloadImage = (url: string) => {
+      const img = new Image();
+      img.src = url;
+    };
+
+    // 1. Preload Next Scene logic
+    let nextSceneToPreload: Scene | null = null;
+    let secondNextSceneToPreload: Scene | null = null;
+
+    if (isPlayingTour && selectedPlayTourId) {
+      // Play Tour Mode: Look ahead in the Play Tour sequence
+      const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+      if (selectedTour && selectedTour.play_tour_scenes) {
+        // Next scene
+        const nextPtScene = selectedTour.play_tour_scenes[currentPlayTourSceneIndex + 1];
+        if (nextPtScene) {
+          nextSceneToPreload = scenes.find(s => s.id === nextPtScene.scene_id) || null;
+        }
+
+        // Second next scene (for extra smoothness)
+        const secondNextPtScene = selectedTour.play_tour_scenes[currentPlayTourSceneIndex + 2];
+        if (secondNextPtScene) {
+          secondNextSceneToPreload = scenes.find(s => s.id === secondNextPtScene.scene_id) || null;
+        }
+      }
+    } else {
+      // Standard Mode: Preload sequential next
+      const nextIndex = (currentSceneIndex + 1) % scenes.length;
+      nextSceneToPreload = scenes[nextIndex];
+    }
+
+    if (nextSceneToPreload?.src_original_url) {
+      preloadImage(nextSceneToPreload.src_original_url);
+    }
+
+    if (secondNextSceneToPreload?.src_original_url) {
+      preloadImage(secondNextSceneToPreload.src_original_url);
+    }
+
+  }, [currentSceneIndex, currentPlayTourSceneIndex, isPlayingTour, selectedPlayTourId, playTours, scenes]);
+
   // Play Tour playback logic
   useEffect(() => {
     if (!isPlayingTour || !selectedPlayTourId) return;
@@ -605,10 +689,11 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       setCurrentSceneIndex(sceneIndex);
     }
 
-    // Reset progress if scene changed
-    if (playTourLastSceneIndexRef.current !== currentPlayTourSceneIndex) {
+    // Reset progress if scene changed or restart triggered
+    if (playTourLastSceneIndexRef.current !== currentPlayTourSceneIndex || playTourRestartTriggerRef.current !== restartTrigger) {
       playTourProgressRef.current = 0;
       playTourLastSceneIndexRef.current = currentPlayTourSceneIndex;
+      playTourRestartTriggerRef.current = restartTrigger;
     }
 
     // Wait for scene to load, then animate camera
@@ -681,7 +766,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex]);
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, restartTrigger]);
 
   const handlePrevScene = useCallback(() => {
     if (isTransitioning) return;
@@ -1220,6 +1305,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
             autoRotate={isAutoplay}
             forcedCameraPosition={currentCamera}
             isPlaybackMode={isPlayingTour}
+            preloadSceneIds={preloadSceneIds}
             onOverlayPause={() => {
               if (isPlayingTour) {
                 setIsPlayingTour(false);
@@ -1391,6 +1477,9 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
               isAutoplay={isAutoplay || isPlayingTour}
               isTransitioning={isTransitioning}
               onSceneChange={selectedPlayTourId ? (idx) => {
+                if (idx === currentPlayTourSceneIndex) {
+                  setRestartTrigger(prev => prev + 1);
+                }
                 setCurrentPlayTourSceneIndex(idx);
                 if (!isPlayingTour) {
                   const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
@@ -1405,6 +1494,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
               segmentDuration={selectedPlayTourId && currentPlayTourScene
                 ? (currentPlayTourScene.move_duration + (currentPlayTourScene.wait_duration || 0))
                 : (currentTour?.auto_change_interval || 12000)}
+              restartTrigger={restartTrigger}
             />
           </>
         )}

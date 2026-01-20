@@ -39,7 +39,8 @@ const ProgressBar = ({
   onSceneChange,
   isOverlayModalOpen = false,
   segmentDuration = 12000,
-  forcedProgress = 0
+  forcedProgress = 0,
+  restartTrigger
 }: {
   scenes: any[];
   currentSceneIndex: number;
@@ -49,12 +50,14 @@ const ProgressBar = ({
   isOverlayModalOpen?: boolean;
   segmentDuration?: number;
   forcedProgress?: number;
+  restartTrigger?: number;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number | undefined>(undefined);
   const startTimeRef = useRef<number>(0);
   const pausedProgressRef = useRef<number>(forcedProgress || 0);
   const lastSceneIndexRef = useRef<number>(currentSceneIndex);
+  const prevRestartTriggerRef = useRef<number>(restartTrigger || 0);
 
   // Sync with forced progress from parent
   useEffect(() => {
@@ -64,9 +67,13 @@ const ProgressBar = ({
   }, [forcedProgress, isAutoplay]);
 
   useEffect(() => {
-    if (lastSceneIndexRef.current !== currentSceneIndex) {
+    if (lastSceneIndexRef.current !== currentSceneIndex || (restartTrigger !== undefined && prevRestartTriggerRef.current !== restartTrigger)) {
       pausedProgressRef.current = 0;
       lastSceneIndexRef.current = currentSceneIndex;
+      if (restartTrigger !== undefined) {
+        prevRestartTriggerRef.current = restartTrigger;
+        startTimeRef.current = Date.now(); // Reset start time for immediate restart
+      }
     }
 
     if (isTransitioning || scenes.length <= 1) {
@@ -112,7 +119,7 @@ const ProgressBar = ({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen, segmentDuration, forcedProgress]);
+  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen, segmentDuration, forcedProgress, restartTrigger]);
 
   if (scenes.length <= 1) return null;
 
@@ -319,6 +326,8 @@ export default function TourEditor({
   const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const playTourProgressRef = useRef<number>(0);
   const playTourLastSceneIndexRef = useRef<number>(0);
+  const playTourRestartTriggerRef = useRef<number>(0);
+  const [restartTrigger, setRestartTrigger] = useState(0);
 
 
   const playTourDisplayScenes = useMemo(() => {
@@ -452,10 +461,11 @@ export default function TourEditor({
       setCurrentSceneIndex(sceneIndex);
     }
 
-    // Reset progress if scene changed
-    if (playTourLastSceneIndexRef.current !== currentPlayTourSceneIndex) {
+    // Reset progress if scene changed or restart triggered
+    if (playTourLastSceneIndexRef.current !== currentPlayTourSceneIndex || playTourRestartTriggerRef.current !== restartTrigger) {
       playTourProgressRef.current = 0;
       playTourLastSceneIndexRef.current = currentPlayTourSceneIndex;
+      playTourRestartTriggerRef.current = restartTrigger;
     }
 
     // Wait for scene to load, then animate camera
@@ -528,7 +538,7 @@ export default function TourEditor({
       if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, currentSceneId]);
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, currentSceneId, restartTrigger]);
 
   const handleSceneChange = useCallback((sceneId: string) => {
     if (sceneId === currentSceneId) return; // Don't transition to the same scene
@@ -558,6 +568,32 @@ export default function TourEditor({
       setIsTransitioning(false);
     }, 1500);
   }, [currentSceneId, scenes, selectedPlayTourId, playTours]);
+
+  // Calculate scenes to preload (tiles)
+  const preloadSceneIds = useMemo(() => {
+    const ids: string[] = [];
+
+    // 1. Play Tour - Look ahead 2 scenes
+    if (isPlayingTour && selectedPlayTourId) {
+      const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+      if (selectedTour && selectedTour.play_tour_scenes) {
+        // Next scene
+        const nextPtScene = selectedTour.play_tour_scenes[currentPlayTourSceneIndex + 1];
+        if (nextPtScene) ids.push(nextPtScene.scene_id);
+
+        // Second next scene
+        const secondPtScene = selectedTour.play_tour_scenes[currentPlayTourSceneIndex + 2];
+        if (secondPtScene) ids.push(secondPtScene.scene_id);
+      }
+    }
+    // 2. Standard sequential
+    else if (scenes.length > 0) {
+      const nextIndex = (currentSceneIndex + 1) % scenes.length;
+      if (scenes[nextIndex]) ids.push(scenes[nextIndex].id);
+    }
+
+    return ids;
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, currentSceneIndex, scenes]);
 
   const handleCenterPlayClick = useCallback(() => {
     setHasStartedFullscreenPreview(true);
@@ -1122,7 +1158,11 @@ export default function TourEditor({
         preloadScene(scenes[currentIndex + 1].id);
       }
     }
-  }, [currentSceneId, scenes, preloadedScenes]);
+
+    // Preload scenes identified by preloadSceneIds
+    preloadSceneIds.forEach(id => preloadScene(id));
+
+  }, [currentSceneId, scenes, preloadedScenes, preloadSceneIds]);
 
   // Client-side only flag
   useEffect(() => {
@@ -1514,6 +1554,7 @@ export default function TourEditor({
           forcedCameraPosition={isPlayingTour ? currentCamera : previewCameraPosition}
           isPlaybackMode={isPlayingTour}
           cameraControlRef={cameraControlRef}
+          preloadSceneIds={preloadSceneIds}
         />
 
         {/* Pause Animation Overlay */}
@@ -1656,6 +1697,10 @@ export default function TourEditor({
               isTransitioning={isTransitioning}
               forcedProgress={playTourProgressRef.current}
               onSceneChange={(index) => {
+                if (selectedPlayTourId ? (index === currentPlayTourSceneIndex) : (index === currentSceneIndex)) {
+                  setRestartTrigger(prev => prev + 1);
+                }
+
                 if (selectedPlayTourId && playTourDisplayScenes) {
                   const targetStep = playTourDisplayScenes[index];
                   if (targetStep && targetStep.originalId) {
@@ -1666,6 +1711,7 @@ export default function TourEditor({
                   handleSceneChangeByIndex(index);
                 }
               }}
+              restartTrigger={restartTrigger}
               isOverlayModalOpen={showOverlayDialog || showHotspotDialog || isInfoModalOpen}
             />
           </div>

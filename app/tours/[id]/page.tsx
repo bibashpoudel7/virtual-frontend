@@ -184,7 +184,8 @@ const ProgressBar = React.memo(({
   isTransitioning,
   onSceneChange,
   isOverlayModalOpen = false,
-  segmentDuration = 12000 // Default 12s
+  segmentDuration = 12000, // Default 12s
+  restartTrigger
 }: {
   scenes: any[];
   currentSceneIndex: number;
@@ -193,19 +194,25 @@ const ProgressBar = React.memo(({
   onSceneChange: (index: number) => void;
   isOverlayModalOpen?: boolean;
   segmentDuration?: number;
+  restartTrigger?: number;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number | undefined>(undefined);
   const startTimeRef = useRef<number>(0);
   const pausedProgressRef = useRef<number>(0); // Track progress when paused
   const lastSceneIndexRef = useRef<number>(currentSceneIndex);
+  const prevRestartTriggerRef = useRef<number>(restartTrigger || 0);
 
   // Direct DOM manipulation for smooth progress without React re-renders
   useEffect(() => {
-    // Reset progress when scene changes
-    if (lastSceneIndexRef.current !== currentSceneIndex) {
+    // Reset progress when scene changes or restart is triggered
+    if (lastSceneIndexRef.current !== currentSceneIndex || (restartTrigger !== undefined && prevRestartTriggerRef.current !== restartTrigger)) {
       pausedProgressRef.current = 0;
       lastSceneIndexRef.current = currentSceneIndex;
+      if (restartTrigger !== undefined) {
+        prevRestartTriggerRef.current = restartTrigger;
+        startTimeRef.current = Date.now(); // Reset start time for immediate restart
+      }
     }
 
     if (isTransitioning || scenes.length <= 1) {
@@ -252,7 +259,7 @@ const ProgressBar = React.memo(({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen, segmentDuration]);
+  }, [isAutoplay, isTransitioning, currentSceneIndex, scenes.length, isOverlayModalOpen, segmentDuration, restartTrigger]);
 
   if (scenes.length <= 1) return null;
 
@@ -376,6 +383,7 @@ export default function PublicTourViewer() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [isOverlayModalOpen, setIsOverlayModalOpen] = useState(false);
   const [showPauseOverlay, setShowPauseOverlay] = useState(false);
+  const [restartTrigger, setRestartTrigger] = useState(0);
 
   // Play Tour state
   const [playTours, setPlayTours] = useState<any[]>([]);
@@ -390,6 +398,7 @@ export default function PublicTourViewer() {
   const autoplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const playTourProgressRef = useRef<number>(0);
   const playTourLastSceneIndexRef = useRef<number>(0);
+  const playTourRestartTriggerRef = useRef<number>(0);
 
   const tourId = params.id as string;
 
@@ -572,7 +581,12 @@ export default function PublicTourViewer() {
   }, []);
 
   const handleSceneChange = useCallback((index: number) => {
-    if (index === currentSceneIndex || isTransitioning) return;
+    if (index === currentSceneIndex || isTransitioning) {
+      if (index === currentSceneIndex) {
+        setRestartTrigger(prev => prev + 1);
+      }
+      return;
+    }
 
     // Interrupt any active playback when changing scenes manually
     setIsPlayingTour(false);
@@ -599,10 +613,37 @@ export default function PublicTourViewer() {
     }, 100);
 
     // Reset transition state after animation completes
+    // Reset transition state after animation completes
     setTimeout(() => {
       setIsTransitioning(false);
     }, 600);
   }, [currentSceneIndex, isTransitioning, scenes, selectedPlayTourId, playTours]);
+
+  // Calculate scenes to preload (tiles)
+  const preloadSceneIds = useMemo(() => {
+    const ids: string[] = [];
+
+    // 1. Play Tour - Look ahead 2 scenes
+    if (isPlayingTour && selectedPlayTourId) {
+      const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+      if (selectedTour && selectedTour.play_tour_scenes) {
+        // Next scene
+        const nextPtScene = selectedTour.play_tour_scenes[currentPlayTourSceneIndex + 1];
+        if (nextPtScene) ids.push(nextPtScene.scene_id);
+
+        // Second next scene
+        const secondPtScene = selectedTour.play_tour_scenes[currentPlayTourSceneIndex + 2];
+        if (secondPtScene) ids.push(secondPtScene.scene_id);
+      }
+    }
+    // 2. Standard sequential
+    else if (scenes.length > 0) {
+      const nextIndex = (currentSceneIndex + 1) % scenes.length;
+      if (scenes[nextIndex]) ids.push(scenes[nextIndex].id);
+    }
+
+    return ids;
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, currentSceneIndex, scenes]);
 
   // Play Tour playback logic
   useEffect(() => {
@@ -639,10 +680,11 @@ export default function PublicTourViewer() {
       setCurrentSceneIndex(sceneIndex);
     }
 
-    // Reset progress if scene changed
-    if (playTourLastSceneIndexRef.current !== currentPlayTourSceneIndex) {
+    // Reset progress if scene changed or restart triggered
+    if (playTourLastSceneIndexRef.current !== currentPlayTourSceneIndex || playTourRestartTriggerRef.current !== restartTrigger) {
       playTourProgressRef.current = 0;
       playTourLastSceneIndexRef.current = currentPlayTourSceneIndex;
+      playTourRestartTriggerRef.current = restartTrigger;
     }
 
     // Wait for scene to load, then animate camera
@@ -715,7 +757,7 @@ export default function PublicTourViewer() {
       if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex]);
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, restartTrigger]);
 
   // Modified Autoplay Toggle to prioritize Play Tour
   const toggleAutoplay = useCallback(() => {
@@ -1190,6 +1232,7 @@ export default function PublicTourViewer() {
           autoRotate={isAutoplay}
           forcedCameraPosition={currentCamera}
           isPlaybackMode={isPlayingTour}
+          preloadSceneIds={preloadSceneIds}
           onOverlayPause={() => {
             if (isPlayingTour) {
               setIsPlayingTour(false);
@@ -1370,6 +1413,9 @@ export default function PublicTourViewer() {
               isAutoplay={isAutoplay || isPlayingTour}
               isTransitioning={isTransitioning}
               onSceneChange={selectedPlayTourId ? (idx) => {
+                if (idx === currentPlayTourSceneIndex) {
+                  setRestartTrigger(prev => prev + 1);
+                }
                 setCurrentPlayTourSceneIndex(idx);
                 if (!isPlayingTour) {
                   const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
@@ -1384,6 +1430,7 @@ export default function PublicTourViewer() {
               segmentDuration={selectedPlayTourId && currentPlayTourScene
                 ? (currentPlayTourScene.move_duration + (currentPlayTourScene.wait_duration || 0))
                 : (tour?.auto_change_interval || 12000)}
+              restartTrigger={restartTrigger}
             />
           </>
         )}
