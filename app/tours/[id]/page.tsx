@@ -1339,7 +1339,7 @@ export default function PublicTourViewer() {
 
         {/* 360° Experience Badge - Show when controls are not active */}
         {!showControls && (
-          <div className="absolute bottom-16 right-4 bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg font-bold shadow-lg z-20">
+          <div className="absolute bottom-4 right-4 bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg font-bold shadow-lg z-20">
             <span className="text-xl">360°</span> Experience
           </div>
         )}
