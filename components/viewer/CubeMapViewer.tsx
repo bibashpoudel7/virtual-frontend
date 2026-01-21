@@ -306,10 +306,10 @@ export default function CubeMapViewer({
               if (groupChild instanceof THREE.Sprite && groupChild.userData.baseScale) {
                 const scale = groupChild.userData.baseScale * scaleFactor;
                 groupChild.scale.set(scale, scale, 1);
-                groupChild.visible = true;
+                groupChild.visible = !isTransitioningRef.current;
               }
             });
-            child.visible = true;
+            child.visible = !isTransitioningRef.current;
           }
         });
       }
@@ -354,6 +354,9 @@ export default function CubeMapViewer({
             }
 
             child.scale.set(scale * pulseFactor, scale * pulseFactor, 1);
+
+            // Hide hotspots during transition
+            child.visible = !isTransitioningRef.current;
 
             // Update opacity
             if (child.material && 'opacity' in child.material) {
@@ -1165,10 +1168,11 @@ export default function CubeMapViewer({
     if (!container) return;
 
     const onPointerDown = (event: PointerEvent) => {
-      event.preventDefault();
+      // Disable interaction ONLY during transitions. 
+      // Playback mode should still allow initial coordinate capture for clicks.
+      if (isTransitioningRef.current) return;
 
-      // Disable user interaction during playback mode
-      if (isPlaybackMode) return;
+      event.preventDefault();
 
       const controls = controlsRef.current;
 
@@ -1222,22 +1226,12 @@ export default function CubeMapViewer({
     };
 
     const onPointerMove = (event: PointerEvent) => {
-      // Disable hover interactions when auto-rotating (playing)
-      if (isAutoRotatingRef.current || autoRotateRef.current) {
-        if (container.style.cursor !== 'grab') {
-          container.style.cursor = 'grab';
-        }
-        // Clear any existing hover state
-        if (hoveredHotspotRef.current) {
-          if (hoveredHotspotRef.current.userData) {
-            hoveredHotspotRef.current.userData.targetGlow = 0;
-          }
-          hoveredHotspotRef.current = null;
-        }
-        return;
-      }
-
       const controls = controlsRef.current;
+      // Disable interaction during transitions
+      if (isTransitioningRef.current) return;
+
+      // When auto-rotating (playing), we still want to allow hotspot hovering
+      // But we should track it even if not interacting (moving mouse without button down)
 
       // Check for hotspot/overlay hover
       if (!isEditMode && cameraRef.current) {
@@ -1299,8 +1293,12 @@ export default function CubeMapViewer({
         controls.isDragging = true;
       }
 
-      controls.lon = (controls.onPointerDownX - event.clientX) * 0.15 + controls.onPointerDownLon;
-      controls.lat = (event.clientY - controls.onPointerDownY) * 0.15 + controls.onPointerDownLat;
+      // Capture LON/LAT for click context even in playback, 
+      // but only apply them to actually ROTATE the camera if not in playback mode
+      if (!isPlaybackMode) {
+        controls.lon = (controls.onPointerDownX - event.clientX) * 0.15 + controls.onPointerDownLon;
+        controls.lat = (event.clientY - controls.onPointerDownY) * 0.15 + controls.onPointerDownLat;
+      }
     };
 
     const onPointerUp = (event: PointerEvent) => {
@@ -1320,16 +1318,10 @@ export default function CubeMapViewer({
 
       // Handle interactions (clicks)
       if (!wasDragging) {
-        // If autoplay OR playback is active, ANY click should pause it immediately
-        const isAnyPlaybackActive = isAutoRotatingRef.current || autoRotateRef.current || isPlaybackMode;
-        if (isAnyPlaybackActive && onOverlayPause) {
-          console.log('[CubeMapViewer] PAUSING - calling onOverlayPause');
-          onOverlayPause();
-          // We still continue to process the click (e.g. to navigate or show info), 
-          // but the pause happens first/simultaneously.
-        } else {
-          console.log('[CubeMapViewer] NOT PAUSING - conditions not met');
-        }
+        // Initial pause logic removed - will be re-added after targetHotspot calculation
+
+        // If we hit a hotspot, we handle it below and DON'T pause the overall tour immediately
+        // (The individual hotspot action like navigation will handle its own state changes)
 
         let clickedOnTarget = false;
         let targetHotspot: Hotspot | null = null;
@@ -1391,7 +1383,14 @@ export default function CubeMapViewer({
           }
         }
 
-        // 3. Action Logic
+        // 3. Handle pausing logic - ANY click on background during playback should pause it
+        const isAnyPlaybackActive = isAutoRotatingRef.current || autoRotateRef.current || isPlaybackMode;
+        if (isAnyPlaybackActive && onOverlayPause && !targetHotspot) {
+          console.log('[CubeMapViewer] PAUSING - calling onOverlayPause because background was clicked');
+          onOverlayPause();
+        }
+
+        // 4. Action Logic
         if (targetHotspot) {
           // Handle Navigation Hotspot (Matterport-style smooth walking transition)
           if (targetHotspot.kind === 'navigation') {
@@ -1741,6 +1740,7 @@ export default function CubeMapViewer({
           onPause={onOverlayPause}
           onOverlayClick={(overlay) => void 0}
           radius={45}
+          isTransitioning={isTransitioning}
         />
       )}
     </div>

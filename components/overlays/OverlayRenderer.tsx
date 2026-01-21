@@ -24,6 +24,7 @@ interface OverlayRendererProps {
   isAutoplay?: boolean;
   onPause?: () => void;
   radius?: number;
+  isTransitioning?: boolean;
 }
 
 // Helper function to format URLs
@@ -253,7 +254,8 @@ export default function OverlayRenderer({
   isFullscreen = false,
   isAutoplay = false,
   onPause,
-  radius = 450
+  radius = 450,
+  isTransitioning = false
 }: OverlayRendererProps) {
   const overlaySpritesRef = useRef<Map<string, THREE.Group>>(new Map());
   const [hoveredOverlay, setHoveredOverlay] = useState<Overlay | null>(null);
@@ -712,8 +714,8 @@ export default function OverlayRenderer({
   // Render hover tooltip
   const renderHoverTooltip = () => {
     // Show hover tooltip even when modal is open
-    // But don't show if autoplay is active
-    if (!hoveredOverlay || !hoverPosition || isAutoplay) return null;
+    // But don't show if autoplay is active or if we are transitioning
+    if (!hoveredOverlay || !hoverPosition || isAutoplay || isTransitioning) return null;
 
     let payload: any = {};
     try {
