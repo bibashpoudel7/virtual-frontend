@@ -10,6 +10,18 @@ const nextConfig: NextConfig = {
     // Allow production builds to successfully complete even if there are ESLint errors
     ignoreDuringBuilds: true,
   },
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'test.thenimto.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'images.unsplash.com',
+      },
+    ],
+  },
 };
 
 export default nextConfig;
