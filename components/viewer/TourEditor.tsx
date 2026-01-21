@@ -1837,16 +1837,49 @@ export default function TourEditor({
                     <div className="aspect-video bg-gray-100 rounded-t-lg overflow-hidden relative">
                       {scene.src_original_url ? (
                         <img
-                          src={scene.src_original_url}
+                          src={(() => {
+                            // 1. Try manifest preview first (most reliable)
+                            if (scene.tiles_manifest) {
+                              try {
+                                const manifest = typeof scene.tiles_manifest === 'string'
+                                  ? JSON.parse(scene.tiles_manifest)
+                                  : scene.tiles_manifest;
+                                if (manifest.preview) return manifest.preview;
+                              } catch (e) {
+                              }
+                            }
+                            // 2. Try thumb convention
+                            return scene.src_original_url.replace(/\.(jpg|jpeg|png)$/i, '_thumb.$1');
+                          })()}
                           alt={scene.name}
                           className="w-full h-full object-cover"
+                          loading="lazy"
                           onError={(e) => {
-                            // Fallback to a placeholder if image fails to load
-                            e.currentTarget.style.display = 'none';
+                            const img = e.currentTarget;
+                            const currentSrc = img.src;
+
+                            if (!img.dataset.fallbackState) {
+                              img.dataset.fallbackState = 'thumb_failed';
+                              // If we started with manifest/thumb and it failed, try standardized tiles path
+                              img.src = `${R2_PUBLIC_URL}/scenes/${scene.id}/tiles/preview.jpg`;
+                            } else if (img.dataset.fallbackState === 'thumb_failed') {
+                              img.dataset.fallbackState = 'tiles_preview_failed';
+                              // Try root preview path (legacy/simple upload)
+                              img.src = `${R2_PUBLIC_URL}/scenes/${scene.id}/preview.jpg`;
+                            } else if (img.dataset.fallbackState === 'tiles_preview_failed') {
+                              img.dataset.fallbackState = 'root_preview_failed';
+                              // Final resort: Original image (heavy)
+                              img.src = scene.src_original_url || '';
+                            } else {
+                              // Everything failed
+                              img.style.display = 'none';
+                              const placeholder = img.parentElement?.querySelector('.placeholder-icon');
+                              if (placeholder) (placeholder as HTMLElement).style.display = 'flex';
+                            }
                           }}
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-400">
+                        <div className="w-full h-full flex items-center justify-center text-gray-400 placeholder-icon">
                           <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                           </svg>
