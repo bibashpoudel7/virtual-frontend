@@ -4,7 +4,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import Toast, { ToastType } from '../ui/Toast';
 import { Tour, Scene, PlayTour, PlayTourScene } from '@/types/tour';
+import PlayTourOverlay from '../tours/PlayTourOverlay';
 import { tourService } from '@/services/tourService';
+
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
 
 interface PlayTourEditorProps {
     tourId: string;
@@ -312,7 +315,49 @@ export default function PlayTourEditor({
                                     className="text-xs p-2 bg-gray-50 border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-all text-left truncate font-medium text-gray-700 cursor-pointer"
                                     title={s.name}
                                 >
-                                    {s.src_original_url && <img src={s.src_original_url} className="w-full h-12 object-cover rounded mb-1" />}
+                                    {s.src_original_url && (
+                                        <img
+                                            src={(() => {
+                                                // 1. Try manifest preview first (most reliable)
+                                                if (s.tiles_manifest) {
+                                                    try {
+                                                        const manifest = typeof s.tiles_manifest === 'string'
+                                                            ? JSON.parse(s.tiles_manifest)
+                                                            : s.tiles_manifest;
+                                                        if (manifest.preview) return manifest.preview;
+                                                    } catch (e) {
+                                                        // Ignore parse error
+                                                    }
+                                                }
+                                                // 2. Try thumb convention
+                                                return s.src_original_url.replace(/\.(jpg|jpeg|png)$/i, '_thumb.$1');
+                                            })()}
+                                            alt={s.name}
+                                            className="w-full h-12 object-cover rounded mb-1"
+                                            loading="lazy"
+                                            onError={(e) => {
+                                                const img = e.currentTarget;
+                                                // const currentSrc = img.src;
+
+                                                if (!img.dataset.fallbackState) {
+                                                    img.dataset.fallbackState = 'thumb_failed';
+                                                    // If we started with manifest/thumb and it failed, try standardized tiles path
+                                                    img.src = `${R2_PUBLIC_URL}/scenes/${s.id}/tiles/preview.jpg`;
+                                                } else if (img.dataset.fallbackState === 'thumb_failed') {
+                                                    img.dataset.fallbackState = 'tiles_preview_failed';
+                                                    // Try root preview path (legacy/simple upload)
+                                                    img.src = `${R2_PUBLIC_URL}/scenes/${s.id}/preview.jpg`;
+                                                } else if (img.dataset.fallbackState === 'tiles_preview_failed') {
+                                                    img.dataset.fallbackState = 'root_preview_failed';
+                                                    // Final resort: Original image (heavy)
+                                                    img.src = s.src_original_url || '';
+                                                } else {
+                                                    // Everything failed
+                                                    img.style.display = 'none';
+                                                }
+                                            }}
+                                        />
+                                    )}
                                     {s.name || 'Untitled Scene'}
                                 </button>
                             ))}
