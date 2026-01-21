@@ -3,7 +3,7 @@
 import React from 'react';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
-import Pricing from '../components/Pricing';
+// import Pricing from '../components/Pricing';
 import HomeTourViewer from '../components/HomeTourViewer';
 import {
   Play,
@@ -135,7 +135,7 @@ const HomePage: React.FC = () => {
     <div className="min-h-screen bg-white">
       <Header />
 
-      <section className="relative bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 text-white">
+      <section className="relative bg-indigo-600 text-white">
         <div className="absolute inset-0 bg-black opacity-20"></div>
         <div className="relative container mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
@@ -156,10 +156,10 @@ const HomePage: React.FC = () => {
                   <Play className="w-5 h-5" />
                   Browse Virtual Tours
                 </button>
-                <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-200 flex items-center justify-center gap-2">
+                {/* <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-200 flex items-center justify-center gap-2">
                   Start Free Trial
                   <ArrowRight className="w-5 h-5" />
-                </button>
+                </button> */}
               </div>
               <div className="flex items-center gap-6">
                 <div className="flex -space-x-2">
@@ -202,7 +202,7 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      <section className="py-20 bg-gradient-to-r from-indigo-50 to-purple-50">
+      <section className="py-20 bg-indigo-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
             <h2 className="text-4xl font-bold text-gray-900 mb-4">
@@ -224,7 +224,7 @@ const HomePage: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300">
-              <div className="h-48 bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center">
+              <div className="h-48 bg-indigo-500 flex items-center justify-center">
                 <div className="text-white text-center">
                   <Camera className="w-12 h-12 mx-auto mb-2" />
                   <p className="text-sm">360° Experience</p>
@@ -242,7 +242,7 @@ const HomePage: React.FC = () => {
               </div>
             </div>
             <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300">
-              <div className="h-48 bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center">
+              <div className="h-48 bg-teal-500 flex items-center justify-center">
                 <div className="text-white text-center">
                   <Globe className="w-12 h-12 mx-auto mb-2" />
                   <p className="text-sm">Travel Destinations</p>
@@ -260,7 +260,7 @@ const HomePage: React.FC = () => {
               </div>
             </div>
             <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300">
-              <div className="h-48 bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center">
+              <div className="h-48 bg-purple-500 flex items-center justify-center">
                 <div className="text-white text-center">
                   <Users className="w-12 h-12 mx-auto mb-2" />
                   <p className="text-sm">Event Venues</p>
@@ -308,7 +308,7 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      <section className="py-20 bg-gradient-to-r from-indigo-50 to-purple-50">
+      <section className="py-20 bg-slate-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
             <h2 className="text-4xl font-bold text-gray-900 mb-4">
@@ -333,9 +333,9 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      <Pricing />
+      {/* <Pricing /> */}
 
-      <section className="py-20 bg-white">
+      {/* <section className="py-20 bg-white">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
             <h2 className="text-4xl font-bold text-gray-900 mb-4">
@@ -372,7 +372,7 @@ const HomePage: React.FC = () => {
             ))}
           </div>
         </div>
-      </section>
+      </section> */}
 
       <section className="py-20 bg-indigo-600 text-white">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center">
@@ -390,13 +390,13 @@ const HomePage: React.FC = () => {
               Browse Virtual Tours
               <ArrowRight className="w-5 h-5" />
             </button>
-            <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-200">
+            {/* <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-200">
               Start Your Free Trial
-            </button>
+            </button> */}
           </div>
-          <p className="mt-6 text-indigo-200">
+          {/* <p className="mt-6 text-indigo-200">
             No credit card required • 14-day free trial • Cancel anytime
-          </p>
+          </p> */}
         </div>
       </section>
 

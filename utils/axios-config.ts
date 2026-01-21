@@ -16,18 +16,18 @@ export const configureAxios = () => {
   axios.interceptors.request.use(
     (config) => {
       // Get token from localStorage (try multiple keys for compatibility)
-      const token = localStorage.getItem('accessToken') || 
-                   localStorage.getItem('auth_token') || 
-                   localStorage.getItem('token');
-      
+      const token = localStorage.getItem('accessToken') ||
+        localStorage.getItem('auth_token') ||
+        localStorage.getItem('token');
+
       if (token) {
         config.headers['Authorization'] = `Bearer ${token}`;
       }
-      
+
       // Add CORS headers
       config.headers['Content-Type'] = 'application/json';
       config.headers['Accept'] = 'application/json';
-      
+
       return config;
     },
     (error) => {
@@ -41,7 +41,7 @@ export const configureAxios = () => {
     (error) => {
       if (error.response?.status === 401) {
         console.log('Token expired - logging out user');
-        
+
         // Use the global logout function if available
         if (globalLogoutFunction) {
           globalLogoutFunction();
@@ -51,21 +51,27 @@ export const configureAxios = () => {
           localStorage.removeItem('token');
           localStorage.removeItem('user_data');
           localStorage.removeItem('user');
-          
+
           // Clear any user-specific cache entries
           Object.keys(localStorage).forEach(key => {
-            if (key.startsWith('userType_') || key.includes('_cache') || 
-                key.includes('user_') || key.includes('tour_')) {
+            if (key.startsWith('userType_') || key.includes('_cache') ||
+              key.includes('user_') || key.includes('tour_')) {
               localStorage.removeItem(key);
             }
           });
-          
-          // Clear axios auth header
-          delete axios.defaults.headers.common['Authorization'];
-          
-          // Redirect to login
+
+          // Redirect to login ONLY if not on a public page
           if (typeof window !== 'undefined') {
-            window.location.href = '/login';
+            const publicPaths = ['/', '/showcase', '/tours'];
+            const currentPath = window.location.pathname;
+            const isPublicPath = publicPaths.some(path =>
+              currentPath === path || (path !== '/' && currentPath.startsWith(path))
+            );
+
+            if (!isPublicPath) {
+              console.log('Not on a public path, redirecting to login...');
+              window.location.href = '/login';
+            }
           }
         }
       }

@@ -18,9 +18,9 @@ interface MicrofrontendWrapperProps {
   config?: Partial<MicrofrontendConfig>;
 }
 
-export default function MicrofrontendWrapper({ 
-  children, 
-  config 
+export default function MicrofrontendWrapper({
+  children,
+  config
 }: MicrofrontendWrapperProps) {
   const [isConfigured, setIsConfigured] = useState(false);
   const [configuration, setConfiguration] = useState<MicrofrontendConfig>({
@@ -35,11 +35,11 @@ export default function MicrofrontendWrapper({
   useEffect(() => {
     // Check if running in iframe
     const isEmbedded = window.parent !== window;
-    
+
     if (isEmbedded) {
       // Request configuration from parent
       window.parent.postMessage({ type: 'REQUEST_CONFIG' }, '*');
-      
+
       // Listen for configuration
       const handleMessage = (event: MessageEvent) => {
         if (event.data.type === 'MICROFRONTEND_CONFIG') {
@@ -51,16 +51,16 @@ export default function MicrofrontendWrapper({
           setIsConfigured(true);
         }
       };
-      
+
       window.addEventListener('message', handleMessage);
-      
+
       // Timeout fallback
       setTimeout(() => {
         if (!isConfigured) {
           setIsConfigured(true);
         }
       }, 2000);
-      
+
       return () => {
         window.removeEventListener('message', handleMessage);
       };
@@ -72,21 +72,21 @@ export default function MicrofrontendWrapper({
   useEffect(() => {
     // Configure axios defaults
     axios.defaults.baseURL = configuration.apiUrl;
-    
+
     // Add request interceptor for cross-origin
     axios.interceptors.request.use(
       (config) => {
         // Add CORS headers if needed
         config.headers['X-Requested-With'] = 'XMLHttpRequest';
-        
+
         // Add property ID if available
         if (configuration.propertyId) {
           config.headers['X-Property-ID'] = configuration.propertyId;
         }
-        
+
         // Add source header
         config.headers['X-Source'] = configuration.mode === 'embedded' ? 'main_app' : 'standalone';
-        
+
         return config;
       },
       (error) => {
@@ -103,8 +103,18 @@ export default function MicrofrontendWrapper({
           if (configuration.mode === 'embedded') {
             window.parent.postMessage({ type: 'AUTH_REQUIRED' }, '*');
           } else {
-            // Redirect to login
-            window.location.href = '/login';
+            // Redirect to login ONLY if not on a public page
+            if (typeof window !== 'undefined') {
+              const publicPaths = ['/', '/showcase', '/tours'];
+              const currentPath = window.location.pathname;
+              const isPublicPath = publicPaths.some(path =>
+                currentPath === path || (path !== '/' && currentPath.startsWith(path))
+              );
+
+              if (!isPublicPath) {
+                window.location.href = '/login';
+              }
+            }
           }
         }
         return Promise.reject(error);
@@ -124,7 +134,7 @@ export default function MicrofrontendWrapper({
   }
 
   return (
-    <AuthProvider 
+    <AuthProvider
       mainBackendUrl={configuration.mainAppUrl}
       microserviceUrl={configuration.apiUrl}
     >

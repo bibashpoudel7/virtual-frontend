@@ -164,15 +164,16 @@ const Footer: React.FC = () => {
             <div className="flex flex-col md:flex-row items-center gap-4 mb-4 md:mb-0">
               <div className="flex items-center gap-2 text-gray-400">
                 <Mail className="w-4 h-4" />
-                <span>contact@virtualtours.com</span>
+                {/* <span>contact@virtualtours.com</span> */}
+                <span>info@thenimto.com</span>
               </div>
               <div className="flex items-center gap-2 text-gray-400">
                 <Phone className="w-4 h-4" />
-                <span>+1 (555) 123-4567</span>
+                <span>+977-9802364691</span>
               </div>
               <div className="flex items-center gap-2 text-gray-400">
                 <MapPin className="w-4 h-4" />
-                <span>San Francisco, CA</span>
+                <span>Baluwatar Kathmandu, Nepal</span>
               </div>
             </div>
             <div className="text-gray-400 text-sm">

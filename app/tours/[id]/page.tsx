@@ -1278,7 +1278,7 @@ export default function PublicTourViewer() {
           </div>
         )}
 
-        {/* Close Button - Always visible */}
+        {/* Close Button - Always visible
         <div className="absolute top-4 right-4 z-30">
           <button
             onClick={() => window.close()}
@@ -1288,10 +1288,11 @@ export default function PublicTourViewer() {
             <X className="w-5 h-5" />
           </button>
         </div>
+        */}
 
         {/* Top Right Controls - Only show when controls are active */}
         {showControls && (
-          <div className="absolute top-4 right-16 z-30 flex gap-2">
+          <div className="absolute top-4 right-4 z-30 flex gap-2">
             {/* Share Button */}
             <button
               onClick={handleShare}

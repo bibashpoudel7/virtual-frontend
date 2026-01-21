@@ -110,8 +110,36 @@ class TourService {
     return this.fetchWithAuth(`tours/${id}`);
   }
 
+  async getPublicTour(id: string): Promise<Tour> {
+    return this.fetchWithAuth(`tours/${id}/public`);
+  }
+
+  async getPublicScenes(tourId: string): Promise<Scene[]> {
+    const response = await this.fetchWithAuth(`tours/${tourId}/scenes/public?limit=500`);
+    if (response && response.datas && Array.isArray(response.datas)) {
+      return response.datas;
+    }
+    return Array.isArray(response) ? response : (response?.scenes || []);
+  }
+
+  async getPublicPlayTours(tourId: string): Promise<PlayTour[]> {
+    const tours = await this.fetchWithAuth(`tours/${tourId}/play-tours/public`) as PlayTour[];
+    if (Array.isArray(tours)) {
+      tours.forEach(tour => {
+        if (tour.play_tour_scenes) {
+          tour.play_tour_scenes.sort((a, b) => a.sequence_order - b.sequence_order);
+        }
+      });
+    }
+    return tours;
+  }
+
   async listTours(): Promise<Tour[]> {
     return this.fetchWithAuth(`tours`);
+  }
+
+  async listPublicTours(): Promise<Tour[]> {
+    return this.fetchWithAuth(`tours/public`);
   }
 
   async getUploadURL(sceneId: string, prefix?: string): Promise<GetUploadURLResponse> {

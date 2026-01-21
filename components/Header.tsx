@@ -10,7 +10,7 @@ const Header: React.FC = () => {
   const publicNavigation = [
     { name: 'Home', href: '/', icon: Home },
     { name: 'Browse Tours', href: '/showcase', icon: MapPin },
-    { name: 'Pricing', href: '/pricing', icon: DollarSign },
+    // { name: 'Pricing', href: '/pricing', icon: DollarSign },
     { name: 'Contact', href: '/contact', icon: Phone },
   ];
 
@@ -18,7 +18,7 @@ const Header: React.FC = () => {
     { name: 'Home', href: '/', icon: Home },
     { name: 'Browse Tours', href: '/showcase', icon: MapPin },
     { name: 'My Tours', href: '/admin/tours', icon: Calendar },
-    { name: 'Pricing', href: '/pricing', icon: DollarSign },
+    // { name: 'Pricing', href: '/pricing', icon: DollarSign },
     { name: 'Contact', href: '/contact', icon: Phone },
   ];
 

@@ -41,8 +41,8 @@ interface AuthProviderProps {
   microserviceUrl?: string;
 }
 
-export const AuthProvider: React.FC<AuthProviderProps> = ({ 
-  children, 
+export const AuthProvider: React.FC<AuthProviderProps> = ({
+  children,
   mainBackendUrl = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL || 'http://localhost:3000',
   microserviceUrl = process.env.NEXT_PUBLIC_MICROSERVICE_URL || 'http://localhost:8080'
 }) => {
@@ -57,35 +57,46 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     localStorage.removeItem('auth_token');
     localStorage.removeItem('accessToken');
     localStorage.removeItem('user_data');
-    
+
     // Clean up any userType cache entries
     Object.keys(localStorage).forEach(key => {
       if (key.startsWith('userType_')) {
         localStorage.removeItem(key);
       }
     });
-    
+
     // Clear tours cache and other user-specific data
     localStorage.removeItem('tours_cache');
     localStorage.removeItem('tours_cache_time');
-    
+
     // Clear any other user-specific cache entries
     Object.keys(localStorage).forEach(key => {
       if (key.includes('_cache') || key.includes('user_') || key.includes('tour_')) {
         localStorage.removeItem(key);
       }
     });
-    
+
     delete axios.defaults.headers.common['Authorization'];
-    
+
     // Notify parent if in iframe
     if (window.parent !== window) {
       window.parent.postMessage({ type: 'LOGOUT' }, '*');
     }
 
-    // Redirect to login page
+    // Redirect to login page ONLY if not on a public page
     if (typeof window !== 'undefined') {
-      window.location.href = '/login';
+      const publicPaths = ['/', '/showcase', '/tours'];
+      const currentPath = window.location.pathname;
+      const isPublicPath = publicPaths.some(path =>
+        currentPath === path || (path !== '/' && currentPath.startsWith(path))
+      );
+
+      if (!isPublicPath) {
+        console.log('Not on a public path, redirecting to login...');
+        window.location.href = '/login';
+      } else {
+        console.log('Already on a public path, staying here after logout/token clear.');
+      }
     }
   }, []);
 
@@ -105,9 +116,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     // NestJS typically stores as 'accessToken'
     const storedToken = localStorage.getItem('accessToken') || localStorage.getItem('auth_token');
     const parentToken = window.parent !== window ? checkParentToken() : null;
-    
+
     const authToken = parentToken || storedToken;
-    
+
     if (authToken) {
       validateAndSetToken(authToken);
     } else {
@@ -116,7 +127,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
 
     // Listen for messages from parent (main app)
     window.addEventListener('message', handleParentMessage);
-    
+
     return () => {
       window.removeEventListener('message', handleParentMessage);
     };
@@ -127,7 +138,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     try {
       // Request token from parent
       window.parent.postMessage({ type: 'REQUEST_AUTH_TOKEN' }, '*');
-      
+
       // This would typically be handled asynchronously
       // For now, check sessionStorage set by parent
       return sessionStorage.getItem('parent_auth_token');
@@ -169,7 +180,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
 
       // Validate token with Go microservice backend
       const response = await axios.post(`${microserviceUrl}/api/auth/validate`, {}, {
-        headers: { 
+        headers: {
           'Authorization': `Bearer ${authToken}`,
           'Content-Type': 'application/json'
         }
@@ -180,7 +191,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
         setUser(response.data.user);
         localStorage.setItem('auth_token', authToken);
         localStorage.setItem('user_data', JSON.stringify(response.data.user));
-        
+
         // Set default axios header
         axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
       } else {
@@ -189,11 +200,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       }
     } catch (error: unknown) {
       console.error('Token validation failed:', error);
-      
+
       if ((error as unknown as { response?: { status?: number } })?.response?.status === 401) {
         return;
       }
-      
+
       if ((error as unknown as { code?: string })?.code === 'ECONNREFUSED' || (error as unknown as { message?: string })?.message?.includes('ECONNREFUSED')) {
         const storedUserData = localStorage.getItem('user_data');
         if (storedUserData && authToken) {
@@ -209,7 +220,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
           }
         }
       }
-      
+
       logout();
     } finally {
       setIsLoading(false);
@@ -224,7 +235,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     localStorage.setItem('auth_token', authToken);
     localStorage.setItem('user_data', JSON.stringify(userData));
     axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
-    
+
     // Notify parent if in iframe
     if (window.parent !== window) {
       window.parent.postMessage({
@@ -242,7 +253,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
       const response = await axios.get(`${microserviceUrl}/api/payment/check-limit`, {
         headers: getAuthHeaders()
       });
-      
+
       return response.data.paymentRequired;
     } catch (error) {
       console.error('Payment check failed:', error);
