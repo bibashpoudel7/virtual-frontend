@@ -1391,6 +1391,17 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
           </div>
         )}
 
+        {/* TheNimto Logo - Only visible after controls are activated */}
+        {showControls && (
+          <div className="absolute bottom-1 right-4 z-30">
+            <img
+              src="/TheNimto.png"
+              alt="TheNimto"
+              className="h-30 w-auto opacity-80 hover:opacity-100 transition-opacity duration-200"
+            />
+          </div>
+        )}
+
         {/* Top Right Controls - Only show when controls are active */}
         {showControls && (
           <div className="absolute top-4 right-4 z-30 flex gap-2">

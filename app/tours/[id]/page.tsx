@@ -1339,7 +1339,7 @@ export default function PublicTourViewer() {
 
         {/* 360° Experience Badge - Show when controls are not active */}
         {!showControls && (
-          <div className="absolute bottom-4 right-4 bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg font-bold shadow-lg z-20">
+          <div className="absolute bottom-16 right-4 bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg font-bold shadow-lg z-20">
             <span className="text-xl">360°</span> Experience
           </div>
         )}
@@ -1434,6 +1434,17 @@ export default function PublicTourViewer() {
               restartTrigger={restartTrigger}
             />
           </>
+        )}
+
+        {/* TheNimto Logo - Only visible after controls are activated */}
+        {showControls && (
+          <div className="absolute bottom-1 right-4 z-30">
+            <img
+              src="/TheNimto.png"
+              alt="TheNimto"
+              className="h-30 w-auto opacity-80 hover:opacity-100 transition-opacity duration-200"
+            />
+          </div>
         )}
       </div>
 
