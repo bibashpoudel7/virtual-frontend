@@ -23,6 +23,8 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-dropzone": "^14.3.8",
+    "react-hook-form": "^7.71.1",
+    "react-phone-number-input": "^3.4.14",
     "react-toastify": "^11.0.5",
     "three": "^0.180.0"
   },

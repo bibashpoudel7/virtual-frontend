@@ -1,6 +1,8 @@
+'use client';
+
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Menu, X, Home, MapPin, Calendar, DollarSign, Phone, User, LogOut } from 'lucide-react';
+import { Menu, X, Home, MapPin, Calendar, Phone, User, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 const Header: React.FC = () => {

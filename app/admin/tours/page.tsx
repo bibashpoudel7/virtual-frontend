@@ -140,6 +140,15 @@ export default function ToursPage() {
                 >
                   Create Tour
                 </button>
+                {/* Only show Contacts button for SUPERADMIN (role === '1') */}
+                {userRole === '1' && (
+                  <button
+                    onClick={() => router.push('/admin/contacts')}
+                    className="px-4 py-2 rounded cursor-pointer bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  >
+                    Contacts
+                  </button>
+                )}
               </div>
               
               {/* Action Buttons */}
