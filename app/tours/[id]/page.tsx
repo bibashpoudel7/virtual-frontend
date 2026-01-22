@@ -1,5 +1,6 @@
 'use client';
 
+import { Icon } from '@iconify/react';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
@@ -1403,6 +1404,18 @@ export default function PublicTourViewer() {
                         <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-2 border-r-2 border-t-4 border-transparent border-t-black/80"></div>
                       </div>
                     </button>
+                  </div>
+                )}
+
+                {/* Walking Man Icon - Shows when tour is paused (like Matterport) */}
+                {!isAutoplay && !isPlayingTour && !isTransitioning && (
+                  <div className="bg-white rounded-full p-2.5 flex items-center justify-center shadow-lg border border-gray-200 transition-all duration-500">
+                    <Icon 
+                      icon="mdi:walk" 
+                      width="20" 
+                      height="20" 
+                      className="text-red-500"
+                    />
                   </div>
                 )}
               </div>

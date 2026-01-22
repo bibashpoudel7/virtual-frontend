@@ -1,5 +1,6 @@
 'use client';
 
+import { Icon } from '@iconify/react';
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Tour, Scene, Hotspot } from '@/types/tour';
@@ -782,6 +783,18 @@ export default function VirtualTourViewer({
               {scene.name}
             </button>
           ))}
+
+          {/* Walking Man Icon - Shows when tour is paused (like Matterport) */}
+          {!isAutoplay && !isLoading && !error && (
+            <div className="bg-white rounded-full p-2.5 flex items-center justify-center shadow-lg border border-gray-200 transition-all duration-500">
+              <Icon 
+                icon="mdi:walk" 
+                width="20" 
+                height="20" 
+                className="text-red-500"
+              />
+            </div>
+          )}
         </div>
       )}
 
