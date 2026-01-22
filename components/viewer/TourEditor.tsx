@@ -329,6 +329,17 @@ export default function TourEditor({
   const playTourLastSceneIndexRef = useRef<number>(0);
   const playTourRestartTriggerRef = useRef<number>(0);
   const [restartTrigger, setRestartTrigger] = useState(0);
+  const [isManualSceneChange, setIsManualSceneChange] = useState(false);
+
+  // Reset manual scene change flag after CubeMapViewer processes it
+  useEffect(() => {
+    if (isManualSceneChange) {
+      const timer = setTimeout(() => {
+        setIsManualSceneChange(false);
+      }, 100); // Small delay to ensure CubeMapViewer processes the flag
+      return () => clearTimeout(timer);
+    }
+  }, [isManualSceneChange]);
 
 
   const playTourDisplayScenes = useMemo(() => {
@@ -544,6 +555,9 @@ export default function TourEditor({
   const handleSceneChange = useCallback((sceneId: string) => {
     if (sceneId === currentSceneId) return; // Don't transition to the same scene
 
+    // This is hotspot navigation, not manual scene change
+    setIsManualSceneChange(false);
+
     setIsTransitioning(true);
 
     // Update both scene ID and index
@@ -738,6 +752,9 @@ export default function TourEditor({
   const handleSceneChangeByIndex = useCallback((index: number) => {
     if (index === currentSceneIndex || isTransitioning) return;
 
+    // Mark this as a manual scene change (user clicked navigation buttons)
+    setIsManualSceneChange(true);
+
     setIsTransitioning(true);
 
     // Immediate scene change with enhanced loading feedback
@@ -753,16 +770,90 @@ export default function TourEditor({
   }, [currentSceneIndex, isTransitioning, scenes]);
 
   const handlePrevScene = useCallback(() => {
-    if (currentSceneIndex > 0) {
-      handleSceneChangeByIndex(currentSceneIndex - 1);
+    if (selectedPlayTourId && playTourDisplayScenes) {
+      // Navigate through Play Tour sequence - direct navigation without scene sync
+      if (currentPlayTourSceneIndex > 0) {
+        const newIndex = currentPlayTourSceneIndex - 1;
+        setCurrentPlayTourSceneIndex(newIndex);
+        
+        // Mark this as a manual scene change to prevent sync issues
+        setIsManualSceneChange(true);
+        
+        // Interrupt any active playback
+        setIsPlayingTour(false);
+        setIsAutoplay(false);
+        
+        // Find the corresponding scene and change directly WITHOUT calling handleSceneChange
+        const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+        const pScene = selectedTour?.play_tour_scenes?.[newIndex];
+        if (pScene) {
+          const targetScene = scenes.find(s => s.id === pScene.scene_id);
+          if (targetScene) {
+            setIsTransitioning(true);
+            
+            // Direct scene change without sync logic
+            setCurrentSceneId(pScene.scene_id);
+            const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
+            if (sceneIdx !== -1) {
+              setCurrentSceneIndex(sceneIdx);
+            }
+            
+            setTimeout(() => {
+              setIsTransitioning(false);
+            }, 1500);
+          }
+        }
+      }
+    } else {
+      // Navigate through base scenes
+      if (currentSceneIndex > 0) {
+        handleSceneChangeByIndex(currentSceneIndex - 1);
+      }
     }
-  }, [currentSceneIndex, handleSceneChangeByIndex]);
+  }, [currentSceneIndex, handleSceneChangeByIndex, selectedPlayTourId, playTourDisplayScenes, currentPlayTourSceneIndex, playTours, scenes]);
 
   const handleNextScene = useCallback(() => {
-    if (currentSceneIndex < scenes.length - 1) {
-      handleSceneChangeByIndex(currentSceneIndex + 1);
+    if (selectedPlayTourId && playTourDisplayScenes) {
+      // Navigate through Play Tour sequence - direct navigation without scene sync
+      if (currentPlayTourSceneIndex < playTourDisplayScenes.length - 1) {
+        const newIndex = currentPlayTourSceneIndex + 1;
+        setCurrentPlayTourSceneIndex(newIndex);
+        
+        // Mark this as a manual scene change to prevent sync issues
+        setIsManualSceneChange(true);
+        
+        // Interrupt any active playback
+        setIsPlayingTour(false);
+        setIsAutoplay(false);
+        
+        // Find the corresponding scene and change directly WITHOUT calling handleSceneChange
+        const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+        const pScene = selectedTour?.play_tour_scenes?.[newIndex];
+        if (pScene) {
+          const targetScene = scenes.find(s => s.id === pScene.scene_id);
+          if (targetScene) {
+            setIsTransitioning(true);
+            
+            // Direct scene change without sync logic
+            setCurrentSceneId(pScene.scene_id);
+            const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
+            if (sceneIdx !== -1) {
+              setCurrentSceneIndex(sceneIdx);
+            }
+            
+            setTimeout(() => {
+              setIsTransitioning(false);
+            }, 1500);
+          }
+        }
+      }
+    } else {
+      // Navigate through base scenes
+      if (currentSceneIndex < scenes.length - 1) {
+        handleSceneChangeByIndex(currentSceneIndex + 1);
+      }
     }
-  }, [currentSceneIndex, scenes.length, handleSceneChangeByIndex]);
+  }, [currentSceneIndex, scenes.length, handleSceneChangeByIndex, selectedPlayTourId, playTourDisplayScenes, currentPlayTourSceneIndex, playTours, scenes]);
 
   const handleHotspotClick = useCallback((hotspot: Hotspot) => {
     // Pause any active autoplay when user manually interacts with hotspots
@@ -1564,6 +1655,7 @@ export default function TourEditor({
           isPlaybackMode={isPlayingTour}
           cameraControlRef={cameraControlRef}
           preloadSceneIds={preloadSceneIds}
+          isManualSceneChange={isManualSceneChange}
         />
 
         {/* Pause Animation Overlay */}
