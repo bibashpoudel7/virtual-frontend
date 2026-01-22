@@ -3,6 +3,7 @@
 import { Icon } from '@iconify/react';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Tour, Scene, Hotspot, Overlay, PlayTour } from '@/types/tour';
+import { useAuth } from '@/contexts/AuthContext';
 
 const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
 import { tourService } from '@/services/tourService';
@@ -371,6 +372,7 @@ const ProgressBar = React.memo(({
 ProgressBar.displayName = 'ProgressBar';
 
 const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
+  const { isAuthenticated, isLoading } = useAuth();
   const [currentTour, setCurrentTour] = useState<Tour | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [currentSceneIndex, setCurrentSceneIndex] = useState(0);
@@ -406,121 +408,156 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const playTourProgressRef = useRef<number>(0);
   const playTourLastSceneIndexRef = useRef<number>(0);
   const playTourRestartTriggerRef = useRef<number>(0);
+  const fetchInProgressRef = useRef<boolean>(false);
 
-  // Fetch tours on component mount
-  useEffect(() => {
-    const fetchTours = async () => {
-      try {
-        setLoading(true);
+  // Memoize the fetch function to prevent unnecessary re-creations
+  const fetchTours = useCallback(async () => {
+    // Prevent duplicate API calls
+    if (fetchInProgressRef.current) {
+      return;
+    }
 
-        // 1. Try to fetch user-specific tours if authenticated
-        const token = localStorage.getItem('accessToken') || localStorage.getItem('auth_token');
-        let toursData: Tour[] = [];
-        let isGuest = !token;
+    // Wait for authentication check to complete before deciding which API to use
+    if (isLoading) {
+      return;
+    }
 
-        if (token) {
-          try {
-            toursData = await tourService.listTours();
-          } catch (authErr) {
-            console.warn('Auth token found but failed to list tours, falling back to public:', authErr);
-            isGuest = true;
-          }
-        }
+    try {
+      fetchInProgressRef.current = true;
+      setLoading(true);
 
-        let usingPublicApi = false;
+      // 1. Try to fetch user-specific tours if authenticated
+      let toursData: Tour[] = [];
+      let usingPublicApi = false;
+      let selectedTour: Tour | null = null;
 
-        // 2. Fallback to public tours if guest or no user tours found
-        if (isGuest || !toursData || toursData.length === 0) {
-          console.log('[HomeTourViewer] Fetching public showcase tours...');
-          try {
-            toursData = await tourService.listPublicTours();
-            usingPublicApi = true;
-          } catch (pubErr) {
-            console.error('Failed to fetch public tours:', pubErr);
-            throw pubErr;
-          }
-        }
+      if (isAuthenticated) {
+        // User is authenticated - only use authenticated API
+        try {
+          toursData = await tourService.listTours();
 
-        if (toursData && toursData.length > 0) {
-          // Select the first tour from the list for consistency with showcase
-          const selectedTour = toursData[0];
+          if (toursData && toursData.length > 0) {
+            // Filter for featured tours first
+            const featuredTours = toursData.filter(tour => tour.is_featured_on_homepage === true);
 
-          // Fetch the FULL tour details, scenes and play tours
-          // Use public endpoints if we are in guest mode or on public fallback
-          let fullTourData: Tour;
-          let scenesData: Scene[] = [];
-          let playToursData: PlayTour[] = [];
-
-          if (usingPublicApi) {
-            console.log('[HomeTourViewer] Loading tour details via PUBLIC API for tour:', selectedTour.id);
-            fullTourData = await tourService.getPublicTour(selectedTour.id);
-            scenesData = await tourService.getPublicScenes(selectedTour.id);
-            try {
-              playToursData = await tourService.getPublicPlayTours(selectedTour.id);
-            } catch (e) {
-              console.warn('Public play tours not found:', e);
-              playToursData = [];
+            if (featuredTours.length > 0) {
+              // Use the first featured tour
+              selectedTour = featuredTours[0];
+              console.log('[HomeTourViewer] Found featured tour:', selectedTour.name);
+            } else {
+              // No featured tours found, use the first available tour
+              selectedTour = toursData[0];
+              console.log('[HomeTourViewer] No featured tours found, using first available tour:', selectedTour.name);
             }
           } else {
-            console.log('[HomeTourViewer] Loading tour details via AUTH API for tour:', selectedTour.id);
-            fullTourData = await tourService.getTour(selectedTour.id);
-            scenesData = await tourService.getAllScenes(selectedTour.id);
-            try {
-              playToursData = await tourService.listPlayTours(selectedTour.id);
-            } catch (e) {
-              console.warn('Auth play tours not found:', e);
-              playToursData = [];
-            }
+            setError('No tours available for your account');
+            return;
           }
+        } catch (authErr) {
+          console.error('Failed to fetch authenticated tours:', authErr);
+          setError('Failed to load your tours');
+          return;
+        }
+      } else {
+        // User is not authenticated - use public API
+        console.log('[HomeTourViewer] User not authenticated, fetching public tours...');
+        try {
+          toursData = await tourService.listPublicTours();
+          usingPublicApi = true;
+          if (toursData && toursData.length > 0) {
+            // Select the first tour from the public list
+            selectedTour = toursData[0];
+            console.log('[HomeTourViewer] Using public tour:', selectedTour.name);
+          } else {
+            setError('No public tours available');
+            return;
+          }
+        } catch (pubErr) {
+          console.error('Failed to fetch public tours:', pubErr);
+          setError('Failed to load virtual tours');
+          return;
+        }
+      }
 
-          setCurrentTour(fullTourData);
-          const validScenesData = scenesData || [];
-          setScenes(validScenesData);
+      if (selectedTour) {
+        // Use the selected tour data directly from the list API (no need for individual tour API call)
+        // Only fetch scenes and play tours separately
+        let scenesData: Scene[] = [];
+        let playToursData: PlayTour[] = [];
 
-          // Extract hotspots and overlays
-          const preloadedHotspots = validScenesData.flatMap((s: Scene) => s.hotspots || []);
-          const preloadedOverlays = validScenesData.flatMap((s: Scene) => s.overlays || []);
-
-          setAllHotspots(preloadedHotspots);
-          setAllOverlays(preloadedOverlays);
-
-          // Sort play tour scenes by sequence order
-          const finalPlayTours = (playToursData || []).map((pt: any) => {
-            if (pt.play_tour_scenes) {
-              return {
-                ...pt,
-                play_tour_scenes: [...pt.play_tour_scenes].sort((a: any, b: any) => (a.sequence_order || 0) - (b.sequence_order || 0))
-              };
-            }
-            return pt;
-          });
-
-          setPlayTours(finalPlayTours);
-          if (finalPlayTours.length > 0) {
-            setSelectedPlayTourId(finalPlayTours[0].id);
-
-            const firstPlayTour = finalPlayTours[0];
-            if (firstPlayTour.play_tour_scenes && firstPlayTour.play_tour_scenes.length > 0) {
-              const firstSceneId = firstPlayTour.play_tour_scenes[0].scene_id;
-              const sceneIndex = validScenesData.findIndex((s: Scene) => s.id === firstSceneId);
-              if (sceneIndex !== -1) {
-                setCurrentSceneIndex(sceneIndex);
-              }
-            }
+        if (usingPublicApi) {
+          scenesData = await tourService.getPublicScenes(selectedTour.id);
+          try {
+            playToursData = await tourService.getPublicPlayTours(selectedTour.id);
+          } catch (e) {
+            console.warn('Public play tours not found:', e);
+            playToursData = [];
           }
         } else {
-          setError('No tours available');
+          scenesData = await tourService.getAllScenes(selectedTour.id);
+          try {
+            playToursData = await tourService.listPlayTours(selectedTour.id);
+          } catch (e) {
+            console.warn('Auth play tours not found:', e);
+            playToursData = [];
+          }
         }
-      } catch (err) {
-        console.error('Error fetching tours:', err);
-        setError('Failed to load virtual tours');
-      } finally {
-        setLoading(false);
-      }
-    };
 
+        // Use the tour data directly from the list (no additional API call needed)
+        setCurrentTour(selectedTour);
+        const validScenesData = scenesData || [];
+        setScenes(validScenesData);
+
+        // Extract hotspots and overlays
+        const preloadedHotspots = validScenesData.flatMap((s: Scene) => s.hotspots || []);
+        const preloadedOverlays = validScenesData.flatMap((s: Scene) => s.overlays || []);
+
+        setAllHotspots(preloadedHotspots);
+        setAllOverlays(preloadedOverlays);
+
+        // Sort play tour scenes by sequence order
+        const finalPlayTours = (playToursData || []).map((pt: any) => {
+          if (pt.play_tour_scenes) {
+            return {
+              ...pt,
+              play_tour_scenes: [...pt.play_tour_scenes].sort((a: any, b: any) => (a.sequence_order || 0) - (b.sequence_order || 0))
+            };
+          }
+          return pt;
+        });
+
+        setPlayTours(finalPlayTours);
+        if (finalPlayTours.length > 0) {
+          setSelectedPlayTourId(finalPlayTours[0].id);
+
+          const firstPlayTour = finalPlayTours[0];
+          if (firstPlayTour.play_tour_scenes && firstPlayTour.play_tour_scenes.length > 0) {
+            const firstSceneId = firstPlayTour.play_tour_scenes[0].scene_id;
+            const sceneIndex = validScenesData.findIndex((s: Scene) => s.id === firstSceneId);
+            if (sceneIndex !== -1) {
+              setCurrentSceneIndex(sceneIndex);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching tours:', err);
+      setError('Failed to load virtual tours');
+    } finally {
+      setLoading(false);
+      fetchInProgressRef.current = false;
+    }
+  }, [isAuthenticated, isLoading]);
+
+  // Fetch tours on component mount and when authentication changes
+  useEffect(() => {
     fetchTours();
-  }, []);
+
+    // Cleanup function to reset fetch progress if component unmounts
+    return () => {
+      fetchInProgressRef.current = false;
+    };
+  }, [fetchTours]);
 
   const playTourDisplayScenes = React.useMemo(() => {
     if (!selectedPlayTourId) return null;
@@ -1514,10 +1551,10 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
                 {/* Walking Man Icon - Shows when tour is paused (like Matterport) */}
                 {!isAutoplay && !isPlayingTour && !isTransitioning && (
                   <div className="bg-white rounded-full p-2.5 flex items-center justify-center shadow-lg border border-gray-200 transition-all duration-500">
-                    <Icon 
-                      icon="mdi:walk" 
-                      width="20" 
-                      height="20" 
+                    <Icon
+                      icon="mdi:walk"
+                      width="20"
+                      height="20"
                       className="text-red-500"
                     />
                   </div>
