@@ -62,7 +62,7 @@ const Header: React.FC = () => {
                   <Link
                     key={item.name}
                     href={item.href}
-                    className={`px-3 py-2 rounded-md text-base font-semibold transition-colors duration-200 flex items-center gap-2 ${
+                    className={`px-3 py-2 rounded-md text-base font-normal transition-colors duration-200 flex items-center gap-2 ${
                       active
                         ? 'text-indigo-600'
                         : 'text-gray-700 hover:text-indigo-600'
@@ -80,7 +80,7 @@ const Header: React.FC = () => {
                   </span> */}
                   <button
                     onClick={handleLogout}
-                    className="bg-red-600 text-white px-3 py-2 rounded-md text-base font-semibold hover:bg-red-700 transition-colors duration-200 flex items-center gap-2 cursor-pointer"
+                    className="bg-red-600 text-white px-3 py-2 rounded-md text-base font-normal hover:bg-red-700 transition-colors duration-200 flex items-center gap-2 cursor-pointer"
                   >
                     <LogOut className="w-5 h-5" />
                     Sign Out
@@ -88,7 +88,7 @@ const Header: React.FC = () => {
                 </div>
               ) : (
                 <Link href="/login">
-                  <button className="bg-indigo-600 text-white px-3 py-2 rounded-md text-base font-semibold hover:bg-indigo-700 transition-colors duration-200 flex items-center gap-2 cursor-pointer">
+                  <button className="bg-indigo-600 text-white px-3 py-2 rounded-md text-base font-normal hover:bg-indigo-700 transition-colors duration-200 flex items-center gap-2 cursor-pointer">
                     <User className="w-5 h-5" />
                     Sign In
                   </button>
@@ -116,7 +116,7 @@ const Header: React.FC = () => {
                   <Link
                     key={item.name}
                     href={item.href}
-                    className={`block px-3 py-2 rounded-md text-lg font-semibold flex items-center gap-2 ${
+                    className={`block px-3 py-2 rounded-md text-lg font-normal flex items-center gap-2 ${
                       active
                         ? 'text-indigo-600'
                         : 'text-gray-700 hover:text-indigo-600'
@@ -134,7 +134,7 @@ const Header: React.FC = () => {
                   </div> */}
                   <button
                     onClick={handleLogout}
-                    className="w-full bg-red-600 text-white px-4 py-2 rounded-md text-base font-semibold hover:bg-red-700 transition-colors duration-200 flex items-center justify-center gap-2"
+                    className="w-full bg-red-600 text-white px-4 py-2 rounded-md text-base font-normal hover:bg-red-700 transition-colors duration-200 flex items-center justify-center gap-2"
                   >
                     <LogOut className="w-5 h-5" />
                     Sign Out
@@ -142,7 +142,7 @@ const Header: React.FC = () => {
                 </div>
               ) : (
                 <Link href="/login">
-                  <button className="w-full bg-indigo-600 text-white px-4 py-2 rounded-md text-base font-semibold hover:bg-indigo-700 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer">
+                  <button className="w-full bg-indigo-600 text-white px-4 py-2 rounded-md text-base font-normal hover:bg-indigo-700 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer">
                     <User className="w-5 h-5" />
                     Sign In
                   </button>
