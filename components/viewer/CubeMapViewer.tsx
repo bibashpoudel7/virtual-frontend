@@ -27,6 +27,7 @@ interface CubeMapViewerProps {
   isPlaybackMode?: boolean;
   cameraControlRef?: React.MutableRefObject<{ setCamera: (yaw: number, pitch: number, fov: number) => void } | null>;
   preloadSceneIds?: string[];
+  isManualSceneChange?: boolean;
 }
 
 
@@ -49,6 +50,7 @@ export default function CubeMapViewer({
   isPlaybackMode = false,
   cameraControlRef,
   preloadSceneIds = [],
+  isManualSceneChange = false,
 }: CubeMapViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -76,6 +78,7 @@ export default function CubeMapViewer({
   const loadingTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
   // Store target camera direction when navigating to new scene
   const navigationTargetRef = useRef<{ yaw: number; pitch: number } | null>(null);
+  const isManualSceneChangeRef = useRef<boolean>(false);
 
   // Controls state
   const controlsRef = useRef({
@@ -93,6 +96,13 @@ export default function CubeMapViewer({
     phi: 0,
     theta: 0,
     isDragging: false, // Track if user is dragging vs clicking
+    // Inertia & Smoothness
+    targetLon: 0,
+    targetLat: 0,
+    lonSpeed: 0,
+    latSpeed: 0,
+    dampingFactor: 0.95, // Slower decay (longer slide)
+    smoothFactor: 0.15, // Heavier/Smoother drag (more weight)
   });
 
   const isAutoRotatingRef = useRef(isAutoRotating);
@@ -175,25 +185,83 @@ export default function CubeMapViewer({
       console.warn('[CubeMapViewer] No tiles_manifest in currentScene');
     }
 
+    // Parse manifest and handle camera reset
     // Reset camera - use navigation target if we just walked to this scene, otherwise use scene defaults
     if (!isPlaybackMode && !forcedCameraPosition) {
       const controls = controlsRef.current;
-      const isNavigatedEntry = !!navigationTargetRef.current;
 
-      if (navigationTargetRef.current) {
-        // We navigated here via hotspot - face the direction we were walking
-        console.log('[CubeMapViewer] Using navigation target direction:', navigationTargetRef.current);
-        controls.lon = navigationTargetRef.current.yaw;
-        controls.lat = navigationTargetRef.current.pitch;
-        navigationTargetRef.current = null; // Clear after use
-      } else {
-        // Normal load - use scene defaults
+      // Priority logic:
+      // 1. If this is a manual scene change, always use scene defaults
+      // 2. If we have a navigation target and it's NOT a manual change, use navigation target
+      // 3. Otherwise, use scene defaults
+
+      if (isManualSceneChange) {
+        // Manual scene change - always use scene defaults
+        console.log('[CubeMapViewer] Manual scene change detected. Resetting to defaults.');
         controls.lon = currentScene.yaw || 0;
         controls.lat = currentScene.pitch || 0;
+        controls.targetLon = currentScene.yaw || 0;
+        controls.targetLat = currentScene.pitch || 0;
+
+        // Clear navigation target since we're doing manual change
+        navigationTargetRef.current = null;
+      } else if (navigationTargetRef.current) {
+        console.log('[CubeMapViewer] Using navigationTargetRef:', navigationTargetRef.current);
+        // Hotspot navigation - use navigation target with smooth transition
+        const targetYaw = navigationTargetRef.current.yaw;
+        const targetPitch = navigationTargetRef.current.pitch;
+
+        // Calculate smooth transition from current position to target
+        let deltaYaw = targetYaw - controls.lon;
+        while (deltaYaw > 180) deltaYaw -= 360;
+        while (deltaYaw < -180) deltaYaw += 360;
+
+        // If the camera change is small (< 30 degrees), apply it smoothly
+        if (Math.abs(deltaYaw) < 30 && Math.abs(targetPitch - controls.lat) < 30) {
+          // Smooth transition to target position
+          const startYaw = controls.lon;
+          const startPitch = controls.lat;
+          const startTime = Date.now();
+          const transitionDuration = 200; // 200ms smooth camera adjustment
+
+          const smoothCameraTransition = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / transitionDuration, 1);
+            const easeOutQuad = (t: number) => 1 - (1 - t) * (1 - t);
+            const easedProgress = easeOutQuad(progress);
+
+            controls.lon = startYaw + deltaYaw * easedProgress;
+            controls.lat = startPitch + (targetPitch - startPitch) * easedProgress;
+            controls.targetLon = controls.lon;
+            controls.targetLat = controls.lat;
+
+            if (progress < 1) {
+              requestAnimationFrame(smoothCameraTransition);
+            }
+          };
+
+          smoothCameraTransition();
+        } else {
+          // Large camera change - apply immediately
+          controls.lon = targetYaw;
+          controls.lat = targetPitch;
+          controls.targetLon = targetYaw;
+          controls.targetLat = targetPitch;
+        }
+
+        navigationTargetRef.current = null; // Clear after use
+      } else {
+        // Default case - use scene defaults
+        controls.lon = currentScene.yaw || 0;
+        controls.lat = currentScene.pitch || 0;
+        controls.targetLon = currentScene.yaw || 0;
+        controls.targetLat = currentScene.pitch || 0;
       }
 
       controls.targetRotationX = 0; // Reset momentum
       controls.targetRotationY = 0;
+      controls.lonSpeed = 0; // Stop any existing movement
+      controls.latSpeed = 0;
 
       const targetFov = currentScene.fov || 60;
 
@@ -205,7 +273,7 @@ export default function CubeMapViewer({
       // Entry animation is handled by applyAllTextures() when new textures are ready
       // This ensures the scene is visible before any animation starts
     }
-  }, [currentScene]);
+  }, [currentScene, isManualSceneChange]);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -274,12 +342,47 @@ export default function CubeMapViewer({
       // Update camera rotation based on controls
       const controls = controlsRef.current;
 
+      // Handle Inertia & Smooth Drag
+      if (controls.isUserInteracting) {
+        // While dragging, smoothly follow target
+        // Calculate velocity (speed)
+        const deltaLon = (controls.targetLon - controls.lon) * controls.smoothFactor;
+        const deltaLat = (controls.targetLat - controls.lat) * controls.smoothFactor;
+
+        controls.lon += deltaLon;
+        controls.lat += deltaLat;
+
+        // Save current speed for when released (throw)
+        controls.lonSpeed = deltaLon;
+        controls.latSpeed = deltaLat;
+      } else {
+        // When released, apply damping to speed
+        if (Math.abs(controls.lonSpeed) > 0.001) {
+          controls.lon += controls.lonSpeed;
+          controls.lonSpeed *= controls.dampingFactor;
+        } else {
+          controls.lonSpeed = 0;
+        }
+
+        if (Math.abs(controls.latSpeed) > 0.001) {
+          controls.lat += controls.latSpeed;
+          controls.latSpeed *= controls.dampingFactor;
+        } else {
+          controls.latSpeed = 0;
+        }
+
+        // Update targets to match current position so it doesn't snap back when re-grabbing
+        controls.targetLon = controls.lon;
+        controls.targetLat = controls.lat;
+      }
+
       // Auto-rotation controlled by state or scene settings
       // Use refs to access latest values without re-triggering effect
       // Skip auto-rotate during playback mode
-      if (!isPlaybackMode && (autoRotateRef.current || isAutoRotatingRef.current) && !controls.isUserInteracting) {
+      if (!isPlaybackMode && (autoRotateRef.current || isAutoRotatingRef.current) && !controls.isUserInteracting && Math.abs(controls.lonSpeed) < 0.01) {
         const rotateSpeed = 0.5;
         controls.lon += rotateSpeed * 0.2;
+        controls.targetLon = controls.lon; // Keep target in sync
       }
 
       controls.lat = Math.max(-90, Math.min(90, controls.lat)); // Allow full vertical range
@@ -569,20 +672,7 @@ export default function CubeMapViewer({
     const applyAllTextures = () => {
       console.log('[CubeMapViewer] Applying all 6 face textures at once for smooth transition');
 
-      // Reset cube position and scale for smooth appearance after navigation animation
-      if (cubeRef.current) {
-        cubeRef.current.position.set(0, 0, 0);
-        cubeRef.current.scale.set(1, 1, 1);
-      }
-
-      // Reset camera FOV to scene default ONLY if transitioning to new scene
-      // This prevents "zooming out" when just loading higher res tiles during zoom
-      if (cameraRef.current && isTransitioningRef.current) {
-        const targetFov = currentScene.fov || 60;
-        cameraRef.current.fov = targetFov;
-        cameraRef.current.updateProjectionMatrix();
-      }
-
+      // Apply new textures first
       pendingTextures.forEach((texture, faceIndex) => {
         if (materialsRef.current[faceIndex]) {
           const oldMap = materialsRef.current[faceIndex].map;
@@ -597,8 +687,115 @@ export default function CubeMapViewer({
         }
       });
 
-      setIsTransitioning(false);
-      setIsLoading(false);
+      // Smooth scene appearance with fade-in and camera adjustment
+      if (isTransitioningRef.current && cubeRef.current && cameraRef.current) {
+        const targetFov = currentScene.fov || 60;
+        const currentFov = cameraRef.current.fov;
+        
+        // Store navigation target for smooth camera transition
+        const targetRotation = navigationTargetRef.current;
+        const startYaw = controlsRef.current.lon;
+        const startPitch = controlsRef.current.lat;
+        
+        // Calculate smooth rotation path
+        let deltaYaw = 0;
+        let deltaPitch = 0;
+        if (targetRotation) {
+          deltaYaw = targetRotation.yaw - startYaw;
+          while (deltaYaw > 180) deltaYaw -= 360;
+          while (deltaYaw < -180) deltaYaw += 360;
+          deltaPitch = targetRotation.pitch - startPitch;
+        }
+
+        // Reset cube position immediately (no backward movement)
+        cubeRef.current.position.set(0, 0, 0);
+        cubeRef.current.scale.set(1, 1, 1);
+
+        // Start with slightly dimmed materials for fade-in effect
+        materialsRef.current.forEach(material => {
+          material.color.setHex(0x888888); // Start dimmed
+        });
+
+        const startTime = Date.now();
+        const transitionDuration = 400; // 400ms transition
+
+        const smoothTransition = () => {
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(elapsed / transitionDuration, 1);
+          
+          // Smooth easing - ease out
+          const easeOutQuad = (t: number) => 1 - (1 - t) * (1 - t);
+          const easedProgress = easeOutQuad(progress);
+
+          if (cameraRef.current) {
+            // Smooth FOV transition
+            const newFov = currentFov + (targetFov - currentFov) * easedProgress;
+            cameraRef.current.fov = newFov;
+            cameraRef.current.updateProjectionMatrix();
+
+            // Smooth camera rotation if target exists
+            if (targetRotation) {
+              controlsRef.current.lon = startYaw + deltaYaw * easedProgress;
+              controlsRef.current.lat = startPitch + deltaPitch * easedProgress;
+              controlsRef.current.targetLon = controlsRef.current.lon;
+              controlsRef.current.targetLat = controlsRef.current.lat;
+            }
+          }
+
+          // Smooth fade-in effect for materials
+          const brightness = 0.5 + 0.5 * easedProgress; // From 50% to 100% brightness
+          const colorValue = Math.floor(brightness * 255);
+          const hexColor = (colorValue << 16) | (colorValue << 8) | colorValue;
+          
+          materialsRef.current.forEach(material => {
+            material.color.setHex(hexColor);
+          });
+
+          if (progress < 1) {
+            requestAnimationFrame(smoothTransition);
+          } else {
+            // Transition complete - ensure full brightness
+            materialsRef.current.forEach(material => {
+              material.color.setHex(0xffffff);
+            });
+            
+            setIsTransitioning(false);
+            setIsLoading(false);
+            
+            // Clear navigation target
+            if (targetRotation) {
+              navigationTargetRef.current = null;
+            }
+          }
+        };
+
+        smoothTransition();
+      } else {
+        // Not transitioning, apply immediately
+        if (cubeRef.current) {
+          cubeRef.current.position.set(0, 0, 0);
+          cubeRef.current.scale.set(1, 1, 1);
+        }
+
+        // Reset camera FOV to scene default
+        if (cameraRef.current) {
+          const targetFov = currentScene.fov || 60;
+          cameraRef.current.fov = targetFov;
+          cameraRef.current.updateProjectionMatrix();
+        }
+
+        // Apply rotation immediately if target exists
+        if (navigationTargetRef.current) {
+          controlsRef.current.lon = navigationTargetRef.current.yaw;
+          controlsRef.current.lat = navigationTargetRef.current.pitch;
+          controlsRef.current.targetLon = navigationTargetRef.current.yaw;
+          controlsRef.current.targetLat = navigationTargetRef.current.pitch;
+          navigationTargetRef.current = null;
+        }
+
+        setIsTransitioning(false);
+        setIsLoading(false);
+      }
     };
 
     // Composite multiple tiles for all levels (level 0 removed)
@@ -610,7 +807,10 @@ export default function CubeMapViewer({
         pendingTextures.set(faceIndex, loadedTexturesRef.current.get(cacheKey)!);
         facesCompleted++;
         if (facesCompleted === 6) {
-          applyAllTextures();
+          // Small delay to ensure camera position is stable before texture swap
+          setTimeout(() => {
+            applyAllTextures();
+          }, 50);
         }
         return;
       }
@@ -650,9 +850,12 @@ export default function CubeMapViewer({
         pendingTextures.set(faceIndex, texture);
         facesCompleted++;
 
-        // When all 6 faces are ready, apply them all at once
+        // When all 6 faces are ready, apply them all at once with a small delay for camera stability
         if (facesCompleted === 6) {
-          applyAllTextures();
+          // Small delay to ensure camera position is stable before texture swap
+          setTimeout(() => {
+            applyAllTextures();
+          }, 50);
         }
       };
 
@@ -1223,6 +1426,14 @@ export default function CubeMapViewer({
       controls.onPointerDownY = event.clientY;
       controls.onPointerDownLon = controls.lon;
       controls.onPointerDownLat = controls.lat;
+
+      // Initialize targets to Avoid Jump
+      controls.targetLon = controls.lon;
+      controls.targetLat = controls.lat;
+      controls.lonSpeed = 0;
+      controls.latSpeed = 0;
+
+      container.style.cursor = 'grabbing';
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -1244,9 +1455,15 @@ export default function CubeMapViewer({
         let foundHoverable = false;
 
         // Check overlay hover first
-        // Overlay hover handling is managed by OverlayRenderer
+        if (overlaysRef.current) {
+          const intersects = raycasterRef.current.intersectObjects(overlaysRef.current.children, true);
+          if (intersects.length > 0) {
+            container.style.cursor = 'pointer';
+            foundHoverable = true;
+          }
+        }
 
-        // Check hotspot hover
+        // Check hotspot hover if no overlay found
         if (!foundHoverable && hotspotsRef.current) {
           const intersects = raycasterRef.current.intersectObjects(hotspotsRef.current.children, true);
 
@@ -1278,14 +1495,15 @@ export default function CubeMapViewer({
         }
 
         if (!foundHoverable) {
-          container.style.cursor = isEditMode ? 'crosshair' : 'grab';
+          // Default arrow when not hovering, Grabbing when dragging/interacting
+          container.style.cursor = isEditMode ? 'crosshair' : (controls.isUserInteracting ? 'grabbing' : 'default');
         }
       }
 
       if (!controls.isUserInteracting) return;
 
       // Detect if user is dragging (movement > 10px threshold)
-      const dragThreshold = 10;
+      const dragThreshold = 5;
       const deltaX = Math.abs(event.clientX - controls.onPointerDownX);
       const deltaY = Math.abs(event.clientY - controls.onPointerDownY);
 
@@ -1295,9 +1513,12 @@ export default function CubeMapViewer({
 
       // Capture LON/LAT for click context even in playback, 
       // but only apply them to actually ROTATE the camera if not in playback mode
+      // Capture LON/LAT for click context even in playback, 
+      // but only apply them to actually ROTATE the camera if not in playback mode
       if (!isPlaybackMode) {
-        controls.lon = (controls.onPointerDownX - event.clientX) * 0.15 + controls.onPointerDownLon;
-        controls.lat = (event.clientY - controls.onPointerDownY) * 0.15 + controls.onPointerDownLat;
+        // Update TARGETS instead of direct values for smooth interpolation
+        controls.targetLon = (controls.onPointerDownX - event.clientX) * 0.15 + controls.onPointerDownLon;
+        controls.targetLat = (event.clientY - controls.onPointerDownY) * 0.15 + controls.onPointerDownLat;
       }
     };
 
@@ -1315,6 +1536,7 @@ export default function CubeMapViewer({
 
       controls.isUserInteracting = false;
       controls.isDragging = false;
+      container.style.cursor = 'default';
 
       // Handle interactions (clicks)
       if (!wasDragging) {
@@ -1438,12 +1660,28 @@ export default function CubeMapViewer({
                   }
                 }
 
-                // Use target values if defined, otherwise continue facing hotspot direction
+                // Use target values if defined, otherwise calculate natural viewing direction
+                let finalYaw, finalPitch;
+
+                if (targetYaw !== undefined) {
+                  finalYaw = targetYaw;
+                } else {
+                  const controls = controlsRef.current;
+                  finalYaw = controls.lon; // Keep facing the same direction you were looking
+                }
+
+                if (targetPitch !== undefined) {
+                  finalPitch = targetPitch;
+                } else {
+                  // For navigation hotspots, maintain a natural eye-level view
+                  // Reset to horizon (0) instead of preserving downward look
+                  finalPitch = 0;
+                }
+
                 navigationTargetRef.current = {
-                  yaw: targetYaw !== undefined ? targetYaw : hotspot.yaw,
-                  pitch: targetPitch !== undefined ? targetPitch : 0
+                  yaw: finalYaw,
+                  pitch: finalPitch
                 };
-                console.log('[CubeMapViewer] Set navigation target:', navigationTargetRef.current);
 
                 // Fire event to load new scene - old scene stays visible until new textures ready
                 if (onHotspotClick) onHotspotClick(hotspot);
@@ -1487,7 +1725,7 @@ export default function CubeMapViewer({
             // Phase 1: Smooth rotation toward hotspot (if needed)
             // Phase 2: Slow forward movement
             const rotationDuration = Math.min(Math.abs(deltaYaw) * 6, 800); // Slower rotation
-            const moveDuration = 3000; // Slower, gentle forward movement
+            const moveDuration = 3000; // Slower, forward movement
             const startTime = Date.now();
 
             // Easing functions
@@ -1512,7 +1750,7 @@ export default function CubeMapViewer({
 
                 requestAnimationFrame(animateToHotspot);
               }
-              // Phase 2: Gentle forward movement
+              // Phase 2: forward movement
               else {
                 const moveElapsed = elapsed - rotationDuration;
                 const moveProgress = Math.min(moveElapsed / moveDuration, 1);
