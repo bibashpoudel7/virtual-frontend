@@ -887,6 +887,13 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   }, [scenes, currentSceneIndex]);
 
   const handleHotspotClick = useCallback((hotspot: Hotspot) => {
+    // Pause any active autoplay when user manually interacts with hotspots
+    if (isAutoplay) {
+      setIsAutoplay(false);
+    }
+    if (isPlayingTour) {
+      setIsPlayingTour(false);
+    }
 
     if (hotspot.kind === 'navigation') {
       // Handle navigation hotspots - check both target_scene_id and payload.targetSceneId

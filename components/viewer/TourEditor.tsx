@@ -765,6 +765,14 @@ export default function TourEditor({
   }, [currentSceneIndex, scenes.length, handleSceneChangeByIndex]);
 
   const handleHotspotClick = useCallback((hotspot: Hotspot) => {
+    // Pause any active autoplay when user manually interacts with hotspots
+    if (isAutoplay) {
+      setIsAutoplay(false);
+    }
+    if (isPlayingTour) {
+      setIsPlayingTour(false);
+    }
+
     if (hotspot.kind === 'navigation' && hotspot.payload) {
       try {
         const payload = JSON.parse(hotspot.payload);
@@ -787,7 +795,7 @@ export default function TourEditor({
           return div.innerHTML;
         };
 
-        // Pause autoplay when modal opens
+        // Pause autoplay when modal opens (already handled above, but keeping for info modals)
         const wasAutoplayActive = isAutoplay;
         const wasPlayingTourActive = isPlayingTour;
 
