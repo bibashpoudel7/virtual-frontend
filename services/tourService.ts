@@ -304,7 +304,11 @@ class TourService {
 
   async getFeaturedTour(): Promise<Tour | null> {
     try {
-      return await this.fetchWithAuth('tours/featured');
+      const response = await this.fetchWithAuth('tours/featured');
+      if (response && typeof response === 'object' && 'tour' in response) {
+        return response.tour;
+      }
+      return response;
     } catch (error) {
       console.error('No featured tour found:', error);
       return null;
