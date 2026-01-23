@@ -443,26 +443,33 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       let selectedTour: Tour | null = null;
 
       if (isAuthenticated) {
-        // User is authenticated - only use authenticated API
+        // User is authenticated - fetch featured tour or first available
         try {
-          toursData = await tourService.listTours();
+          // First try to get a featured tour using the dedicated endpoint
+          let featuredTour: Tour | null = null;
+          
+          try {
+            featuredTour = await tourService.getFeaturedTour();
+            console.log('[HomeTourViewer] Fetched featured tour:', featuredTour?.name);
+          } catch (featuredErr) {
+            console.log('[HomeTourViewer] No featured tour found, will use first available');
+          }
 
-          if (toursData && toursData.length > 0) {
-            // Filter for featured tours first
-            const featuredTours = toursData.filter(tour => tour.is_featured_on_homepage === true);
-
-            if (featuredTours.length > 0) {
-              // Use the first featured tour
-              selectedTour = featuredTours[0];
-              console.log('[HomeTourViewer] Found featured tour:', selectedTour.name);
-            } else {
-              // No featured tours found, use the first available tour
+          if (featuredTour) {
+            selectedTour = featuredTour;
+            console.log('[HomeTourViewer] Using featured tour:', selectedTour.name);
+          } else {
+            // No featured tour found, get first available tour from page 1
+            const response = await tourService.listTours(1, 10);
+            toursData = Array.isArray(response) ? response : response.data || [];
+            
+            if (toursData && toursData.length > 0) {
               selectedTour = toursData[0];
               console.log('[HomeTourViewer] No featured tours found, using first available tour:', selectedTour.name);
+            } else {
+              setError('No tours available for your account');
+              return;
             }
-          } else {
-            setError('No tours available for your account');
-            return;
           }
         } catch (authErr) {
           console.error('Failed to fetch authenticated tours:', authErr);

@@ -134,8 +134,14 @@ class TourService {
     return tours;
   }
 
-  async listTours(): Promise<Tour[]> {
-    return this.fetchWithAuth(`tours`);
+  async listTours(page: number = 1, limit: number = 10): Promise<{ data: Tour[], pagination: any }> {
+    const response = await this.fetchWithAuth(`tours?page=${page}&limit=${limit}`);
+    return response;
+  }
+
+  async listToursLegacy(): Promise<Tour[]> {
+    const response = await this.fetchWithAuth(`tours`);
+    return response?.data || [];
   }
 
   async listPublicTours(): Promise<Tour[]> {
@@ -297,8 +303,12 @@ class TourService {
   }
 
   async getFeaturedTour(): Promise<Tour | null> {
-    const tours = await this.listTours();
-    return tours.find(t => t.is_featured_on_homepage) || null;
+    try {
+      return await this.fetchWithAuth('tours/featured');
+    } catch (error) {
+      console.error('No featured tour found:', error);
+      return null;
+    }
   }
 
 
