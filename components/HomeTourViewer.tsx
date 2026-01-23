@@ -447,7 +447,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         try {
           // First try to get a featured tour using the dedicated endpoint
           let featuredTour: Tour | null = null;
-          
+
           try {
             featuredTour = await tourService.getFeaturedTour();
             console.log('[HomeTourViewer] Fetched featured tour:', featuredTour?.name);
@@ -462,13 +462,28 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
             // No featured tour found, get first available tour from page 1
             const response = await tourService.listTours(1, 10);
             toursData = Array.isArray(response) ? response : response.data || [];
-            
+
             if (toursData && toursData.length > 0) {
               selectedTour = toursData[0];
               console.log('[HomeTourViewer] No featured tours found, using first available tour:', selectedTour.name);
             } else {
-              setError('No tours available for your account');
-              return;
+              // Fallback to public tours if user has no tours
+              console.log('[HomeTourViewer] User has no tours, falling back to public tours');
+              try {
+                toursData = await tourService.listPublicTours();
+                usingPublicApi = true;
+                if (toursData && toursData.length > 0) {
+                  selectedTour = toursData[0];
+                  console.log('[HomeTourViewer] Using public tour as fallback:', selectedTour.name);
+                } else {
+                  setError('No tours available');
+                  return;
+                }
+              } catch (fallbackErr) {
+                console.error('Failed to fetch fallback public tours:', fallbackErr);
+                setError('No tours available');
+                return;
+              }
             }
           }
         } catch (authErr) {
@@ -614,7 +629,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     // Interrupt any active playback when changing scenes manually (like PublicTourViewer)
     setIsPlayingTour(false);
     setIsAutoplay(false);
-    
+
     // Reset forced camera control - this is crucial for manual scene changes
     setCurrentCamera(null);
 
@@ -866,21 +881,21 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
 
   const handlePrevScene = useCallback(() => {
     if (isTransitioning) return;
-    
+
     if (selectedPlayTourId && playTourDisplayScenes) {
       // Navigate through Play Tour sequence - direct navigation without scene sync
       if (currentPlayTourSceneIndex > 0) {
         const newIndex = currentPlayTourSceneIndex - 1;
         setCurrentPlayTourSceneIndex(newIndex);
-        
+
         // Mark this as a manual scene change to prevent sync issues
         setIsManualSceneChange(true);
-        
+
         // Interrupt any active playback
         setIsPlayingTour(false);
         setIsAutoplay(false);
         setCurrentCamera(null);
-        
+
         // Find the corresponding scene and change directly
         const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
         const pScene = selectedTour?.play_tour_scenes?.[newIndex];
@@ -906,21 +921,21 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
 
   const handleNextScene = useCallback(() => {
     if (isTransitioning) return;
-    
+
     if (selectedPlayTourId && playTourDisplayScenes) {
       // Navigate through Play Tour sequence - direct navigation without scene sync
       if (currentPlayTourSceneIndex < playTourDisplayScenes.length - 1) {
         const newIndex = currentPlayTourSceneIndex + 1;
         setCurrentPlayTourSceneIndex(newIndex);
-        
+
         // Mark this as a manual scene change to prevent sync issues
         setIsManualSceneChange(true);
-        
+
         // Interrupt any active playback
         setIsPlayingTour(false);
         setIsAutoplay(false);
         setCurrentCamera(null);
-        
+
         // Find the corresponding scene and change directly
         const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
         const pScene = selectedTour?.play_tour_scenes?.[newIndex];
