@@ -129,17 +129,32 @@ const Footer: React.FC = () => {
             <div className="space-y-3">
               <div className="flex items-center space-x-3">
                 <Mail className="w-4 h-4 text-indigo-400" />
-                <span className="text-gray-300 text-sm">info@thenimto.com</span>
+                <a 
+                  href="mailto:info@thenimto.com" 
+                  className="text-gray-300 hover:text-indigo-400 transition-colors text-sm"
+                >
+                  info@thenimto.com
+                </a>
               </div>
               <div className="flex items-center space-x-3">
                 <Phone className="w-4 h-4 text-indigo-400" />
-                <span className="text-gray-300 text-sm">+977-9802364691</span>
+                <a 
+                  href="tel:+9779802364691" 
+                  className="text-gray-300 hover:text-indigo-400 transition-colors text-sm"
+                >
+                  +977-9802364691
+                </a>
               </div>
               <div className="flex items-start space-x-3">
                 <MapPin className="w-4 h-4 text-indigo-400 mt-0.5" />
-                <span className="text-gray-300 text-sm">
+                <a 
+                  href="https://maps.app.goo.gl/m45GDqJMaJZL32sA8" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-gray-300 hover:text-indigo-400 transition-colors text-sm"
+                >
                   Baluwatar Kathmandu, Nepal
-                </span>
+                </a>
               </div>
             </div>
           </div>
