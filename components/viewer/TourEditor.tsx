@@ -1,6 +1,6 @@
 'use client';
 import { Icon } from '@iconify/react';
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, Play, Pencil, Volume2, VolumeX, Maximize, Minimize, Settings, X, Share2 } from 'lucide-react';
 import CubeMapViewer from './CubeMapViewer';
 import OverlayEditor from '../overlays/OverlayEditor';
@@ -32,7 +32,7 @@ function debounce<T extends (...args: any[]) => any>(
 }
 
 // Progress bar component for fullscreen mode
-const ProgressBar = ({
+const ProgressBar = React.memo(({
   scenes,
   currentSceneIndex,
   isAutoplay,
@@ -139,77 +139,45 @@ const ProgressBar = ({
             >
               <div className="w-full h-1 bg-white/40 rounded-full overflow-hidden">
                 <div
-                  className={`progress-fill h-full rounded-full ${isCompleted || isCurrent
-                    ? 'bg-red-500'
-                    : 'bg-white/40'
-                    }`}
-                  style={{
-                    width: isCompleted ? '100%' : '0%',
-                    backgroundColor: isCompleted || isCurrent ? '#ef4444' : undefined
-                  }}
+                  className={`progress-fill h-full bg-red-500 transition-none ${(!isCurrent && !isCompleted) ? 'w-0' : ''} ${isCompleted ? 'w-full' : ''}`}
+                  style={isCurrent ? { width: '0%' } : {}}
                 />
               </div>
-
               <button
                 onClick={() => onSceneChange(index)}
-                disabled={isTransitioning}
-                className="absolute inset-0 -top-2 -bottom-2 cursor-pointer disabled:cursor-not-allowed group"
-                title={scene.name || `Scene ${index + 1}`}
-              >
-                <div className="absolute inset-0 top-2 bottom-2 bg-red-400/30 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                className="absolute inset-0 -top-2 -bottom-2 w-full cursor-pointer z-10"
+              />
 
-                <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-300 delay-150 pointer-events-none z-50">
-                  <div className="bg-black/90 backdrop-blur-sm rounded-lg overflow-hidden shadow-xl border border-white/20">
-                    <div className="w-32 h-20 bg-gray-800 relative overflow-hidden">
-                      {scene.src_original_url ? (
-                        <img
-                          src={scene.src_original_url}
-                          alt={scene.name || `Scene ${index + 1}`}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            const img = e.target as HTMLImageElement;
-                            if (!img.dataset.fallbackTried) {
-                              img.dataset.fallbackTried = 'true';
-                              const fallbackUrl = scene.src_original_url?.replace(/\.(jpg|jpeg|png)$/i, '_thumb.$1') ||
-                                `${R2_PUBLIC_URL}/scenes/${scene.id}/preview.jpg`;
-                              img.src = fallbackUrl;
-                            } else {
-                              img.style.display = 'none';
-                              const placeholder = img.nextElementSibling as HTMLElement;
-                              if (placeholder) placeholder.style.display = 'flex';
-                            }
-                          }}
-                        />
-                      ) : null}
-                      <div
-                        className="w-full h-full flex items-center justify-center text-white/60 text-xs"
-                        style={{ display: scene.src_original_url ? 'none' : 'flex' }}
-                      >
-                        <div className="text-center">
-                          <div className="w-8 h-8 mx-auto mb-1 bg-white/20 rounded flex items-center justify-center">
-                            📷
-                          </div>
-                          Scene {index + 1}
-                        </div>
-                      </div>
-                      <div className="absolute top-1 right-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
-                        {index + 1}
-                      </div>
-                    </div>
-                    <div className="px-3 py-2 text-white text-xs font-medium">
-                      {scene.name || `Scene ${index + 1}`}
+              {/* Tooltip Content - matches HomeTourViewer style */}
+              <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-300 delay-150 pointer-events-none z-50">
+                <div className="bg-black/90 backdrop-blur-sm rounded-lg overflow-hidden shadow-xl border border-white/20">
+                  <div className="w-32 h-20 bg-gray-800 relative overflow-hidden">
+                    {scene.src_original_url && (
+                      <img
+                        src={scene.src_original_url}
+                        alt={scene.name}
+                        className="w-full h-full object-cover"
+                      />
+                    )}
+                    <div className="absolute top-1 right-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
+                      {index + 1}
                     </div>
                   </div>
-                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-6 border-transparent border-t-black/90"></div>
+                  <div className="px-3 py-2 text-white text-xs font-medium">
+                    {scene.name || `Scene ${index + 1}`}
+                  </div>
                 </div>
-              </button>
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-6 border-transparent border-t-black/90"></div>
+              </div>
             </div>
           );
         })}
       </div>
     </div>
   );
-};
+});
+
+ProgressBar.displayName = 'ProgressBar';
 
 const calculateTransitionOffsets = (direction: string, progress: number) => {
   // Use a smooth ease-out curve that doesn't return to zero
@@ -265,6 +233,8 @@ export default function TourEditor({
   loadingMore
 }: TourEditorProps) {
   const [currentSceneId, setCurrentSceneId] = useState(scenes[0]?.id || '');
+  const [isFullscreenMode, setIsFullscreenMode] = useState(false);
+  const [isSingleStep, setIsSingleStep] = useState(false);
   const [currentSceneIndex, setCurrentSceneIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false); // Disable edit mode by default
@@ -536,7 +506,12 @@ export default function TourEditor({
           // Animation complete, wait then move to next scene
           timeoutId = setTimeout(() => {
             if (!isCleanedUp) {
-              setCurrentPlayTourSceneIndex(prev => prev + 1);
+              if (isSingleStep) {
+                setIsPlayingTour(false);
+                setIsSingleStep(false);
+              } else {
+                setCurrentPlayTourSceneIndex(prev => prev + 1);
+              }
             }
           }, waitDuration);
         }
@@ -550,7 +525,7 @@ export default function TourEditor({
       if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, currentSceneId, restartTrigger]);
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, currentSceneId, restartTrigger, isSingleStep]);
 
   const handleSceneChange = useCallback((sceneId: string) => {
     if (sceneId === currentSceneId) return; // Don't transition to the same scene
@@ -770,90 +745,76 @@ export default function TourEditor({
   }, [currentSceneIndex, isTransitioning, scenes]);
 
   const handlePrevScene = useCallback(() => {
-    if (selectedPlayTourId && playTourDisplayScenes) {
-      // Navigate through Play Tour sequence - direct navigation without scene sync
-      if (currentPlayTourSceneIndex > 0) {
+    if (isTransitioning) return;
+
+    if (selectedPlayTourId) {
+      const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+      if (selectedTour && selectedTour.play_tour_scenes && currentPlayTourSceneIndex > 0) {
         const newIndex = currentPlayTourSceneIndex - 1;
         setCurrentPlayTourSceneIndex(newIndex);
 
         // Mark this as a manual scene change to prevent sync issues
         setIsManualSceneChange(true);
 
-        // Interrupt any active playback
-        setIsPlayingTour(false);
+        // Interrupt active autoplay
         setIsAutoplay(false);
+        playTourProgressRef.current = 0;
 
-        // Find the corresponding scene and change directly WITHOUT calling handleSceneChange
-        const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
-        const pScene = selectedTour?.play_tour_scenes?.[newIndex];
+        // Find the corresponding scene and change directly
+        const pScene = selectedTour.play_tour_scenes[newIndex];
         if (pScene) {
-          const targetScene = scenes.find(s => s.id === pScene.scene_id);
-          if (targetScene) {
-            setIsTransitioning(true);
-
-            // Direct scene change without sync logic
-            setCurrentSceneId(pScene.scene_id);
-            const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
-            if (sceneIdx !== -1) {
-              setCurrentSceneIndex(sceneIdx);
-            }
-
-            setTimeout(() => {
-              setIsTransitioning(false);
-            }, 1500);
+          if (!isPlayingTour) {
+            setIsSingleStep(true);
+            setIsPlayingTour(true);
+            setHasPlayTourStarted(true);
+          }
+          if (pScene.scene_id !== currentSceneId) {
+            handleSceneChange(pScene.scene_id);
           }
         }
       }
     } else {
       // Navigate through base scenes
-      if (currentSceneIndex > 0) {
-        handleSceneChangeByIndex(currentSceneIndex - 1);
-      }
+      const newIndex = (currentSceneIndex - 1 + scenes.length) % scenes.length;
+      handleSceneChangeByIndex(newIndex);
     }
-  }, [currentSceneIndex, handleSceneChangeByIndex, selectedPlayTourId, playTourDisplayScenes, currentPlayTourSceneIndex, playTours, scenes]);
+  }, [currentSceneIndex, scenes, handleSceneChangeByIndex, selectedPlayTourId, playTours, currentPlayTourSceneIndex, handleSceneChange, currentSceneId, isPlayingTour]);
 
   const handleNextScene = useCallback(() => {
-    if (selectedPlayTourId && playTourDisplayScenes) {
-      // Navigate through Play Tour sequence - direct navigation without scene sync
-      if (currentPlayTourSceneIndex < playTourDisplayScenes.length - 1) {
+    if (isTransitioning) return;
+
+    if (selectedPlayTourId) {
+      const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+      if (selectedTour && selectedTour.play_tour_scenes && currentPlayTourSceneIndex < selectedTour.play_tour_scenes.length - 1) {
         const newIndex = currentPlayTourSceneIndex + 1;
         setCurrentPlayTourSceneIndex(newIndex);
 
         // Mark this as a manual scene change to prevent sync issues
         setIsManualSceneChange(true);
 
-        // Interrupt any active playback
-        setIsPlayingTour(false);
+        // Interrupt active autoplay
         setIsAutoplay(false);
+        playTourProgressRef.current = 0;
 
-        // Find the corresponding scene and change directly WITHOUT calling handleSceneChange
-        const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
-        const pScene = selectedTour?.play_tour_scenes?.[newIndex];
+        // Find the corresponding scene and change directly
+        const pScene = selectedTour.play_tour_scenes[newIndex];
         if (pScene) {
-          const targetScene = scenes.find(s => s.id === pScene.scene_id);
-          if (targetScene) {
-            setIsTransitioning(true);
-
-            // Direct scene change without sync logic
-            setCurrentSceneId(pScene.scene_id);
-            const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
-            if (sceneIdx !== -1) {
-              setCurrentSceneIndex(sceneIdx);
-            }
-
-            setTimeout(() => {
-              setIsTransitioning(false);
-            }, 1500);
+          if (!isPlayingTour) {
+            setIsSingleStep(true);
+            setIsPlayingTour(true);
+            setHasPlayTourStarted(true);
+          }
+          if (pScene.scene_id !== currentSceneId) {
+            handleSceneChange(pScene.scene_id);
           }
         }
       }
     } else {
       // Navigate through base scenes
-      if (currentSceneIndex < scenes.length - 1) {
-        handleSceneChangeByIndex(currentSceneIndex + 1);
-      }
+      const newIndex = (currentSceneIndex + 1) % scenes.length;
+      handleSceneChangeByIndex(newIndex);
     }
-  }, [currentSceneIndex, scenes.length, handleSceneChangeByIndex, selectedPlayTourId, playTourDisplayScenes, currentPlayTourSceneIndex, playTours, scenes]);
+  }, [currentSceneIndex, scenes, handleSceneChangeByIndex, selectedPlayTourId, playTours, currentPlayTourSceneIndex, handleSceneChange, currentSceneId, isPlayingTour]);
 
   const handleHotspotClick = useCallback((hotspot: Hotspot) => {
     // Pause any active autoplay when user manually interacts with hotspots
@@ -1804,7 +1765,7 @@ export default function TourEditor({
               scenes={playTourDisplayScenes || scenes}
               currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
               isAutoplay={isAutoplay || (!!selectedPlayTourId && isPlayingTour)}
-              segmentDuration={isPlayingTour && playTourDisplayScenes ?
+              segmentDuration={selectedPlayTourId && playTourDisplayScenes ?
                 ((playTourDisplayScenes[currentPlayTourSceneIndex]?.move_duration || 5000) +
                   (playTourDisplayScenes[currentPlayTourSceneIndex]?.wait_duration || 1000)) : 12000}
               isTransitioning={isTransitioning}
@@ -1819,6 +1780,7 @@ export default function TourEditor({
                   if (targetStep && targetStep.originalId) {
                     handleSceneChange(targetStep.originalId);
                     setCurrentPlayTourSceneIndex(index);
+                    playTourProgressRef.current = 0;
                   }
                 } else {
                   handleSceneChangeByIndex(index);

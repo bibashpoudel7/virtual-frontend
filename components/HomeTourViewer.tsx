@@ -192,6 +192,7 @@ const ProgressBar = React.memo(({
   onSceneChange,
   isOverlayModalOpen = false,
   segmentDuration = 12000, // Default 12s
+  forcedProgress = 0,
   restartTrigger
 }: {
   scenes: any[];
@@ -201,14 +202,22 @@ const ProgressBar = React.memo(({
   onSceneChange: (index: number) => void;
   isOverlayModalOpen?: boolean;
   segmentDuration?: number;
+  forcedProgress?: number;
   restartTrigger?: number;
 }) => {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number | undefined>(undefined);
   const startTimeRef = useRef<number>(0);
-  const pausedProgressRef = useRef<number>(0); // Track progress when paused
+  const pausedProgressRef = useRef<number>(forcedProgress || 0); // Track progress when paused
   const lastSceneIndexRef = useRef<number>(currentSceneIndex);
   const prevRestartTriggerRef = useRef<number>(restartTrigger || 0);
+
+  // Sync with forced progress from parent
+  useEffect(() => {
+    if (forcedProgress > 0 && !isAutoplay) {
+      pausedProgressRef.current = forcedProgress;
+    }
+  }, [forcedProgress, isAutoplay]);
 
   // Direct DOM manipulation for smooth progress without React re-renders
   useEffect(() => {
@@ -390,6 +399,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [isOverlayModalOpen, setIsOverlayModalOpen] = useState(false);
   const [showPauseOverlay, setShowPauseOverlay] = useState(false);
+  const [isSingleStep, setIsSingleStep] = useState(false);
   const [restartTrigger, setRestartTrigger] = useState(0);
 
   // Play Tour state
@@ -863,7 +873,12 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
           // Animation complete, wait then move to next scene
           timeoutId = setTimeout(() => {
             if (!isCleanedUp) {
-              setCurrentPlayTourSceneIndex(prev => prev + 1);
+              if (isSingleStep) {
+                setIsPlayingTour(false);
+                setIsSingleStep(false);
+              } else {
+                setCurrentPlayTourSceneIndex(prev => prev + 1);
+              }
             }
           }, waitDuration);
         }
@@ -877,7 +892,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, restartTrigger]);
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, restartTrigger, isSingleStep]);
 
   const handlePrevScene = useCallback(() => {
     if (isTransitioning) return;
@@ -891,10 +906,10 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         // Mark this as a manual scene change to prevent sync issues
         setIsManualSceneChange(true);
 
-        // Interrupt any active playback
-        setIsPlayingTour(false);
+        // Interrupt active autoplay
         setIsAutoplay(false);
         setCurrentCamera(null);
+        playTourProgressRef.current = 0;
 
         // Find the corresponding scene and change directly
         const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
@@ -902,6 +917,11 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         if (pScene) {
           const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
           if (sceneIdx !== -1) {
+            if (!isPlayingTour) {
+              setIsSingleStep(true);
+              setIsPlayingTour(true);
+              setHasPlayTourStarted(true);
+            }
             setIsTransitioning(true);
             setTimeout(() => {
               setCurrentSceneIndex(sceneIdx);
@@ -917,7 +937,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       const newIndex = (currentSceneIndex - 1 + scenes.length) % scenes.length;
       handleSceneChange(newIndex);
     }
-  }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange, selectedPlayTourId, playTourDisplayScenes, currentPlayTourSceneIndex, playTours]);
+  }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange, selectedPlayTourId, playTourDisplayScenes, currentPlayTourSceneIndex, playTours, isPlayingTour]);
 
   const handleNextScene = useCallback(() => {
     if (isTransitioning) return;
@@ -931,10 +951,10 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         // Mark this as a manual scene change to prevent sync issues
         setIsManualSceneChange(true);
 
-        // Interrupt any active playback
-        setIsPlayingTour(false);
+        // Interrupt active autoplay
         setIsAutoplay(false);
         setCurrentCamera(null);
+        playTourProgressRef.current = 0;
 
         // Find the corresponding scene and change directly
         const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
@@ -942,6 +962,11 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         if (pScene) {
           const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
           if (sceneIdx !== -1) {
+            if (!isPlayingTour) {
+              setIsSingleStep(true);
+              setIsPlayingTour(true);
+              setHasPlayTourStarted(true);
+            }
             setIsTransitioning(true);
             setTimeout(() => {
               setCurrentSceneIndex(sceneIdx);
@@ -957,7 +982,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       const newIndex = (currentSceneIndex + 1) % scenes.length;
       handleSceneChange(newIndex);
     }
-  }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange, selectedPlayTourId, playTourDisplayScenes, currentPlayTourSceneIndex, playTours]);
+  }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange, selectedPlayTourId, playTours, currentPlayTourSceneIndex, isPlayingTour, playTourDisplayScenes]);
 
   const triggerPauseAnimation = useCallback(() => {
     if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
@@ -1695,6 +1720,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
                     return;
                   }
                   setCurrentPlayTourSceneIndex(idx);
+                  playTourProgressRef.current = 0;
                   if (!isPlayingTour) {
                     const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
                     const pScene = selectedTour?.play_tour_scenes?.[idx];
@@ -1711,6 +1737,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
                 segmentDuration={selectedPlayTourId && currentPlayTourScene
                   ? (currentPlayTourScene.move_duration + (currentPlayTourScene.wait_duration || 0))
                   : (currentTour?.auto_change_interval || 12000)}
+                forcedProgress={playTourProgressRef.current}
                 restartTrigger={restartTrigger}
               />
             )}
