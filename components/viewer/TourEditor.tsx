@@ -1799,7 +1799,7 @@ export default function TourEditor({
             </div>
           </div>
 
-          <div className={`transition-opacity duration-300 ${hasStartedFullscreenPreview ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+          <div className={`transition-opacity duration-300 ${hasStartedFullscreenPreview && (isAutoplay || isPlayingTour) ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
             <ProgressBar
               scenes={playTourDisplayScenes || scenes}
               currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}

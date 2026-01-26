@@ -1683,35 +1683,37 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
               </div>
             </div>
 
-            <ProgressBar
-              scenes={selectedPlayTourId && playTourDisplayScenes ? playTourDisplayScenes : scenes}
-              currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
-              isAutoplay={isAutoplay || isPlayingTour}
-              isTransitioning={isTransitioning}
-              onSceneChange={selectedPlayTourId ? (idx) => {
-                if (idx === currentPlayTourSceneIndex) {
-                  setRestartTrigger(prev => prev + 1);
-                  return;
-                }
-                setCurrentPlayTourSceneIndex(idx);
-                if (!isPlayingTour) {
-                  const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
-                  const pScene = selectedTour?.play_tour_scenes?.[idx];
-                  if (pScene) {
-                    const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
-                    if (sceneIdx !== -1) {
-                      // Use handleSceneChange to properly set manual scene change flag
-                      handleSceneChange(sceneIdx);
+            {(isAutoplay || isPlayingTour) && (
+              <ProgressBar
+                scenes={selectedPlayTourId && playTourDisplayScenes ? playTourDisplayScenes : scenes}
+                currentSceneIndex={selectedPlayTourId ? currentPlayTourSceneIndex : currentSceneIndex}
+                isAutoplay={isAutoplay || isPlayingTour}
+                isTransitioning={isTransitioning}
+                onSceneChange={selectedPlayTourId ? (idx) => {
+                  if (idx === currentPlayTourSceneIndex) {
+                    setRestartTrigger(prev => prev + 1);
+                    return;
+                  }
+                  setCurrentPlayTourSceneIndex(idx);
+                  if (!isPlayingTour) {
+                    const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+                    const pScene = selectedTour?.play_tour_scenes?.[idx];
+                    if (pScene) {
+                      const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
+                      if (sceneIdx !== -1) {
+                        // Use handleSceneChange to properly set manual scene change flag
+                        handleSceneChange(sceneIdx);
+                      }
                     }
                   }
-                }
-              } : handleSceneChange}
-              isOverlayModalOpen={isOverlayModalOpen}
-              segmentDuration={selectedPlayTourId && currentPlayTourScene
-                ? (currentPlayTourScene.move_duration + (currentPlayTourScene.wait_duration || 0))
-                : (currentTour?.auto_change_interval || 12000)}
-              restartTrigger={restartTrigger}
-            />
+                } : handleSceneChange}
+                isOverlayModalOpen={isOverlayModalOpen}
+                segmentDuration={selectedPlayTourId && currentPlayTourScene
+                  ? (currentPlayTourScene.move_duration + (currentPlayTourScene.wait_duration || 0))
+                  : (currentTour?.auto_change_interval || 12000)}
+                restartTrigger={restartTrigger}
+              />
+            )}
           </>
         )}
       </div>
