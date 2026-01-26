@@ -80,14 +80,14 @@ const ContactPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
-      
+
       <div className="container mx-auto px-4 py-12">
         <div className="max-w-6xl mx-auto">
           {/* Header Section */}
           <div className="text-center mb-12">
             <h1 className="text-4xl font-bold text-gray-900 mb-4">Contact Us</h1>
             <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-              Have questions about our virtual tours? We'd love to hear from you. 
+              Have questions about our virtual tours? We'd love to hear from you.
               Send us a message and we'll respond as soon as possible.
             </p>
           </div>
@@ -96,7 +96,7 @@ const ContactPage: React.FC = () => {
             {/* Contact Information */}
             <div className="bg-white rounded-lg shadow-lg p-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-6">Get in Touch</h2>
-              
+
               <div className="space-y-6">
                 <div className="flex items-start space-x-4">
                   <div className="flex-shrink-0">
@@ -104,8 +104,8 @@ const ContactPage: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="text-lg font-medium text-gray-900">Email</h3>
-                    <a 
-                      href="mailto:info@thenimto.com" 
+                    <a
+                      href="mailto:info@thenimto.com"
                       className="text-indigo-600 hover:text-indigo-800 transition-colors"
                     >
                       info@thenimto.com
@@ -119,8 +119,8 @@ const ContactPage: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="text-lg font-medium text-gray-900">Phone</h3>
-                    <a 
-                      href="tel:+9779802364691" 
+                    <a
+                      href="tel:+9779802364691"
                       className="text-indigo-600 hover:text-indigo-800 transition-colors"
                     >
                       +977-9802364691
@@ -168,12 +168,12 @@ const ContactPage: React.FC = () => {
             {/* Contact Form */}
             <div className="bg-white rounded-lg shadow-lg p-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-6">Send us a Message</h2>
-              
+
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                 {/* Full Name */}
                 <div>
                   <label htmlFor="fullName" className="block text-sm font-medium text-gray-700 mb-2">
-                    Full Name *
+                    Full Name <span className="text-red-600">*</span>
                   </label>
                   <input
                     type="text"
@@ -190,12 +190,12 @@ const ContactPage: React.FC = () => {
                 {/* Email */}
                 <div>
                   <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                    Email Address *
+                    Email Address <span className="text-red-600">*</span>
                   </label>
                   <input
                     type="email"
                     id="email"
-                    {...register('email', { 
+                    {...register('email', {
                       required: 'Email is required',
                       pattern: {
                         value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
@@ -213,7 +213,7 @@ const ContactPage: React.FC = () => {
                 {/* Phone Number */}
                 <div>
                   <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-2">
-                    Phone Number *
+                    Phone Number <span className="text-red-600">*</span>
                   </label>
                   <PhoneInput
                     value={phoneNumber}
@@ -238,7 +238,7 @@ const ContactPage: React.FC = () => {
                 {/* Message */}
                 <div>
                   <label htmlFor="message" className="block text-sm font-medium text-gray-700 mb-2">
-                    Message *
+                    Message <span className="text-red-600">*</span>
                   </label>
                   <textarea
                     id="message"

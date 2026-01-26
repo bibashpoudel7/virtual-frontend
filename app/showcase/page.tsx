@@ -1,10 +1,12 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Tour } from '@/types/tour';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import Image from 'next/image';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import TourSkeleton from '@/components/tours/TourSkeleton';
 
 export default function ShowcasePage() {
   const router = useRouter();
@@ -13,16 +15,32 @@ export default function ShowcasePage() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  useEffect(() => {
-    fetchPublicTours();
-  }, []);
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [limit] = useState(6); // Default 6 items per page
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [isPageLoading, setIsPageLoading] = useState(false);
+  const isInitialMount = useRef(true);
 
-  const fetchPublicTours = async () => {
+  useEffect(() => {
+    if (isInitialMount.current) {
+      fetchPublicTours(currentPage, false);
+      isInitialMount.current = false;
+    } else {
+      fetchPublicTours(currentPage, true);
+    }
+  }, [currentPage]);
+
+  const fetchPublicTours = async (page: number = 1, isPagination: boolean = false) => {
     try {
-      setLoading(true);
-      // Fetch directly from backend - backend will handle is_published logic and include thumbnail_url
+      if (isPagination) {
+        setIsPageLoading(true);
+      } else {
+        setLoading(true);
+      }
       const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
-      const response = await fetch(`${backendUrl}tours/public`, {
+      const response = await fetch(`${backendUrl}tours/public?page=${page}&limit=${limit}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -34,12 +52,27 @@ export default function ShowcasePage() {
       }
 
       const data = await response.json();
-      setTours(data);
+
+      // Handle the new paginated API response structure
+      if (data.datas && Array.isArray(data.datas)) {
+        setTours(data.datas);
+        if (data.pagination) {
+          setTotalPages(data.pagination.total_pages);
+          setTotalCount(data.pagination.total);
+          setCurrentPage(data.pagination.page);
+        }
+      } else if (Array.isArray(data)) {
+        // Fallback for old API structure
+        setTours(data);
+        setTotalPages(Math.ceil(data.length / limit));
+        setTotalCount(data.length);
+      }
     } catch (err) {
       console.error('Failed to fetch tours:', err);
       setError('Unable to load virtual tours. Please try again later.');
     } finally {
       setLoading(false);
+      setIsPageLoading(false);
     }
   };
 
@@ -101,16 +134,14 @@ export default function ShowcasePage() {
             </div>
           </div>
 
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            </div>
+          {loading || isPageLoading ? (
+            <TourSkeleton count={limit} />
           ) : error ? (
             <div className="text-center py-12">
               <p className="text-red-500 text-lg mb-4">{error}</p>
               <button
-                onClick={fetchPublicTours}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                onClick={() => fetchPublicTours(currentPage)}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
               >
                 Try Again
               </button>
@@ -231,6 +262,50 @@ export default function ShowcasePage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Pagination Controls */}
+          {!loading && !error && tours.length > 0 && totalPages > 1 && (
+            <div className="mt-12 flex flex-col items-center justify-center space-y-4">
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1 || loading || isPageLoading}
+                  className="p-2 rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+
+                <div className="flex items-center space-x-2">
+                  {[...Array(totalPages)].map((_, i) => (
+                    <button
+                      key={i + 1}
+                      onClick={() => setCurrentPage(i + 1)}
+                      disabled={loading || isPageLoading}
+                      className={`w-10 h-10 rounded-lg text-sm font-medium transition-colors cursor-pointer ${currentPage === i + 1
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                      {i + 1}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages || loading || isPageLoading}
+                  className="p-2 rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-sm text-gray-500">
+                Showing {((currentPage - 1) * limit) + 1} to {Math.min(currentPage * limit, totalCount)} of {totalCount} tours
+              </p>
             </div>
           )}
         </div>

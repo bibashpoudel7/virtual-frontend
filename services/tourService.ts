@@ -144,8 +144,12 @@ class TourService {
     return response?.data || [];
   }
 
-  async listPublicTours(): Promise<Tour[]> {
-    return this.fetchWithAuth(`tours/public`);
+  async listPublicTours(page: number = 1, limit: number = 10): Promise<Tour[]> {
+    const response = await this.fetchWithAuth(`tours/public?page=${page}&limit=${limit}`);
+    if (response && response.datas && Array.isArray(response.datas)) {
+      return response.datas;
+    }
+    return Array.isArray(response) ? response : (response?.data || []);
   }
 
   async getUploadURL(sceneId: string, prefix?: string): Promise<GetUploadURLResponse> {
