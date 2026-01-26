@@ -265,7 +265,7 @@ const ProgressBar = React.memo(({
   if (scenes.length <= 1) return null;
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 p-4" ref={progressBarRef}>
+    <div className="absolute bottom-0 left-0 right-0 p-4 z-40" ref={progressBarRef}>
       {/* Segmented Progress Bar with gaps */}
       <div className="flex gap-1 w-full h-1">
         {scenes.map((scene, index) => {
@@ -858,21 +858,21 @@ export default function PublicTourViewer() {
 
   const handlePrevScene = useCallback(() => {
     if (isTransitioning) return;
-    
+
     if (selectedPlayTourId && playTourDisplayScenes) {
       // Navigate through Play Tour sequence - direct navigation without scene sync
       if (currentPlayTourSceneIndex > 0) {
         const newIndex = currentPlayTourSceneIndex - 1;
         setCurrentPlayTourSceneIndex(newIndex);
-        
+
         // Mark this as a manual scene change to prevent sync issues
         setIsManualSceneChange(true);
-        
+
         // Interrupt any active playback
         setIsPlayingTour(false);
         setIsAutoplay(false);
         setCurrentCamera(null);
-        
+
         // Find the corresponding scene and change directly
         const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
         const pScene = selectedTour?.play_tour_scenes?.[newIndex];
@@ -898,21 +898,21 @@ export default function PublicTourViewer() {
 
   const handleNextScene = useCallback(() => {
     if (isTransitioning) return;
-    
+
     if (selectedPlayTourId && playTourDisplayScenes) {
       // Navigate through Play Tour sequence - direct navigation without scene sync
       if (currentPlayTourSceneIndex < playTourDisplayScenes.length - 1) {
         const newIndex = currentPlayTourSceneIndex + 1;
         setCurrentPlayTourSceneIndex(newIndex);
-        
+
         // Mark this as a manual scene change to prevent sync issues
         setIsManualSceneChange(true);
-        
+
         // Interrupt any active playback
         setIsPlayingTour(false);
         setIsAutoplay(false);
         setCurrentCamera(null);
-        
+
         // Find the corresponding scene and change directly
         const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
         const pScene = selectedTour?.play_tour_scenes?.[newIndex];
@@ -1494,10 +1494,10 @@ export default function PublicTourViewer() {
                 {/* Walking Man Icon - Shows when tour is paused (like Matterport) */}
                 {!isAutoplay && !isPlayingTour && !isTransitioning && (
                   <div className="bg-white rounded-full p-2.5 flex items-center justify-center shadow-lg border border-gray-200 transition-all duration-500">
-                    <Icon 
-                      icon="mdi:walk" 
-                      width="20" 
-                      height="20" 
+                    <Icon
+                      icon="mdi:walk"
+                      width="20"
+                      height="20"
                       className="text-red-500"
                     />
                   </div>
@@ -1543,7 +1543,7 @@ export default function PublicTourViewer() {
             <img
               src="/TheNimto.png"
               alt="TheNimto"
-              className="h-30 w-auto opacity-80 hover:opacity-100 transition-opacity duration-200"
+              className="h-30 w-auto opacity-100 transition-opacity duration-200"
             />
           </div>
         )}

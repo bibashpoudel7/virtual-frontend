@@ -271,7 +271,7 @@ const ProgressBar = React.memo(({
   if (scenes.length <= 1) return null;
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 p-4" ref={progressBarRef}>
+    <div className="absolute bottom-0 left-0 right-0 p-4 z-40" ref={progressBarRef}>
       {/* Segmented Progress Bar with gaps */}
       <div className="flex gap-1 w-full h-1">
         {scenes.map((scene, index) => {
@@ -1556,7 +1556,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
             <img
               src="/TheNimto.png"
               alt="TheNimto"
-              className="h-30 w-auto opacity-80 hover:opacity-100 transition-opacity duration-200"
+              className="h-30 w-auto opacity-100 transition-opacity duration-200"
             />
           </div>
         )}

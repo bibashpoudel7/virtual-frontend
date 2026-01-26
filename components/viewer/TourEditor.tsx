@@ -775,14 +775,14 @@ export default function TourEditor({
       if (currentPlayTourSceneIndex > 0) {
         const newIndex = currentPlayTourSceneIndex - 1;
         setCurrentPlayTourSceneIndex(newIndex);
-        
+
         // Mark this as a manual scene change to prevent sync issues
         setIsManualSceneChange(true);
-        
+
         // Interrupt any active playback
         setIsPlayingTour(false);
         setIsAutoplay(false);
-        
+
         // Find the corresponding scene and change directly WITHOUT calling handleSceneChange
         const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
         const pScene = selectedTour?.play_tour_scenes?.[newIndex];
@@ -790,14 +790,14 @@ export default function TourEditor({
           const targetScene = scenes.find(s => s.id === pScene.scene_id);
           if (targetScene) {
             setIsTransitioning(true);
-            
+
             // Direct scene change without sync logic
             setCurrentSceneId(pScene.scene_id);
             const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
             if (sceneIdx !== -1) {
               setCurrentSceneIndex(sceneIdx);
             }
-            
+
             setTimeout(() => {
               setIsTransitioning(false);
             }, 1500);
@@ -818,14 +818,14 @@ export default function TourEditor({
       if (currentPlayTourSceneIndex < playTourDisplayScenes.length - 1) {
         const newIndex = currentPlayTourSceneIndex + 1;
         setCurrentPlayTourSceneIndex(newIndex);
-        
+
         // Mark this as a manual scene change to prevent sync issues
         setIsManualSceneChange(true);
-        
+
         // Interrupt any active playback
         setIsPlayingTour(false);
         setIsAutoplay(false);
-        
+
         // Find the corresponding scene and change directly WITHOUT calling handleSceneChange
         const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
         const pScene = selectedTour?.play_tour_scenes?.[newIndex];
@@ -833,14 +833,14 @@ export default function TourEditor({
           const targetScene = scenes.find(s => s.id === pScene.scene_id);
           if (targetScene) {
             setIsTransitioning(true);
-            
+
             // Direct scene change without sync logic
             setCurrentSceneId(pScene.scene_id);
             const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
             if (sceneIdx !== -1) {
               setCurrentSceneIndex(sceneIdx);
             }
-            
+
             setTimeout(() => {
               setIsTransitioning(false);
             }, 1500);
@@ -1788,10 +1788,10 @@ export default function TourEditor({
               {/* Walking Man Icon - Shows when tour is paused (like Matterport) */}
               {!isAutoplay && !isPlayingTour && !isTransitioning && (
                 <div className="bg-white rounded-full p-2.5 flex items-center justify-center shadow-lg border border-gray-200 transition-all duration-500">
-                  <Icon 
-                    icon="mdi:walk" 
-                    width="20" 
-                    height="20" 
+                  <Icon
+                    icon="mdi:walk"
+                    width="20"
+                    height="20"
                     className="text-red-500"
                   />
                 </div>
@@ -2889,7 +2889,7 @@ export default function TourEditor({
         <img
           src="/TheNimto.png"
           alt="TheNimto"
-          className="h-30 w-auto opacity-80 hover:opacity-100 transition-opacity duration-200"
+          className="h-30 w-auto opacity-100 transition-opacity duration-200"
         />
       </div>
 
