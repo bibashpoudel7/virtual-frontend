@@ -9,9 +9,14 @@ import { useAuth } from '../contexts/AuthContext';
 
 const Header: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated, logout, user } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+
+  const toursNavLabel =
+    (user?.role && user.role.toUpperCase() === '1')
+      ? 'Manage Tours'
+      : 'My Tours';
 
   const publicNavigation = [
     { name: 'Home', href: '/', icon: Home },
@@ -23,7 +28,7 @@ const Header: React.FC = () => {
   const authenticatedNavigation = [
     { name: 'Home', href: '/', icon: Home },
     { name: 'Browse Tours', href: '/showcase', icon: MapPin },
-    { name: 'My Tours', href: '/admin/tours', icon: Calendar },
+    { name: toursNavLabel, href: '/admin/tours', icon: Calendar },
     // { name: 'Pricing', href: '/pricing', icon: DollarSign },
     { name: 'Contact', href: '/contact', icon: Phone },
   ];
