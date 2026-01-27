@@ -611,7 +611,7 @@ export default function CubeMapViewer({
   }, [scenes]);
 
   // Progressive loading of cube map tiles with proper compositing
-  const loadCubeMapLevel = useCallback((level: number) => {
+  const loadCubeMapLevel = useCallback((level: number, preserveCamera: boolean = false) => {
     // Always use the current manifest from state, not from closure
     const currentManifest = manifest;
     console.log('[CubeMapViewer] loadCubeMapLevel called with level:', level);
@@ -691,12 +691,12 @@ export default function CubeMapViewer({
       if (isTransitioningRef.current && cubeRef.current && cameraRef.current) {
         const targetFov = currentScene.fov || 60;
         const currentFov = cameraRef.current.fov;
-        
+
         // Store navigation target for smooth camera transition
         const targetRotation = navigationTargetRef.current;
         const startYaw = controlsRef.current.lon;
         const startPitch = controlsRef.current.lat;
-        
+
         // Calculate smooth rotation path
         let deltaYaw = 0;
         let deltaPitch = 0;
@@ -722,7 +722,7 @@ export default function CubeMapViewer({
         const smoothTransition = () => {
           const elapsed = Date.now() - startTime;
           const progress = Math.min(elapsed / transitionDuration, 1);
-          
+
           // Smooth easing - ease out
           const easeOutQuad = (t: number) => 1 - (1 - t) * (1 - t);
           const easedProgress = easeOutQuad(progress);
@@ -746,7 +746,7 @@ export default function CubeMapViewer({
           const brightness = 0.5 + 0.5 * easedProgress; // From 50% to 100% brightness
           const colorValue = Math.floor(brightness * 255);
           const hexColor = (colorValue << 16) | (colorValue << 8) | colorValue;
-          
+
           materialsRef.current.forEach(material => {
             material.color.setHex(hexColor);
           });
@@ -758,10 +758,10 @@ export default function CubeMapViewer({
             materialsRef.current.forEach(material => {
               material.color.setHex(0xffffff);
             });
-            
+
             setIsTransitioning(false);
             setIsLoading(false);
-            
+
             // Clear navigation target
             if (targetRotation) {
               navigationTargetRef.current = null;
@@ -777,20 +777,23 @@ export default function CubeMapViewer({
           cubeRef.current.scale.set(1, 1, 1);
         }
 
-        // Reset camera FOV to scene default
-        if (cameraRef.current) {
-          const targetFov = currentScene.fov || 60;
-          cameraRef.current.fov = targetFov;
-          cameraRef.current.updateProjectionMatrix();
-        }
+        // Only reset FOV/Camera if NOT preserving camera (e.g. on new scene)
+        if (!preserveCamera) {
+          // Reset camera FOV to scene default
+          if (cameraRef.current) {
+            const targetFov = currentScene.fov || 60;
+            cameraRef.current.fov = targetFov;
+            cameraRef.current.updateProjectionMatrix();
+          }
 
-        // Apply rotation immediately if target exists
-        if (navigationTargetRef.current) {
-          controlsRef.current.lon = navigationTargetRef.current.yaw;
-          controlsRef.current.lat = navigationTargetRef.current.pitch;
-          controlsRef.current.targetLon = navigationTargetRef.current.yaw;
-          controlsRef.current.targetLat = navigationTargetRef.current.pitch;
-          navigationTargetRef.current = null;
+          // Apply rotation immediately if target exists
+          if (navigationTargetRef.current) {
+            controlsRef.current.lon = navigationTargetRef.current.yaw;
+            controlsRef.current.lat = navigationTargetRef.current.pitch;
+            controlsRef.current.targetLon = navigationTargetRef.current.yaw;
+            controlsRef.current.targetLat = navigationTargetRef.current.pitch;
+            navigationTargetRef.current = null;
+          }
         }
 
         setIsTransitioning(false);
@@ -1854,11 +1857,11 @@ export default function CubeMapViewer({
         // Only change level if we're upgrading quality or significantly zooming out
         if (targetLevel > currentLevel) {
           // Upgrade quality
-          loadCubeMapLevel(targetLevel);
+          loadCubeMapLevel(targetLevel, true);
           setCurrentLevel(targetLevel);
         } else if (targetLevel < currentLevel && cameraRef.current.fov > 75) {
           // Only downgrade when significantly zoomed out to save memory
-          loadCubeMapLevel(targetLevel);
+          loadCubeMapLevel(targetLevel, true);
           setCurrentLevel(targetLevel);
         }
       }
