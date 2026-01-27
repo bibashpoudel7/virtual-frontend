@@ -18,6 +18,7 @@ interface CreateTourProps {
 export default function CreateTour({ propertyId, onSuccess, preloadedData }: CreateTourProps) {
   const [formData, setFormData] = useState({
     name: '',
+    categories: [] as string[],
     property_id: undefined as string | undefined,
     is_published: false,
     autoplay_enabled: false,
@@ -99,7 +100,7 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
         setLoadingProperties(true);
         const response = await tourService.getApprovedProperties();
         setProperties(response.properties);
-        
+
         // If propertyId is provided, pre-select it
         if (propertyId) {
           const property = response.properties.find(p => p.id === propertyId);
@@ -136,10 +137,11 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
       }
 
       const tour = await tourService.createTour(tourData);
-      
+
       // Reset form
       setFormData({
         name: '',
+        categories: [],
         property_id: undefined,
         is_published: false,
         autoplay_enabled: false,
@@ -148,7 +150,7 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
         default_pitch_speed: 0.0,
         background_audio_url: '',
       });
-      
+
       // Call success callback to switch back to list view
       if (onSuccess) {
         onSuccess(tour);
@@ -177,7 +179,7 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
   return (
     <form onSubmit={handleSubmit} className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow">
       <h2 className="text-2xl font-bold mb-6 text-gray-900">Create New Virtual Tour</h2>
-      
+
       {error && (
         <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
           {error}
@@ -193,16 +195,16 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
             </label>
             <select
               value={formData.property_id || ''}
-              onChange={(e) => setFormData({ 
-                ...formData, 
-                property_id: e.target.value || undefined 
+              onChange={(e) => setFormData({
+                ...formData,
+                property_id: e.target.value || undefined
               })}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
             >
               <option value="">Choose a venue property (or leave blank for standalone tour)...</option>
               {properties?.map((property) => (
-                <option 
-                  key={property.id} 
+                <option
+                  key={property.id}
                   value={property.id}
                   disabled={property.hasTour}
                 >
@@ -234,6 +236,67 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
         </div>
 
         <div>
+          <label className="block text-sm font-bold text-gray-900 mb-2">
+            Categories
+          </label>
+          <div className="flex flex-wrap gap-2 mb-2 p-2 border border-gray-300 rounded-lg bg-gray-50 min-h-[42px]">
+            {(formData.categories || []).map((cat) => (
+              <span key={cat} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 capitalize">
+                {cat}
+                <button
+                  type="button"
+                  onClick={() => setFormData({
+                    ...formData,
+                    categories: formData.categories.filter(c => c !== cat)
+                  })}
+                  className="ml-1.5 text-blue-600 hover:text-blue-900 focus:outline-none"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {(formData.categories || []).length === 0 && (
+              <span className="text-gray-400 text-sm italic py-0.5">No categories selected</span>
+            )}
+          </div>
+
+          <select
+            value=""
+            onChange={(e) => {
+              const selectedValue = e.target.value;
+              if (selectedValue && !formData.categories.includes(selectedValue)) {
+                setFormData({
+                  ...formData,
+                  categories: [...formData.categories, selectedValue]
+                });
+              }
+            }}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
+          >
+            <option value="">+ Add Category...</option>
+            <option value="education">Education</option>
+            <option value="college">College</option>
+            <option value="hospital">Hospital</option>
+            <option value="hotel">Hotel</option>
+            <option value="real-estate">Real Estate</option>
+            <option value="industry">Industry</option>
+            <option value="museum">Museum</option>
+            <option value="showroom">Showroom</option>
+            <option value="restaurant">Restaurant</option>
+            <option value="office">Office</option>
+            <option value="retail">Retail</option>
+            <option value="event-venue">Event Venue</option>
+            <option value="wedding-venue">Wedding Venue</option>
+            <option value="gym">Gym</option>
+            <option value="spa">Spa</option>
+            <option value="apartment">Apartment</option>
+            <option value="house">House</option>
+            <option value="other">Other</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-500">Add one or more categories to help organize your tour (optional).</p>
+        </div>
+
+        <div>
           <label className="block text-sm font-bold text-gray-900 mb-2">Background Audio URL (Optional)</label>
           <input
             type="url"
@@ -253,9 +316,9 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
             <input
               type="number"
               value={formData.default_fov}
-              onChange={(e) => setFormData({ 
-                ...formData, 
-                default_fov: parseFloat(e.target.value) 
+              onChange={(e) => setFormData({
+                ...formData,
+                default_fov: parseFloat(e.target.value)
               })}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
               min="30"
@@ -269,9 +332,9 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
             <input
               type="number"
               value={formData.default_yaw_speed}
-              onChange={(e) => setFormData({ 
-                ...formData, 
-                default_yaw_speed: parseFloat(e.target.value) 
+              onChange={(e) => setFormData({
+                ...formData,
+                default_yaw_speed: parseFloat(e.target.value)
               })}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
               step="0.001"
@@ -283,9 +346,9 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
             <input
               type="number"
               value={formData.default_pitch_speed}
-              onChange={(e) => setFormData({ 
-                ...formData, 
-                default_pitch_speed: parseFloat(e.target.value) 
+              onChange={(e) => setFormData({
+                ...formData,
+                default_pitch_speed: parseFloat(e.target.value)
               })}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
               step="0.001"
@@ -305,14 +368,14 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
           </label>
 
           {/* <label className="flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={formData.autoplay_enabled}
-              onChange={(e) => setFormData({ ...formData, autoplay_enabled: e.target.checked })}
-              className="mr-3 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <span className="text-sm font-bold text-gray-900">Enable autoplay</span>
-          </label> */}
+          <input
+            type="checkbox"
+            checked={formData.autoplay_enabled}
+            onChange={(e) => setFormData({ ...formData, autoplay_enabled: e.target.checked })}
+            className="mr-3 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          />
+          <span className="text-sm font-bold text-gray-900">Enable autoplay</span>
+        </label> */}
         </div>
 
         <button

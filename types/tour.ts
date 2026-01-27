@@ -18,6 +18,7 @@ export interface Tour extends BaseModel {
   autoplay_enabled: boolean;
   is_paid?: boolean;
   source?: string;
+  categories?: string[];
   default_fov: number;
   default_yaw_speed: number;
   default_pitch_speed: number;

@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import SceneManager from '@/components/scenes/SceneManager';
 import TourEditor from '@/components/viewer/TourEditor';
+import EditTour from '@/components/tours/EditTour';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { tourService } from '@/services/tourService';
 
@@ -19,7 +20,7 @@ export default function TourDetailsPage() {
   const [selectedScene, setSelectedScene] = useState<Scene>();
 
   // Derive active tab from URL query param, default to 'scenes'
-  const activeTab = (searchParams.get('tab') === 'viewer' ? 'viewer' : 'scenes') as 'scenes' | 'viewer';
+  const activeTab = (searchParams.get('tab') === 'viewer' ? 'viewer' : searchParams.get('tab') === 'edit' ? 'edit' : 'scenes') as 'scenes' | 'viewer' | 'edit';
   const [tourLoading, setTourLoading] = useState(true);
   const [scenesLoading, setScenesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -210,7 +211,7 @@ export default function TourDetailsPage() {
                 <span className="text-gray-700 font-bold">Tour ID:</span> {tourId}
               </p>
             </div>
-            <div className="flex gap-2">
+            {/* <div className="flex gap-2">
               <button
                 onClick={() => router.push(`/admin/tours/${tourId}?tab=viewer`)}
                 className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 cursor-pointer"
@@ -222,7 +223,7 @@ export default function TourDetailsPage() {
               >
                 Publish Tour
               </button>
-            </div>
+            </div> */}
           </div>
         </div>
       </header>
@@ -240,6 +241,15 @@ export default function TourDetailsPage() {
             >
               Scene Management ({totalScenes})
             </button>
+            {/* Only show Edit Tour tab when explicitly navigated to edit */}
+            {activeTab === 'edit' && (
+              <button
+                onClick={() => router.push(`/admin/tours/${tourId}?tab=edit`)}
+                className="py-4 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm cursor-pointer"
+              >
+                Edit Tour
+              </button>
+            )}
             <button
               onClick={() => router.push(`/admin/tours/${tourId}?tab=viewer`)}
               className={`py-4 px-1 border-b-2 font-medium text-sm cursor-pointer ${activeTab === 'viewer'
@@ -287,6 +297,23 @@ export default function TourDetailsPage() {
                 totalScenes={totalScenes}
                 onPageChange={(page) => fetchScenes(page, true)}
                 loadingMore={loadingMore}
+              />
+            </div>
+          )}
+
+          {activeTab === 'edit' && tour && (
+            <div className="max-w-4xl mx-auto w-full p-6">
+              <EditTour
+                tour={tour}
+                onSuccess={(updatedTour) => {
+                  setTour(updatedTour);
+                  // Redirect back to scenes tab after successful update
+                  router.push(`/admin/tours/${tourId}?tab=scenes`);
+                }}
+                onCancel={() => {
+                  // Go back to scenes tab
+                  router.push(`/admin/tours/${tourId}?tab=scenes`);
+                }}
               />
             </div>
           )}
