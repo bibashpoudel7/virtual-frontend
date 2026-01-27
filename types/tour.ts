@@ -27,6 +27,7 @@ export interface Tour extends BaseModel {
   auto_change_mode?: string;
   auto_pause_on_interaction?: boolean;
   auto_restart_delay?: number;
+  cover_image_url?: string;
   thumbnail_url?: string;
   tour_scenes: TourScene[];
 }

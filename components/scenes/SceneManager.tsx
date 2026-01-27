@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Scene } from '@/types/tour';
+import { Scene, Tour } from '@/types/tour';
 import { HotspotsAPI } from '@/lib/api/hotspots';
 import AdvancedSceneUploader from '../upload/AdvancedSceneUploader';
 import SimplePanoramaPreview from './SimplePanoramaPreview';
@@ -22,6 +22,8 @@ interface SceneManagerProps {
   onPageChange: (page: number) => void;
   onRefresh?: () => void;
   loadingMore?: boolean;
+  tour?: Tour | null;
+  onTourUpdate?: (tour: Tour) => void;
 }
 
 export default function SceneManager({
@@ -35,7 +37,9 @@ export default function SceneManager({
   totalScenes,
   onPageChange,
   onRefresh,
-  loadingMore
+  loadingMore,
+  tour,
+  onTourUpdate
 }: SceneManagerProps) {
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null);
   const [showUploader, setShowUploader] = useState(false);
@@ -557,6 +561,43 @@ export default function SceneManager({
     }
   };
 
+  const handleSetAsCover = async () => {
+    if (!selectedScene || !selectedScene.src_original_url) {
+      toast.error('Scene must have an image to be set as cover');
+      return;
+    }
+
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
+      const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
+
+      const response = await fetch(`${backendUrl}tours/${tourId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          ...tour,
+          cover_image_url: selectedScene.src_original_url
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to set cover image');
+      }
+
+      const updatedTour = await response.json();
+      if (onTourUpdate) {
+        onTourUpdate(updatedTour);
+      }
+      toast.success('Tour cover image updated successfully!');
+    } catch (error) {
+      console.error('Failed to set cover image:', error);
+      toast.error('Failed to update tour cover image');
+    }
+  };
+
   const debouncedSave = useCallback(() => {
     if (saveTimeout) {
       clearTimeout(saveTimeout);
@@ -784,15 +825,52 @@ export default function SceneManager({
             <div className="space-y-6">
               <div>
                 {/* Editable Scene Name */}
-                {isEditingName ? (
-                  <div className="mb-4 flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={editedName}
-                      onChange={(e) => setEditedName(e.target.value)}
-                      onKeyDown={async (e) => {
-                        if (e.key === 'Enter') {
-                          // Save on Enter
+                <div className="flex justify-between items-start mb-4">
+                  {isEditingName ? (
+                    <div className="flex-1 flex flex-col gap-2">
+                      <input
+                        type="text"
+                        value={editedName}
+                        onChange={(e) => setEditedName(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter') {
+                            if (editedName.trim() && editedName !== selectedScene.name) {
+                              try {
+                                const token = localStorage.getItem('accessToken');
+                                const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+                                const separator = baseUrl.endsWith('/') ? '' : '/';
+
+                                const response = await fetch(`${baseUrl}${separator}scenes/${selectedScene.id}`, {
+                                  method: 'PUT',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${token}`
+                                  },
+                                  body: JSON.stringify({
+                                    ...selectedScene,
+                                    name: editedName.trim()
+                                  })
+                                });
+
+                                if (response.ok) {
+                                  const updatedScene = { ...selectedScene, name: editedName.trim() };
+                                  setSelectedScene(updatedScene);
+                                  const updatedScenes = scenes.map(s =>
+                                    s.id === selectedScene.id ? updatedScene : s
+                                  );
+                                  onSceneUpdate?.(updatedScenes);
+                                }
+                              } catch (error) {
+                                console.error('Failed to update scene name:', error);
+                              }
+                            }
+                            setIsEditingName(false);
+                          } else if (e.key === 'Escape') {
+                            setIsEditingName(false);
+                            setEditedName(selectedScene.name);
+                          }
+                        }}
+                        onBlur={async () => {
                           if (editedName.trim() && editedName !== selectedScene.name) {
                             try {
                               const token = localStorage.getItem('accessToken');
@@ -824,66 +902,53 @@ export default function SceneManager({
                             }
                           }
                           setIsEditingName(false);
-                        } else if (e.key === 'Escape') {
-                          // Cancel on Escape
-                          setIsEditingName(false);
-                          setEditedName(selectedScene.name);
-                        }
+                        }}
+                        autoFocus
+                        className="w-full text-xl font-semibold px-2 py-1 border-2 border-blue-500 rounded text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-xs text-gray-500">Press Enter to save, Esc to cancel</span>
+                    </div>
+                  ) : (
+                    <h3
+                      className="text-xl font-semibold text-gray-900 cursor-pointer hover:text-blue-600 inline-flex items-center gap-2 group"
+                      onClick={() => {
+                        setIsEditingName(true);
+                        setEditedName(selectedScene.name);
                       }}
-                      onBlur={async () => {
-                        // Save on blur
-                        if (editedName.trim() && editedName !== selectedScene.name) {
-                          try {
-                            const token = localStorage.getItem('accessToken');
-                            const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
-                            const separator = baseUrl.endsWith('/') ? '' : '/';
+                      title="Click to edit scene name"
+                    >
+                      {selectedScene.name}
+                      <svg className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    </h3>
+                  )}
 
-                            const response = await fetch(`${baseUrl}${separator}scenes/${selectedScene.id}`, {
-                              method: 'PUT',
-                              headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${token}`
-                              },
-                              body: JSON.stringify({
-                                ...selectedScene,
-                                name: editedName.trim()
-                              })
-                            });
-
-                            if (response.ok) {
-                              const updatedScene = { ...selectedScene, name: editedName.trim() };
-                              setSelectedScene(updatedScene);
-                              const updatedScenes = scenes.map(s =>
-                                s.id === selectedScene.id ? updatedScene : s
-                              );
-                              onSceneUpdate?.(updatedScenes);
-                            }
-                          } catch (error) {
-                            console.error('Failed to update scene name:', error);
-                          }
-                        }
-                        setIsEditingName(false);
-                      }}
-                      autoFocus
-                      className="flex-1 text-xl font-semibold px-2 py-1 border-2 border-blue-500 rounded text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <span className="text-xs text-gray-500">Press Enter to save, Esc to cancel</span>
-                  </div>
-                ) : (
-                  <h3
-                    className="text-xl font-semibold mb-4 text-gray-900 cursor-pointer hover:text-blue-600 inline-flex items-center gap-2 group"
-                    onClick={() => {
-                      setIsEditingName(true);
-                      setEditedName(selectedScene.name);
-                    }}
-                    title="Click to edit scene name"
-                  >
-                    {selectedScene.name}
-                    <svg className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                  </h3>
-                )}
+                  {selectedScene.src_original_url && (
+                    <div className="flex flex-col items-end">
+                      <button
+                        onClick={handleSetAsCover}
+                        disabled={tour?.cover_image_url === selectedScene.src_original_url}
+                        className={`px-4 py-2 rounded text-sm font-medium transition-colors cursor-pointer ${tour?.cover_image_url === selectedScene.src_original_url
+                          ? 'bg-green-100 text-green-700 cursor-default flex items-center gap-1'
+                          : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                          }`}
+                      >
+                        {tour?.cover_image_url === selectedScene.src_original_url ? (
+                          <>
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                            Current Cover
+                          </>
+                        ) : 'Set as Tour Cover'}
+                      </button>
+                      {tour?.cover_image_url === selectedScene.src_original_url && (
+                        <p className="text-[10px] text-gray-500 mt-1 italic">This image will be used as the tour thumbnail</p>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 {/* Interactive 360° Preview */}
                 {(selectedScene.src_original_url || tempPreviewUrl) && (

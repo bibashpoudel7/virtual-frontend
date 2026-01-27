@@ -40,7 +40,7 @@ export default function EditTour({ tour, onSuccess, onCancel }: EditTourProps) {
       }
 
       const updatedTour = await response.json();
-      
+
       if (onSuccess) {
         onSuccess(updatedTour);
       }

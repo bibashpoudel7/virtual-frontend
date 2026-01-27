@@ -237,7 +237,7 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
 
         <div>
           <label className="block text-sm font-bold text-gray-900 mb-2">
-            Categories
+            Categories (Optional)
           </label>
           <div className="flex flex-wrap gap-2 mb-2 p-2 border border-gray-300 rounded-lg bg-gray-50 min-h-[42px]">
             {(formData.categories || []).map((cat) => (
@@ -293,7 +293,7 @@ export default function CreateTour({ propertyId, onSuccess, preloadedData }: Cre
             <option value="house">House</option>
             <option value="other">Other</option>
           </select>
-          <p className="mt-1 text-xs text-gray-500">Add one or more categories to help organize your tour (optional).</p>
+          <p className="mt-1 text-xs text-gray-500">Add one or more categories to help organize your tour.</p>
         </div>
 
         <div>

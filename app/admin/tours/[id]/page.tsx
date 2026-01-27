@@ -279,6 +279,7 @@ export default function TourDetailsPage() {
               <SceneManager
                 tourId={tourId}
                 scenes={scenes}
+                tour={tour}
                 onSceneUpdate={(updatedScenes) => {
                   // Check if a scene was added (length increased)
                   if (updatedScenes.length > scenes.length) {
@@ -290,6 +291,7 @@ export default function TourDetailsPage() {
                   }
                   setScenes(updatedScenes);
                 }}
+                onTourUpdate={handleTourUpdate}
                 onRefresh={() => fetchScenes(1, false)}
                 isActive={activeTab === 'scenes'}
                 currentPage={currentPage}
