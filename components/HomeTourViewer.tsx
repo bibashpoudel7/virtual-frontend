@@ -1021,8 +1021,21 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       // This is hotspot navigation, not manual scene change
       setIsManualSceneChange(false);
       setCurrentSceneIndex(sceneIndex);
+
+      // If user navigates via hotspot while Play Tour is paused, ensure progress restarts cleanly
+      playTourProgressRef.current = 0;
+      setRestartTrigger(prev => prev + 1);
+
+      // Keep Play Tour progress bar index in sync if this scene exists in the selected play tour
+      if (selectedPlayTourId) {
+        const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
+        const matchingIndex = selectedTour?.play_tour_scenes?.findIndex((ps: any) => ps.scene_id === sceneId) ?? -1;
+        if (matchingIndex !== -1) {
+          setCurrentPlayTourSceneIndex(matchingIndex);
+        }
+      }
     }
-  }, [scenes, currentSceneIndex]);
+  }, [scenes, currentSceneIndex, selectedPlayTourId, playTours]);
 
   const handleHotspotClick = useCallback((hotspot: Hotspot) => {
     // Pause any active autoplay when user manually interacts with hotspots
@@ -1051,6 +1064,9 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         const targetSceneIndex = scenes.findIndex(scene => scene.id === targetSceneId);
 
         if (targetSceneIndex !== -1) {
+          // Reset Play Tour progress when navigating via hotspots
+          playTourProgressRef.current = 0;
+          setRestartTrigger(prev => prev + 1);
           handleSceneChange(targetSceneIndex, true);
         } else {
           console.error('Target scene not found:', targetSceneId);

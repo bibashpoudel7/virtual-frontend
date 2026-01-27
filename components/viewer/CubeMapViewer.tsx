@@ -108,6 +108,7 @@ export default function CubeMapViewer({
   const isAutoRotatingRef = useRef(isAutoRotating);
   const autoRotateRef = useRef(autoRotate);
   const isTransitioningRef = useRef(isTransitioning);
+  const isPlaybackModeRef = useRef(isPlaybackMode);
 
   // Sync refs with state/props
   useEffect(() => {
@@ -121,6 +122,10 @@ export default function CubeMapViewer({
   useEffect(() => {
     autoRotateRef.current = autoRotate;
   }, [autoRotate]);
+
+  useEffect(() => {
+    isPlaybackModeRef.current = isPlaybackMode;
+  }, [isPlaybackMode]);
 
   // Apply forced camera position (for Play Tour playback)
   useEffect(() => {
@@ -379,7 +384,7 @@ export default function CubeMapViewer({
       // Auto-rotation controlled by state or scene settings
       // Use refs to access latest values without re-triggering effect
       // Skip auto-rotate during playback mode
-      if (!isPlaybackMode && (autoRotateRef.current || isAutoRotatingRef.current) && !controls.isUserInteracting && Math.abs(controls.lonSpeed) < 0.01) {
+      if (!isPlaybackModeRef.current && (autoRotateRef.current || isAutoRotatingRef.current) && !controls.isUserInteracting && Math.abs(controls.lonSpeed) < 0.01) {
         const rotateSpeed = 0.5;
         controls.lon += rotateSpeed * 0.2;
         controls.targetLon = controls.lon; // Keep target in sync
@@ -639,7 +644,7 @@ export default function CubeMapViewer({
     }
 
     // optimization: During playback, stick to lower levels (max level 1) to prevent lag
-    if (isPlaybackMode && level > 1) {
+    if (isPlaybackModeRef.current && level > 1) {
       return;
     }
     const faceSize = levelInfo.size;
@@ -912,7 +917,7 @@ export default function CubeMapViewer({
         }
       }
     });
-  }, [manifest, currentScene.id, isPlaybackMode]);
+  }, [manifest, currentScene.id]);
 
   // Load cube map tiles
   useEffect(() => {
@@ -1514,11 +1519,9 @@ export default function CubeMapViewer({
         controls.isDragging = true;
       }
 
-      // Capture LON/LAT for click context even in playback, 
+      // Capture LON/LAT for click context even in playback,
       // but only apply them to actually ROTATE the camera if not in playback mode
-      // Capture LON/LAT for click context even in playback, 
-      // but only apply them to actually ROTATE the camera if not in playback mode
-      if (!isPlaybackMode) {
+      if (!isPlaybackModeRef.current) {
         // Update TARGETS instead of direct values for smooth interpolation
         controls.targetLon = (controls.onPointerDownX - event.clientX) * 0.15 + controls.onPointerDownLon;
         controls.targetLat = (event.clientY - controls.onPointerDownY) * 0.15 + controls.onPointerDownLat;
@@ -1573,8 +1576,8 @@ export default function CubeMapViewer({
           // 2. Smart Proximity Check (if no direct hit and not in playback/autoplay mode)
           // If we clicked on the background (wall/floor) but close to a navigation hotspot, go there!
           // BUT: Disable this during autoplay/playback - we want clicks to pause, not navigate
-          const isAutoplayActive = isAutoRotatingRef.current || autoRotateRef.current;
-          if (!clickedOnTarget && !isPlaybackMode && !isAutoplayActive && hotspots.length > 0) {
+        const isAutoplayActive = isAutoRotatingRef.current || autoRotateRef.current;
+        if (!clickedOnTarget && !isPlaybackModeRef.current && !isAutoplayActive && hotspots.length > 0) {
             let bestAngle = Math.PI; // Max possible angle
             const proximityThreshold = 25 * (Math.PI / 180); // 25 degrees threshold
 
@@ -1609,7 +1612,7 @@ export default function CubeMapViewer({
         }
 
         // 3. Handle pausing logic - ANY click on background during playback should pause it
-        const isAnyPlaybackActive = isAutoRotatingRef.current || autoRotateRef.current || isPlaybackMode;
+        const isAnyPlaybackActive = isAutoRotatingRef.current || autoRotateRef.current || isPlaybackModeRef.current;
         if (isAnyPlaybackActive && onOverlayPause && !targetHotspot) {
           console.log('[CubeMapViewer] PAUSING - calling onOverlayPause because background was clicked');
           onOverlayPause();
@@ -1826,7 +1829,7 @@ export default function CubeMapViewer({
       event.preventDefault();
 
       // Disable zoom during playback
-      if (isPlaybackMode) return;
+      if (isPlaybackModeRef.current) return;
 
       if (!cameraRef.current) return;
 
