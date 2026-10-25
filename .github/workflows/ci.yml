@@ -1,0 +1,36 @@
+name: Frontend checks
+
+on:
+  pull_request:
+    branches: [main, dev]
+  # Reused by the deploy workflows so nothing deploys without passing checks
+  workflow_call:
+
+jobs:
+  build:
+    name: Type-check and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable corepack (Yarn 4)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Type-check
+        run: npx tsc --noEmit -p .
+
+      - name: Build
+        run: yarn build
+        env:
+          NODE_OPTIONS: '--max_old_space_size=4096'
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:5555/api/

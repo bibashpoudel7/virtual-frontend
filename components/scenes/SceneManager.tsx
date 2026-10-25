@@ -96,14 +96,14 @@ export default function SceneManager({
 
       try {
         const user = JSON.parse(userData);
-        const userId = user.id || user.user_id || null;
-        const role = user.roles?.toString() || user.role?.toString() || null;
+        const userId = user.id || null;
+        const role = user.role === 'admin' ? 'admin' : 'user';
 
         setCurrentUserId(userId);
         setUserRole(role);
 
-        // Check if user is superadmin
-        const isSuperadmin = role === '1';
+        // Admins can edit every tour
+        const isSuperadmin = role === 'admin';
 
         if (isSuperadmin) {
           setTourOwnership({ isOwner: true, isSuperadmin: true, loading: false });
@@ -649,9 +649,9 @@ export default function SceneManager({
           border-radius: 4px;
         }
       `}</style>
-      <div className="flex overflow-hidden" style={{ height: 'calc(100vh - 320px)', minHeight: '600px' }}>
+      <div className="flex flex-col md:flex-row md:overflow-hidden md:h-[calc(100vh-320px)] md:min-h-[600px]">
         <div
-          className="w-1/3 border-r p-4 overflow-y-auto bg-gray-50/30"
+          className="w-full md:w-1/3 max-h-72 md:max-h-none border-b md:border-b-0 md:border-r p-4 overflow-y-auto bg-gray-50/30"
           onScroll={(e) => {
             const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
             if (scrollHeight - scrollTop <= clientHeight + 50) {
@@ -662,9 +662,9 @@ export default function SceneManager({
           }}
         >
           <div className="flex justify-between items-center mb-2">
-            <h3 className="text-lg font-semibold text-gray-900">Scenes</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Photos</h3>
             <button
-              className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
+              className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer whitespace-nowrap"
               onClick={() => {
                 setShowInlineCreation(true);
                 setSelectedScene(null);
@@ -672,14 +672,14 @@ export default function SceneManager({
                 setTempPreviewUrl(null);
               }}
             >
-              Add Scene
+              + Add photo
             </button>
           </div>
           <p className="text-xs text-gray-500 mb-4 flex items-center gap-1">
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
               <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z"></path>
             </svg>
-            Drag and drop scenes to reorder them
+            Drag photos to change their order
           </p>
 
           <div className="space-y-2">
@@ -741,7 +741,7 @@ export default function SceneManager({
           )}
         </div>
 
-        <div className="flex-1 p-6 overflow-y-auto">
+        <div className="flex-1 p-4 md:p-6 overflow-y-auto">
           {showInlineCreation ? (
             <div className="space-y-6">
               <div>
@@ -1211,10 +1211,10 @@ export default function SceneManager({
 
                     {/* Title and Description */}
                     <div>
-                      <h3 className="text-xl font-semibold text-gray-900 mb-2">No Scenes Yet</h3>
+                      <h3 className="text-xl font-semibold text-gray-900 mb-2">Upload your first 360° photo</h3>
                       <p className="text-gray-600 mb-6 leading-relaxed">
-                        Start building your virtual tour by creating your first scene.
-                        Upload 360° panoramic images to create immersive experiences for your visitors.
+                        Each 360° photo becomes a room or spot visitors can look around in.
+                        Start with the entrance or the main room.
                       </p>
                     </div>
 
@@ -1228,7 +1228,7 @@ export default function SceneManager({
                       }}
                       className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer font-medium shadow-sm mb-8"
                     >
-                      Create Your First Scene
+                      Upload 360° photo
                     </button>
                   </div>
                 ) : (

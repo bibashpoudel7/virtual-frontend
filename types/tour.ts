@@ -5,6 +5,47 @@ export interface BaseModel {
   created_by?: string;
 }
 
+// A room label placed on the tour's intro 3D model; clicking it opens that scene
+export interface IntroModelRoom {
+  sceneId: string;
+  label?: string;
+  position: [number, number, number]; // in the intro viewer's normalized model space
+}
+
+// Rooms read from a floor plan image by the server (dollhouse builder)
+export interface FloorPlanAnalysis {
+  /** Real-world width of the whole image, meters */
+  plan_width_meters: number;
+  scale_source: 'dimensions' | 'estimated';
+  /** 0 when the plan doesn't state it */
+  ceiling_height_meters: number;
+  notes: string;
+  rooms: {
+    name: string;
+    /** Suggested 360° photo for this room, or "" */
+    scene_id: string;
+    /** Normalized image coordinates (0..1, origin top left) */
+    corners: { x: number; y: number }[];
+  }[];
+}
+
+// Room layout measured with the Android capture app (ARCore). Meters, one shared frame for all rooms.
+export interface BuildingScan {
+  version: 1;
+  captured_at: string;
+  device: string;
+  rooms: {
+    name: string;
+    scene_id: string;
+    /** Floor corners [x, z] */
+    corners: [number, number][];
+    /** 0 when not measured */
+    ceiling_height: number;
+    /** Where the 360° photo was taken [x, z] */
+    photo_spot: [number, number] | null;
+  }[];
+}
+
 export interface Tour extends BaseModel {
   id: string;
   name: string;
@@ -29,21 +70,10 @@ export interface Tour extends BaseModel {
   auto_restart_delay?: number;
   cover_image_url?: string;
   thumbnail_url?: string;
+  intro_model_url?: string | null; // 3D model (.glb) shown before the 360° tour starts
+  intro_model_rooms?: IntroModelRoom[] | null; // clickable room labels on the intro model
+  building_scan?: BuildingScan | null; // rooms measured with the Android capture app
   tour_scenes: TourScene[];
-}
-
-export interface Property {
-  id: string;
-  propertyName: string;
-  slug: string;
-  propertyType: string;
-  companyName: string;
-  hasTour: boolean;
-}
-
-export interface PropertiesResponse {
-  properties: Property[];
-  total: number;
 }
 
 export interface TourScene extends BaseModel {
@@ -116,7 +146,7 @@ export interface Overlay {
   id?: string;
   tour_id: string;
   scene_id: string;
-  kind: 'text' | 'image' | 'video' | 'html' | 'badge' | 'tooltip';
+  kind: 'text' | 'image' | 'video' | 'html' | 'badge' | 'tooltip' | 'model';
   yaw: number;
   pitch: number;
   payload?: string;
@@ -172,7 +202,12 @@ export interface PlayTourScene extends BaseModel {
   end_pitch: number;
   end_fov: number;
 
-  move_duration: number; // milliseconds
+  // Optional points the camera curves through between start and end
+  // move/hold are optional milliseconds: travel time to the point and pause at it
+  waypoints?: { yaw: number; pitch: number; fov: number; move?: number; hold?: number }[] | null;
+
+  start_hold?: number; // milliseconds to stay on the start view before moving
+  move_duration: number; // milliseconds (with point times: the last leg into the end view)
   wait_duration: number; // milliseconds
   transition_direction?: 'forward' | 'backward' | 'up' | 'down' | 'left' | 'right';
   title?: string;

@@ -51,6 +51,7 @@ export default function ShowcasePage() {
         throw new Error('Failed to fetch tours');
       }
 
+      // Backend returns a paginated envelope: { datas, pagination, statusCode }
       const data = await response.json();
 
       // Handle the new paginated API response structure

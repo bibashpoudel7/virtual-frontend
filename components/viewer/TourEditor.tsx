@@ -2,15 +2,17 @@
 import { Icon } from '@iconify/react';
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, Play, Pencil, Volume2, VolumeX, Maximize, Minimize, Settings, X, Share2 } from 'lucide-react';
-import CubeMapViewer from './CubeMapViewer';
+import CubeMapViewer, { sceneTileUrl } from './CubeMapViewer';
 import OverlayEditor from '../overlays/OverlayEditor';
-import { Tour, Scene, Hotspot, Overlay, PlayTour } from '@/types/tour';
+import { Tour, Scene, Hotspot, Overlay, PlayTour, PlayTourScene } from '@/types/tour';
+import { createCameraPathPlayer, CameraPoint } from '@/lib/camera-path';
 import PlayTourEditor from '../tours/PlayTourEditor';
 import PlayTourOverlay from '../tours/PlayTourOverlay';
 
 const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
 import { HotspotsAPI } from '@/lib/api/hotspots';
 import { tourService } from '@/services/tourService';
+import { getSceneThumbnail } from '@/lib/scene-thumbnail';
 
 // Simple debounce utility with cancel method
 function debounce<T extends (...args: any[]) => any>(
@@ -180,8 +182,8 @@ const ProgressBar = React.memo(({
 ProgressBar.displayName = 'ProgressBar';
 
 const calculateTransitionOffsets = (direction: string, progress: number) => {
-  // Use a smooth ease-out curve that doesn't return to zero
-  const curveProgress = 1 - Math.pow(1 - progress, 3); // Cubic ease-out
+  // Arc: 0 at the start, peak at the midpoint, back to 0 at the end, so the camera lands on the end position
+  const curveProgress = Math.sin(Math.PI * progress);
   let yawOffset = 0;
   let pitchOffset = 0;
   let fovOffset = 0;
@@ -253,6 +255,8 @@ export default function TourEditor({
   const [error, setError] = useState<string | null>(null);
   const [editPanel, setEditPanel] = useState<'hotspots' | 'overlays' | 'playTours' | null>('hotspots');
   const [currentCamera, setCurrentCamera] = useState({ yaw: 0, pitch: 0, fov: 75 });
+  // Placing a new hotspot/overlay: the next click on the panorama sets its position
+  const [placing, setPlacing] = useState<'hotspots' | 'overlays' | null>(null);
   const [previewCameraPosition, setPreviewCameraPosition] = useState<{ yaw: number; pitch: number; fov: number } | null>(null);
   const cameraControlRef = useRef<{ setCamera: (yaw: number, pitch: number, fov: number) => void } | null>(null);
   const [hotspotType, setHotspotType] = useState<'navigation' | 'info' | 'link'>('navigation');
@@ -327,7 +331,7 @@ export default function TourEditor({
         id: `${ps.id}-${idx}`, // Unique ID for the progress bar key
         originalId: scene.id,
         name: scene.name || 'Tour Step',
-        move_duration: ps.move_duration,
+        move_duration: createCameraPathPlayer(ps).duration, // full step length incl. start pause and point times
         wait_duration: ps.wait_duration,
         title: ps.title,
         description: ps.description
@@ -454,14 +458,12 @@ export default function TourEditor({
     timeoutId = setTimeout(() => {
       if (isCleanedUp) return;
 
-      const moveDuration = pScene.move_duration || 5000;
+      // Start pause + path (with per-point times when set); "pause after" is separate
+      const pathPlayer = createCameraPathPlayer(pScene, pScene.transition_direction || 'forward');
+      const moveDuration = pathPlayer.duration;
       // Calculate start time based on saved progress to allow resuming
       const startTime = Date.now() - (playTourProgressRef.current * moveDuration);
       const waitDuration = pScene.wait_duration || 1000;
-
-      const easeInOutCubic = (t: number) => {
-        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      };
 
       const animateCamera = () => {
         if (isCleanedUp) return;
@@ -472,30 +474,20 @@ export default function TourEditor({
         // Save progress for resume functionality
         playTourProgressRef.current = progress;
 
-        const easedProgress = easeInOutCubic(progress);
-
         // Transition Direction & Calculations
         const direction = pScene.transition_direction || 'forward';
 
-        // Calculate directional yaw difference
-        let startYawNorm = pScene.start_yaw % 360;
-        let endYawNorm = pScene.end_yaw % 360;
-        let yawDiff = endYawNorm - startYawNorm;
-
-        // Standardize to -180 to 180 range
-        while (yawDiff > 180) yawDiff -= 360;
-        while (yawDiff < -180) yawDiff += 360;
-
-        // Force direction if specified
-        if (direction === 'left' && yawDiff > 0) yawDiff -= 360;
-        if (direction === 'right' && yawDiff < 0) yawDiff += 360;
-
         // Use centralized offset calculation for enhanced intensities
-        const { yawOffset, pitchOffset, fovOffset } = calculateTransitionOffsets(direction, progress);
+        // Steps with path points follow the drawn path only; the direction arc is for simple start→end moves
+        const { yawOffset, pitchOffset, fovOffset } = pathPlayer.hasPoints
+          ? { yawOffset: 0, pitchOffset: 0, fovOffset: 0 }
+          : calculateTransitionOffsets(direction, progress);
 
-        const currentYaw = startYawNorm + yawDiff * easedProgress + yawOffset;
-        const currentPitch = Math.max(-85, Math.min(85, pScene.start_pitch + (pScene.end_pitch - pScene.start_pitch) * easedProgress + pitchOffset));
-        const currentFov = pScene.start_fov + (pScene.end_fov - pScene.start_fov) * easedProgress + fovOffset;
+        // Follow the drawn path: start pause, then start → points → end with their own timing
+        const pathPoint = pathPlayer.at(progress * moveDuration);
+        const currentYaw = pathPoint.yaw + yawOffset;
+        const currentPitch = Math.max(-85, Math.min(85, pathPoint.pitch + pitchOffset));
+        const currentFov = Math.max(20, Math.min(120, pathPoint.fov + fovOffset));
 
         // Use state-based camera control
         setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
@@ -639,10 +631,17 @@ export default function TourEditor({
     startYaw: number, startPitch: number, startFov: number,
     endYaw: number, endPitch: number, endFov: number,
     duration: number,
-    transitionDirection: string = 'forward'
+    transitionDirection: string = 'forward',
+    waypoints?: PlayTourScene['waypoints'],
+    startHold?: number
   ) => {
-    // Ensure duration has a valid value (default 5s)
-    const animDuration = duration || 5000;
+    const previewPlayer = createCameraPathPlayer({
+      start_yaw: startYaw, start_pitch: startPitch, start_fov: startFov,
+      end_yaw: endYaw, end_pitch: endPitch, end_fov: endFov,
+      waypoints, move_duration: duration || 5000, start_hold: startHold,
+    }, transitionDirection);
+    // Full length of the move: start pause + path with any per-point times
+    const animDuration = previewPlayer.duration;
 
     // Cancel any existing animation
     if (animationRef.current) {
@@ -656,31 +655,17 @@ export default function TourEditor({
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / animDuration, 1);
 
-        // Smooth easing
-        const easeInOutCubic = (t: number) =>
-          t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-        const easedProgress = easeInOutCubic(progress);
-
-        // Calculate directional yaw difference
-        let startYawNorm = startYaw % 360;
-        let endYawNorm = endYaw % 360;
-        let yawDiff = endYawNorm - startYawNorm;
-
-        // Standardize to -180 to 180 range
-        while (yawDiff > 180) yawDiff -= 360;
-        while (yawDiff < -180) yawDiff += 360;
-
-        // Force direction if specified
-        if (transitionDirection === 'left' && yawDiff > 0) yawDiff -= 360;
-        if (transitionDirection === 'right' && yawDiff < 0) yawDiff += 360;
 
         // Use centralized offset calculation for enhanced intensities
-        const { yawOffset, pitchOffset, fovOffset } = calculateTransitionOffsets(transitionDirection, progress);
+        const { yawOffset, pitchOffset, fovOffset } = previewPlayer.hasPoints
+          ? { yawOffset: 0, pitchOffset: 0, fovOffset: 0 }
+          : calculateTransitionOffsets(transitionDirection, progress);
 
-        // Interpolate camera position
-        const currentYaw = startYawNorm + yawDiff * easedProgress + yawOffset;
-        const currentPitch = Math.max(-85, Math.min(85, startPitch + (endPitch - startPitch) * easedProgress + pitchOffset));
-        const currentFov = startFov + (endFov - startFov) * easedProgress + fovOffset;
+        // Follow the drawn path: start → waypoints → end
+        const pathPoint = previewPlayer.at(progress * animDuration);
+        const currentYaw = pathPoint.yaw + yawOffset;
+        const currentPitch = Math.max(-85, Math.min(85, pathPoint.pitch + pitchOffset));
+        const currentFov = Math.max(20, Math.min(120, pathPoint.fov + fovOffset));
 
         // Use direct camera control
         if (cameraControlRef.current) {
@@ -925,7 +910,21 @@ export default function TourEditor({
     }
   }, [handleSceneChange, isAutoplay, isPlayingTour, setIsPlayingTour, setIsInfoModalOpen, containerRef]);
 
+  // Play Tour camera path: shown in the viewer, and while drawing, clicks on the photo add points
+  const [cameraPathPreview, setCameraPathPreview] = useState<{ sceneId: string; points: CameraPoint[]; onPointMove: (index: number, yaw: number, pitch: number) => void } | null>(null);
+  const pathDrawHandlerRef = useRef<((yaw: number, pitch: number) => void) | null>(null);
+  const [isDrawingPath, setIsDrawingPath] = useState(false);
+  const handlePathDrawingChange = useCallback((handler: ((yaw: number, pitch: number) => void) | null) => {
+    pathDrawHandlerRef.current = handler;
+    setIsDrawingPath(Boolean(handler));
+  }, []);
+
   const handleHotspotCreate = useCallback((yaw: number, pitch: number) => {
+    if (pathDrawHandlerRef.current) {
+      pathDrawHandlerRef.current(yaw, pitch);
+      return;
+    }
+    setPlacing(null);
     if (editPanel === 'hotspots') {
       setPendingHotspot({ yaw, pitch });
       setShowHotspotDialog(true);
@@ -934,6 +933,25 @@ export default function TourEditor({
       setShowOverlayDialog(true);
     }
   }, [editPanel]);
+
+  const startPlacing = useCallback((kind: 'hotspots' | 'overlays') => {
+    setEditPanel(kind);
+    setPlacing(kind);
+  }, []);
+
+  // Esc cancels placement; leaving edit mode cancels it too
+  useEffect(() => {
+    if (!placing) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPlacing(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [placing]);
+
+  useEffect(() => {
+    if (!isEditMode) setPlacing(null);
+  }, [isEditMode]);
 
   const createHotspot = useCallback(async () => {
     if (!pendingHotspot) return;
@@ -1146,6 +1164,103 @@ export default function TourEditor({
     }
   }, [currentSceneId]);
 
+  // Starting view: capture the live camera angle as the angle this scene opens at
+  const [savingView, setSavingView] = useState(false);
+  const [viewSavedSceneId, setViewSavedSceneId] = useState<string | null>(null);
+
+  const handleSetStartingView = useCallback(async () => {
+    if (!currentScene) return;
+    const view = {
+      yaw: Math.round(currentCamera.yaw * 100) / 100,
+      pitch: Math.round(currentCamera.pitch * 100) / 100,
+      fov: Math.round(currentCamera.fov * 100) / 100,
+    };
+
+    try {
+      setSavingView(true);
+      await tourService.updateSceneView(currentScene.id, view);
+      // Update in place rather than replacing the scene object: CubeMapViewer reloads tiles
+      // and resets the camera whenever currentScene changes identity
+      Object.assign(currentScene, view);
+      setViewSavedSceneId(currentScene.id);
+      setTimeout(() => setViewSavedSceneId(null), 2500);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to save starting view:', err);
+      setError('Failed to save starting view');
+    } finally {
+      setSavingView(false);
+    }
+  }, [currentScene, currentCamera]);
+
+  // Walk points: aim a center crosshair at the floor, pick the destination room,
+  // and optionally create the way back in that room in the same step
+  const [walkMode, setWalkMode] = useState<'off' | 'aiming' | 'choosing'>('off');
+  const [walkPoint, setWalkPoint] = useState<{ yaw: number; pitch: number } | null>(null);
+  const [walkAddReturn, setWalkAddReturn] = useState(true);
+  const [creatingWalk, setCreatingWalk] = useState(false);
+
+  const cancelWalk = useCallback(() => {
+    setWalkMode('off');
+    setWalkPoint(null);
+  }, []);
+
+  // A walk point belongs to the room it was aimed in
+  useEffect(() => {
+    cancelWalk();
+  }, [currentSceneId, cancelWalk]);
+
+  const placeWalkPoint = useCallback(() => {
+    setWalkPoint({ yaw: currentCamera.yaw, pitch: currentCamera.pitch });
+    setWalkMode('choosing');
+  }, [currentCamera]);
+
+  const createWalkLink = useCallback(async (targetSceneId: string) => {
+    if (!walkPoint || !currentScene) return;
+    const targetScene = scenes.find(s => s.id === targetSceneId);
+    if (!targetScene) return;
+
+    const navPayload = (to: Scene) => ({ label: `Go to ${to.name || 'Scene'}`, targetSceneId: to.id });
+
+    try {
+      setCreatingWalk(true);
+      const created: Hotspot[] = [];
+      created.push(await HotspotsAPI.createHotspot(tour.id, {
+        kind: 'navigation',
+        yaw: walkPoint.yaw,
+        pitch: walkPoint.pitch,
+        scene_id: currentScene.id,
+        target_scene_id: targetScene.id,
+        payload: navPayload(targetScene),
+      }));
+
+      // Way back: assume photos were shot facing the same way, so "back" is behind you.
+      // It can be dragged into place afterwards if the panoramas aren't aligned.
+      const alreadyLinkedBack = hotspots.some(h => h.scene_id === targetScene.id && h.target_scene_id === currentScene.id);
+      if (walkAddReturn && !alreadyLinkedBack) {
+        let backYaw = walkPoint.yaw + 180;
+        if (backYaw > 180) backYaw -= 360;
+        created.push(await HotspotsAPI.createHotspot(tour.id, {
+          kind: 'navigation',
+          yaw: backYaw,
+          pitch: walkPoint.pitch,
+          scene_id: targetScene.id,
+          target_scene_id: currentScene.id,
+          payload: navPayload(currentScene),
+        }));
+      }
+
+      setHotspots(prev => [...prev, ...created]);
+      setError(null);
+      cancelWalk();
+    } catch (err) {
+      console.error('Failed to create walk point:', err);
+      setError('Failed to create walk point');
+    } finally {
+      setCreatingWalk(false);
+    }
+  }, [walkPoint, currentScene, scenes, hotspots, walkAddReturn, tour.id, cancelWalk]);
+
   // Viewer fullscreen functionality
   const toggleViewerFullscreen = useCallback(() => {
     setIsViewerFullscreen(!isViewerFullscreen);
@@ -1195,7 +1310,7 @@ export default function TourEditor({
               for (let x = 0; x < 2; x++) {
                 const img = new Image();
                 img.crossOrigin = 'anonymous';
-                img.src = `${R2_PUBLIC_URL}/scenes/${sceneId}/tiles/${face}_l1_${x}_${y}.jpg`;
+                img.src = sceneTileUrl(sceneId, `${face}_l1_${x}_${y}`);
               }
             }
           });
@@ -1330,56 +1445,38 @@ export default function TourEditor({
   };
 
   const loadDefaultAudio = async () => {
-    // Default background audio when no audio is provided
-    const defaultAudioUrl = 'https://audio.com/saransh-pachhai/audio/niya-a-bloom-vlog-no-copyright-music';
-
-    setAudioError('No audio URL found. Loading default background music...');
-
-    try {
-      // Extract direct audio URL from audio.com for default audio
-      const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(defaultAudioUrl)}`);
-      const result = await response.json();
-
-      if (result.success && result.audioUrl) {
-        const audio = new Audio(result.audioUrl);
-        audio.loop = true;
-        audio.volume = 0.3; // Lower volume for default audio
-        audio.crossOrigin = 'anonymous';
-
-        audio.addEventListener('canplay', () => {
-          setIsAudioLoading(false); // Default audio is ready
-          setAudioError('Playing default background music. Enter your own audio URL for a custom experience.');
-          // Auto-hide message after 4 seconds
-          setTimeout(() => {
-            setAudioError(null);
-          }, 4000);
-        });
-
-        audio.addEventListener('error', (e) => {
-          setIsAudioLoading(false); // Stop loading on error
-          console.error('[TourEditor] Default audio loading error:', e);
-          setAudioError('Default audio failed to load. Please enter your own audio URL.');
-        });
-
-        audio.addEventListener('play', () => {
-          setIsAudioPlaying(true);
-        });
-
-        audio.addEventListener('pause', () => {
-          setIsAudioPlaying(false);
-        });
-
-        audioRef.current = audio;
-      } else {
-        setIsAudioLoading(false); // Stop loading on failure
-        setAudioError('Default audio extraction failed. Please enter your own audio URL.');
-      }
-
-    } catch (error) {
-      setIsAudioLoading(false); // Stop loading on error
-      console.error('[TourEditor] Default audio extraction error:', error);
-      setAudioError('Default audio failed to load. Please enter your own audio URL.');
+    // Default background audio when no audio is provided: a direct audio file URL, or none
+    const defaultAudioUrl = process.env.NEXT_PUBLIC_DEFAULT_AUDIO_URL;
+    if (!defaultAudioUrl) {
+      setIsAudioLoading(false);
+      setAudioError(null);
+      return;
     }
+
+    const audio = new Audio(defaultAudioUrl);
+    audio.loop = true;
+    audio.volume = 0.3; // Lower volume for default audio
+    audio.crossOrigin = 'anonymous';
+
+    audio.addEventListener('canplay', () => {
+      setIsAudioLoading(false); // Default audio is ready
+    });
+
+    audio.addEventListener('error', (e) => {
+      setIsAudioLoading(false); // Stop loading on error
+      console.error('[TourEditor] Default audio loading error:', e);
+      setAudioError('Default audio failed to load. Please enter your own audio URL.');
+    });
+
+    audio.addEventListener('play', () => {
+      setIsAudioPlaying(true);
+    });
+
+    audio.addEventListener('pause', () => {
+      setIsAudioPlaying(false);
+    });
+
+    audioRef.current = audio;
   };
 
   const loadAudioElement = (audioUrl: string, isFromSharingService: boolean) => {
@@ -1603,10 +1700,15 @@ export default function TourEditor({
           scenes={scenes}
           onSceneChange={handleSceneChange}
           onHotspotClick={handleHotspotClick}
-          isEditMode={isViewerFullscreen ? false : isEditMode}
+          isEditMode={isViewerFullscreen ? false : (isEditMode || isDrawingPath)}
           onHotspotCreate={handleHotspotCreate}
+          placementMode={(Boolean(placing) && isEditMode && !isViewerFullscreen) || isDrawingPath}
+          cameraPath={cameraPathPreview && cameraPathPreview.sceneId === currentScene?.id ? cameraPathPreview.points : null}
+          onCameraPathPointMove={cameraPathPreview && cameraPathPreview.sceneId === currentScene?.id ? cameraPathPreview.onPointMove : undefined}
           onHotspotUpdate={updateHotspot}
-          hotspots={isViewerFullscreen && !hasStartedFullscreenPreview ? [] : currentSceneHotspots}
+          onHotspotMoveEnd={updateHotspotAPI}
+          // Hidden while auto-playing (unless editing); shown again on pause
+          hotspots={(isViewerFullscreen && !hasStartedFullscreenPreview) || (!isEditMode && (isAutoplay || isPlayingTour)) ? [] : currentSceneHotspots}
           overlays={isViewerFullscreen && !hasStartedFullscreenPreview ? [] : currentSceneOverlays}
           autoRotate={isAutoplay}
           highlightedHotspotId={editingHotspot}
@@ -1618,6 +1720,82 @@ export default function TourEditor({
           preloadSceneIds={preloadSceneIds}
           isManualSceneChange={isManualSceneChange}
         />
+
+        {/* Walk point: crosshair marks where the floor circle will go */}
+        {walkMode === 'aiming' && (
+          <>
+            <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
+              <div className="w-16 h-16 rounded-full border-4 border-white bg-green-500/40 shadow-[0_0_0_2px_rgba(0,0,0,0.35)] flex items-center justify-center">
+                <div className="w-2 h-2 rounded-full bg-white" />
+              </div>
+            </div>
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 bg-white rounded-xl shadow-2xl px-4 py-3 flex items-center gap-3 max-w-[90%]">
+              <p className="text-sm text-gray-800">
+                Drag the view until the circle sits on the floor where visitors should click to walk.
+              </p>
+              <button
+                onClick={placeWalkPoint}
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-green-600 text-white hover:bg-green-700 cursor-pointer whitespace-nowrap"
+              >
+                Place here
+              </button>
+              <button
+                onClick={cancelWalk}
+                className="px-3 py-2 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Walk point: choose the room it leads to */}
+        {walkMode === 'choosing' && (
+          <div className="absolute inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-lg font-semibold text-gray-900">Walk to which room?</h3>
+                <button onClick={cancelWalk} className="p-1 rounded hover:bg-gray-100 cursor-pointer" title="Cancel">
+                  <X className="w-5 h-5 text-gray-600" />
+                </button>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">Visitors in <strong>{currentScene?.name}</strong> will click this spot to move there.</p>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-72 overflow-y-auto">
+                {scenes.filter(s => s.id !== currentScene?.id).map(scene => {
+                  const linked = hotspots.some(h => h.scene_id === currentScene?.id && h.target_scene_id === scene.id);
+                  return (
+                    <button
+                      key={scene.id}
+                      onClick={() => createWalkLink(scene.id)}
+                      disabled={creatingWalk}
+                      className="text-left rounded-lg border-2 border-gray-200 hover:border-green-500 overflow-hidden cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                    >
+                      <div className="aspect-video bg-gray-100">
+                        {getSceneThumbnail(scene) && (
+                          <img src={getSceneThumbnail(scene)} alt={scene.name} className="w-full h-full object-cover" />
+                        )}
+                      </div>
+                      <div className="px-2 py-1.5">
+                        <p className="text-sm font-medium text-gray-900 truncate">{scene.name}</p>
+                        {linked && <p className="text-xs text-amber-600">Already linked</p>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {scenes.length < 2 && (
+                <p className="text-sm text-gray-600">Upload at least one more 360° photo to link rooms together.</p>
+              )}
+
+              <label className="mt-4 flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                <input type="checkbox" checked={walkAddReturn} onChange={e => setWalkAddReturn(e.target.checked)} />
+                Also add the way back in that room
+              </label>
+              {creatingWalk && <p className="mt-2 text-sm text-gray-600">Linking rooms…</p>}
+            </div>
+          </div>
+        )}
 
         {/* Pause Animation Overlay */}
         {showPauseOverlay && (
@@ -2011,6 +2189,34 @@ export default function TourEditor({
             </div>
           </div>
 
+          {/* Placement banner: shown while choosing where a new hotspot/overlay goes */}
+          {placing && isEditMode && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] flex flex-wrap items-center justify-center gap-2 max-w-[calc(100%-2rem)] rounded-xl bg-gray-900/90 text-white px-4 py-2.5 shadow-xl backdrop-blur">
+              <span className="text-sm font-medium">
+                Click on the panorama where the {placing === 'overlays' ? 'overlay' : 'hotspot'} should go
+              </span>
+              <button
+                onClick={() => handleHotspotCreate(currentCamera.yaw, currentCamera.pitch)}
+                className="px-3 py-1 rounded-lg text-xs font-semibold bg-white text-gray-900 hover:bg-gray-100 cursor-pointer"
+              >
+                Place at center
+              </button>
+              <button
+                onClick={() => setPlacing(null)}
+                className="px-3 py-1 rounded-lg text-xs font-semibold bg-white/15 hover:bg-white/25 cursor-pointer"
+              >
+                Cancel (Esc)
+              </button>
+            </div>
+          )}
+
+          {/* Center crosshair so "Place at center" is predictable */}
+          {placing && isEditMode && (
+            <div className="pointer-events-none absolute inset-0 z-[55] flex items-center justify-center">
+              <div className="w-8 h-8 rounded-full border-2 border-white shadow-[0_0_0_2px_rgba(0,0,0,0.35)]" />
+            </div>
+          )}
+
           {/* Edit Controls Panel - Responsive to sidebar */}
           <div className={`absolute bottom-4 left-2 z-50 transition-all duration-300 ${sidebarOpen ? 'ml-80 pl-2' : 'ml-0'
             }`}>
@@ -2038,12 +2244,37 @@ export default function TourEditor({
             >
               {/* Edit Mode Header */}
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Editor Controls</h3>
+                <h3 className="text-lg font-semibold text-gray-900">Edit this scene</h3>
                 <button
                   onClick={() => setIsEditMode(false)}
-                  className="px-3 py-1 rounded-full text-sm font-medium transition-colors cursor-pointer bg-green-600 text-white hover:bg-green-700"
+                  className="px-3 py-1 rounded-lg text-sm font-medium transition-colors cursor-pointer bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  title="Close the editor"
                 >
-                  ON
+                  Done
+                </button>
+              </div>
+
+              {/* Starting View: capture the current camera angle from the viewer */}
+              <div className="mb-4 p-3 rounded-lg border border-gray-200 bg-gray-50">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-900">Starting view</span>
+                  <span className="text-xs text-gray-500 font-mono">
+                    {Math.round(currentCamera.yaw)}° / {Math.round(currentCamera.pitch)}° · {Math.round(currentCamera.fov)} fov
+                  </span>
+                </div>
+                <p className="text-xs text-gray-600 mb-2">
+                  Rotate and zoom the view, then capture it. Visitors will see this angle when the scene opens.
+                </p>
+                <button
+                  onClick={handleSetStartingView}
+                  disabled={savingView || !currentScene}
+                  className="w-full px-3 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {savingView
+                    ? 'Saving…'
+                    : viewSavedSceneId === currentScene?.id
+                      ? '✓ Starting view saved'
+                      : '📷 Set current view as starting view'}
                 </button>
               </div>
 
@@ -2057,7 +2288,7 @@ export default function TourEditor({
                     : 'bg-white text-gray-700 border-gray-200 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700'
                     }`}
                 >
-                  🔥 Hotspots
+                  🔥 Hotspots ({hotspots.filter(h => h.scene_id === currentSceneId).length})
                 </button>
                 <button
                   onClick={() => setEditPanel('overlays')}
@@ -2066,36 +2297,32 @@ export default function TourEditor({
                     : 'bg-white text-gray-700 border-gray-200 hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700'
                     }`}
                 >
-                  ✨ Overlays
+                  ✨ Overlays ({overlays.filter(o => o.scene_id === currentSceneId).length})
                 </button>
               </div>
 
-              {/* Instructions */}
-              <div className={`border-2 rounded-lg p-3 mb-4 ${editPanel === 'playTours'
-                ? 'bg-purple-50 border-purple-200'
-                : editPanel === 'overlays'
-                  ? 'bg-purple-50 border-purple-200'
-                  : 'bg-blue-50 border-blue-200'
-                }`}>
-                <p className={`text-sm font-medium ${editPanel === 'playTours'
-                  ? 'text-purple-900'
-                  : editPanel === 'overlays'
-                    ? 'text-purple-900'
-                    : 'text-blue-900'
-                  }`}>
-                  {editPanel === 'playTours' ? (
-                    <>
-                      <strong>Play Tours:</strong><br />
-                      Manage automated tour sequences and camera movements
-                    </>
-                  ) : (
-                    <>
-                      <strong>How to add {editPanel}:</strong><br />
-                      Hold <kbd className="px-1 py-0.5 bg-white rounded border text-gray-800 font-semibold">Shift</kbd> + Click on the panorama
-                    </>
-                  )}
-                </p>
-              </div>
+              {/* Add button: starts placement mode */}
+              {editPanel !== 'playTours' && (
+                <div className="mb-4">
+                  <button
+                    onClick={() => (placing ? setPlacing(null) : startPlacing(editPanel === 'overlays' ? 'overlays' : 'hotspots'))}
+                    className={`w-full px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${placing
+                      ? 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                      : editPanel === 'overlays'
+                        ? 'bg-purple-600 text-white hover:bg-purple-700'
+                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                      }`}
+                  >
+                    {placing ? 'Cancel placing' : editPanel === 'overlays' ? '+ Add overlay' : '+ Add hotspot'}
+                  </button>
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    {editPanel === 'overlays'
+                      ? 'Overlays show text, images, video or 3D models in the scene.'
+                      : 'Hotspots link to another scene or show info when clicked.'}
+                    {' '}Shortcut: <kbd className="px-1 bg-gray-100 rounded border text-gray-700">Shift</kbd> + click.
+                  </p>
+                </div>
+              )}
 
               {/* Hotspots List */}
               {editPanel === 'hotspots' && (
@@ -2833,6 +3060,8 @@ export default function TourEditor({
                     currentFov={currentCamera.fov}
                     onPreviewScene={handlePreviewScene}
                     onPlaySceneAnimation={handlePlaySceneAnimation}
+                    onPathPreview={setCameraPathPreview}
+                    onPathDrawingChange={handlePathDrawingChange}
                     onClose={() => {
                       setEditPanel('hotspots');
                       setIsEditMode(false);

@@ -3,6 +3,7 @@
 import { Icon } from '@iconify/react';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Tour, Scene, Hotspot, Overlay, PlayTour } from '@/types/tour';
+import { createCameraPathPlayer } from '@/lib/camera-path';
 import { useAuth } from '@/contexts/AuthContext';
 
 const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
@@ -13,8 +14,8 @@ import AutoplayController from './viewer/AutoplayController';
 import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy, X } from 'lucide-react';
 
 const calculateTransitionOffsets = (direction: string, progress: number) => {
-  // Use a smooth ease-out curve that doesn't return to zero
-  const curveProgress = 1 - Math.pow(1 - progress, 3); // Cubic ease-out
+  // Arc: 0 at the start, peak at the midpoint, back to 0 at the end, so the camera lands on the end position
+  const curveProgress = Math.sin(Math.PI * progress);
   let yawOffset = 0;
   let pitchOffset = 0;
   let fovOffset = 0;
@@ -613,7 +614,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         ...scene,
         id: `${ps.id}-${idx}`, // Unique ID for the progress bar key
         name: scene?.name || 'Tour Step',
-        move_duration: ps.move_duration,
+        move_duration: createCameraPathPlayer(ps).duration, // full step length incl. start pause and point times
         wait_duration: ps.wait_duration,
         title: ps.title,
         description: ps.description
@@ -821,14 +822,12 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
     timeoutId = setTimeout(() => {
       if (isCleanedUp) return;
 
-      const moveDuration = pScene.move_duration || 5000;
+      // Start pause + path (with per-point times when set); "pause after" is separate
+      const pathPlayer = createCameraPathPlayer(pScene, pScene.transition_direction || 'forward');
+      const moveDuration = pathPlayer.duration;
       // Calculate start time based on saved progress to allow resuming
       const startTime = Date.now() - (playTourProgressRef.current * moveDuration);
       const waitDuration = pScene.wait_duration || 1000;
-
-      const easeInOutCubic = (t: number) => {
-        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      };
 
       const animateCamera = () => {
         if (isCleanedUp) return;
@@ -839,31 +838,22 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         // Save progress for resume functionality
         playTourProgressRef.current = progress;
 
-        const easedProgress = easeInOutCubic(progress);
 
         // Calculate curve offset based on transition direction
         // This creates a smooth arc that peaks at 50% progress and returns to 0 at 100%
         const direction = pScene.transition_direction || 'forward';
 
         // Use centralized offset calculation for enhanced intensities
-        const { yawOffset, pitchOffset, fovOffset } = calculateTransitionOffsets(direction, progress);
+        // Steps with path points follow the drawn path only; the direction arc is for simple start→end moves
+        const { yawOffset, pitchOffset, fovOffset } = pathPlayer.hasPoints
+          ? { yawOffset: 0, pitchOffset: 0, fovOffset: 0 }
+          : calculateTransitionOffsets(direction, progress);
 
-        // Calculate directional yaw difference
-        let startYawNorm = pScene.start_yaw % 360;
-        let endYawNorm = pScene.end_yaw % 360;
-        let yawDiff = endYawNorm - startYawNorm;
-
-        // Standardize to -180 to 180 range
-        while (yawDiff > 180) yawDiff -= 360;
-        while (yawDiff < -180) yawDiff += 360;
-
-        // Force direction if specified
-        if (direction === 'left' && yawDiff > 0) yawDiff -= 360;
-        if (direction === 'right' && yawDiff < 0) yawDiff += 360;
-
-        const currentYaw = startYawNorm + yawDiff * easedProgress + yawOffset;
-        const currentPitch = Math.max(-85, Math.min(85, pScene.start_pitch + (pScene.end_pitch - pScene.start_pitch) * easedProgress + pitchOffset));
-        const currentFov = pScene.start_fov + (pScene.end_fov - pScene.start_fov) * easedProgress + fovOffset;
+        // Follow the drawn path: start pause, then start → points → end with their own timing
+        const pathPoint = pathPlayer.at(progress * moveDuration);
+        const currentYaw = pathPoint.yaw + yawOffset;
+        const currentPitch = Math.max(-85, Math.min(85, pathPoint.pitch + pitchOffset));
+        const currentFov = Math.max(20, Math.min(120, pathPoint.fov + fovOffset));
 
         setCurrentCamera({ yaw: currentYaw, pitch: currentPitch, fov: currentFov });
 
@@ -1374,15 +1364,12 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
 
   // Load default audio function
   const loadDefaultAudio = async () => {
-    const defaultAudioUrl = 'https://audio.com/saransh-pachhai/audio/niya-a-bloom-vlog-no-copyright-music';
+    // Direct audio file URL for tours without their own audio; no default music when unset
+    const defaultAudioUrl = process.env.NEXT_PUBLIC_DEFAULT_AUDIO_URL;
 
     try {
-      // Extract direct audio URL from audio.com for default audio
-      const response = await fetch(`/api/extract-audio?url=${encodeURIComponent(defaultAudioUrl)}`);
-      const result = await response.json();
-
-      if (result.success && result.audioUrl) {
-        const audio = new Audio(result.audioUrl);
+      if (defaultAudioUrl) {
+        const audio = new Audio(defaultAudioUrl);
         audio.loop = true;
         audio.volume = 0.3; // Lower volume for default audio
         audio.muted = true;
@@ -1529,7 +1516,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
             scenes={scenes}
             onSceneChange={handleViewerSceneChange}
             onHotspotClick={handleHotspotClick}
-            hotspots={showControls ? currentSceneHotspots : []}
+            hotspots={showControls && !isAutoplay && !isPlayingTour ? currentSceneHotspots : []} // hidden while playing, shown on pause
             overlays={showControls ? currentSceneOverlays : []}
             autoRotate={isAutoplay}
             forcedCameraPosition={currentCamera}
@@ -1751,7 +1738,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
                 } : handleSceneChange}
                 isOverlayModalOpen={isOverlayModalOpen}
                 segmentDuration={selectedPlayTourId && currentPlayTourScene
-                  ? (currentPlayTourScene.move_duration + (currentPlayTourScene.wait_duration || 0))
+                  ? (createCameraPathPlayer(currentPlayTourScene).duration + (currentPlayTourScene.wait_duration || 0))
                   : (currentTour?.auto_change_interval || 12000)}
                 forcedProgress={playTourProgressRef.current}
                 restartTrigger={restartTrigger}

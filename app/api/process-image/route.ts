@@ -83,7 +83,6 @@ export async function POST(request: NextRequest) {
       
       // Get image metadata
       const metadata = await sharp(buffer).metadata();
-      console.log({metadata})
       const originalWidth = metadata.width || 4096;
       const originalHeight = metadata.height || 2048;
       

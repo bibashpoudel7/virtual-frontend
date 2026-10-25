@@ -7,10 +7,9 @@ import {
   ProcessCubemapRequest,
   ProcessCubemapResponse,
   CreateHotspotRequest,
-  Property,
-  PropertiesResponse,
   PlayTour,
-  PlayTourScene
+  PlayTourScene,
+  FloorPlanAnalysis
 } from '@/types/tour';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -25,23 +24,11 @@ export const setTourServiceLogoutFunction = (logoutFn: () => void) => {
 class TourService {
   private async fetchWithAuth(url: string, options?: RequestInit) {
     const token = localStorage.getItem('accessToken');
-    const userData = localStorage.getItem('user_data');
 
-    let role = '';
-    if (userData) {
-      try {
-        const user = JSON.parse(userData);
-        // TheNimto backend stores role as 'roles' (number), not 'role'
-        role = user.roles?.toString() || user.role?.toString() || '';
-      } catch (error) {
-        console.error('Error parsing user data:', error);
-      }
-    }
-
+    // The API reads the user's role from the database; only the login token is sent
     const headers = {
       'Content-Type': 'application/json',
       ...(token && { Authorization: `Bearer ${token}` }),
-      ...(role && { 'X-User-Role': role }),
       ...options?.headers,
     };
 
@@ -96,14 +83,6 @@ class TourService {
       method: 'POST',
       body: JSON.stringify(tour),
     });
-  }
-
-  async getApprovedProperties(): Promise<PropertiesResponse> {
-    return this.fetchWithAuth('properties/approved');
-  }
-
-  async getCompanyInfo(): Promise<any> {
-    return this.fetchWithAuth('properties/company-info');
   }
 
   async getTour(id: string): Promise<Tour> {
@@ -215,6 +194,22 @@ class TourService {
     return Array.isArray(response) ? response : (response?.scenes || []);
   }
 
+  // Read the rooms from a floor plan image with the server's AI model (dollhouse builder)
+  async analyzeFloorPlan(tourId: string, image: Blob): Promise<FloorPlanAnalysis> {
+    const form = new FormData();
+    form.append('image', image, 'floorplan');
+    const token = localStorage.getItem('accessToken');
+    // Not fetchWithAuth: it forces a JSON content type, and this is a multipart upload
+    const response = await fetch(`${API_BASE_URL}tours/${tourId}/floorplan/analyze`, {
+      method: 'POST',
+      body: form,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(data?.error || `HTTP error! status: ${response.status}`);
+    return data;
+  }
+
   // Get all scenes for a tour
   async getAllScenes(tourId: string): Promise<Scene[]> {
     return this.getScenes(tourId, 1, 500);
@@ -231,6 +226,14 @@ class TourService {
     return this.fetchWithAuth(`scenes/${sceneId}`, {
       method: 'PUT',
       body: JSON.stringify(scene),
+    });
+  }
+
+  // Saves only the camera angle the scene opens at (PUT /scenes/:id would overwrite every column)
+  async updateSceneView(sceneId: string, view: { yaw: number; pitch: number; fov: number }): Promise<void> {
+    return this.fetchWithAuth(`scenes/${sceneId}/view`, {
+      method: 'PUT',
+      body: JSON.stringify(view),
     });
   }
 

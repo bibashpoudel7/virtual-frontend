@@ -1,12 +1,93 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { CubeFace, CubeMapManifest } from '@/lib/cubemap-types';
 import OverlayRenderer from '../overlays/OverlayRenderer';
+import { CameraPoint, sampleCameraPath } from '@/lib/camera-path';
 
 const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+
+// Tiles are always loaded in CORS mode. The query string gives them their own browser-cache
+// entry, so a copy cached earlier without CORS headers can never block (black out) a scene.
+export const sceneTileUrl = (sceneId: string, tileKey: string) =>
+  `${R2_PUBLIC_URL}/scenes/${sceneId}/tiles/${tileKey}.jpg?cors=1`;
+
+// Direction from the camera for a yaw/pitch in degrees (same convention as the camera and hotspots)
+const directionFromYawPitch = (yawDeg: number, pitchDeg: number) => {
+  const y = THREE.MathUtils.degToRad(yawDeg + 180);
+  const p = THREE.MathUtils.degToRad(pitchDeg);
+  return new THREE.Vector3(Math.cos(p) * Math.cos(y), Math.sin(p), Math.cos(p) * Math.sin(y));
+};
+
+const FLOOR_DISC_DISTANCE = 38;
+
+/**
+ * Matterport-style navigation marker: lies flat on the floor with its arrow pointing away from the
+ * viewer. Near the horizon it tilts toward the camera so it never turns edge-on.
+ */
+const placeFloorDisc = (mesh: THREE.Object3D, yawDeg: number, pitchDeg: number) => {
+  const dir = directionFromYawPitch(yawDeg, pitchDeg);
+  mesh.position.copy(dir).multiplyScalar(FLOOR_DISC_DISTANCE);
+  const forward = new THREE.Vector3(dir.x, 0, dir.z);
+  if (forward.lengthSq() < 1e-6) forward.set(0, 0, 1);
+  forward.normalize();
+  const tilt = THREE.MathUtils.clamp((pitchDeg + 20) / 30, 0, 0.5);
+  const normal = new THREE.Vector3(0, 1, 0).lerp(dir.clone().negate(), tilt).normalize();
+  const yAxis = forward.sub(normal.clone().multiplyScalar(forward.dot(normal))).normalize();
+  const xAxis = new THREE.Vector3().crossVectors(yAxis, normal).normalize();
+  mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, normal));
+};
+
+const createFloorDiscTexture = () => {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    // Soft shadow so the ring reads on bright floors
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+    ctx.shadowBlur = 24;
+    ctx.lineWidth = 30;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.beginPath();
+    ctx.arc(256, 256, 196, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // Frosted centre
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+    ctx.beginPath();
+    ctx.arc(256, 256, 181, 0, Math.PI * 2);
+    ctx.fill();
+    // Chevron pointing "forward" (canvas top = the way you walk)
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+    ctx.shadowBlur = 10;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.98)';
+    ctx.lineWidth = 34;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(176, 300);
+    ctx.lineTo(256, 210);
+    ctx.lineTo(336, 300);
+    ctx.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.anisotropy = 4;
+  return texture;
+};
+
+// Convert a pointer position over the viewer into yaw/pitch (same maths as Shift+click placement)
+const pointerToYawPitch = (event: PointerEvent, container: HTMLElement, camera: THREE.PerspectiveCamera) => {
+  const rect = container.getBoundingClientRect();
+  const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  const direction = new THREE.Vector3(x, y, 0.5).unproject(camera).sub(camera.position).normalize();
+  return {
+    yaw: Math.atan2(direction.z, direction.x) * 180 / Math.PI - 180,
+    pitch: Math.max(-89, Math.min(89, Math.asin(direction.y) * 180 / Math.PI)),
+  };
+};
 
 interface CubeMapViewerProps {
   tour: Tour;
@@ -17,6 +98,8 @@ interface CubeMapViewerProps {
   isEditMode?: boolean;
   onHotspotCreate?: (yaw: number, pitch: number) => void;
   onHotspotUpdate?: (hotspot: Hotspot) => void;
+  // Edit mode: a hotspot was dragged to a new position (save it)
+  onHotspotMoveEnd?: (hotspot: Hotspot) => void;
   hotspots?: Hotspot[];
   overlays?: Overlay[];
   autoRotate?: boolean;
@@ -28,6 +111,12 @@ interface CubeMapViewerProps {
   cameraControlRef?: React.MutableRefObject<{ setCamera: (yaw: number, pitch: number, fov: number) => void } | null>;
   preloadSceneIds?: string[];
   isManualSceneChange?: boolean;
+  /** Edit mode: the next click on the panorama places a hotspot/overlay (same as Shift + click) */
+  placementMode?: boolean;
+  // Play Tour camera path to draw over the photo (start → points → end)
+  cameraPath?: CameraPoint[] | null;
+  // When set, path markers can be dragged; index 0 is S, the last is E, the rest are the numbered points
+  onCameraPathPointMove?: (index: number, yaw: number, pitch: number) => void;
 }
 
 
@@ -40,7 +129,8 @@ export default function CubeMapViewer({
   isEditMode = false,
   onHotspotCreate,
   onHotspotUpdate,
-  hotspots = [],
+  onHotspotMoveEnd,
+  hotspots: hotspotsProp = [],
   overlays = [],
   autoRotate = false,
   highlightedHotspotId = null,
@@ -51,8 +141,16 @@ export default function CubeMapViewer({
   cameraControlRef,
   preloadSceneIds = [],
   isManualSceneChange = false,
+  placementMode = false,
+  cameraPath = null,
+  onCameraPathPointMove,
 }: CubeMapViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Parents often rebuild the hotspot array every render (e.g. each Play Tour frame); keep the same
+  // array while the content is unchanged so markers and listeners aren't rebuilt constantly
+  const hotspotsKey = JSON.stringify(hotspotsProp.map(h => [h.id, h.yaw, h.pitch, h.kind, h.target_scene_id, h.payload]));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const hotspots = useMemo(() => hotspotsProp, [hotspotsKey]);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -78,7 +176,31 @@ export default function CubeMapViewer({
   const loadingTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
   // Store target camera direction when navigating to new scene
   const navigationTargetRef = useRef<{ yaw: number; pitch: number } | null>(null);
+  // Latest scenes for event handlers registered inside long-lived effects
+  const scenesRef = useRef(scenes);
+  scenesRef.current = scenes;
   const isManualSceneChangeRef = useRef<boolean>(false);
+  // Camera reset for a new scene waits until that scene's textures are on screen, so the old
+  // photo is never shown from the new scene's angle (that looked like a flip/jump)
+  const pendingCameraResetRef = useRef<(() => void) | null>(null);
+  const pendingCameraTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Scene whose photo is currently on the cube, and the fading copy of the previous photo
+  const displayedSceneIdRef = useRef<string | null>(null);
+  const ghostCleanupRef = useRef<(() => void) | null>(null);
+  // Play Tour path markers (for dragging) and the latest move callback
+  const pathMarkersRef = useRef<THREE.Sprite[]>([]);
+  const pathPointMoveRef = useRef(onCameraPathPointMove);
+  pathPointMoveRef.current = onCameraPathPointMove;
+
+  const flushPendingCameraReset = useCallback(() => {
+    if (pendingCameraTimeoutRef.current) {
+      clearTimeout(pendingCameraTimeoutRef.current);
+      pendingCameraTimeoutRef.current = null;
+    }
+    const reset = pendingCameraResetRef.current;
+    pendingCameraResetRef.current = null;
+    reset?.();
+  }, []);
 
   // Controls state
   const controlsRef = useRef({
@@ -109,6 +231,16 @@ export default function CubeMapViewer({
   const autoRotateRef = useRef(autoRotate);
   const isTransitioningRef = useRef(isTransitioning);
   const isPlaybackModeRef = useRef(isPlaybackMode);
+  const placementModeRef = useRef(placementMode);
+  // Placement-mode press waiting to see whether it's a click (place) or a drag (turn the view)
+  const pendingPlacementRef = useRef(false);
+
+  useEffect(() => {
+    placementModeRef.current = placementMode;
+    if (containerRef.current) {
+      containerRef.current.style.cursor = placementMode ? 'crosshair' : 'default';
+    }
+  }, [placementMode]);
 
   // Sync refs with state/props
   useEffect(() => {
@@ -126,6 +258,23 @@ export default function CubeMapViewer({
   useEffect(() => {
     isPlaybackModeRef.current = isPlaybackMode;
   }, [isPlaybackMode]);
+  // Sharper tiles whenever the view is zoomed in, whatever zoomed it (wheel, Play Tour, preview).
+  // Refs because the loader is defined further down and these run from long-lived callbacks.
+  const currentLevelRef = useRef(currentLevel);
+  currentLevelRef.current = currentLevel;
+  const manifestRef = useRef(manifest);
+  manifestRef.current = manifest;
+  const loadLevelRef = useRef<(level: number) => void>(() => {});
+  const requestDetailForFov = (fov: number) => {
+    const levels = manifestRef.current?.levels;
+    if (!levels?.length) return;
+    const target = fov <= 20 && levels.some(l => l.level === 3) ? 3 : fov <= 40 ? 2 : 1;
+    if (target > currentLevelRef.current) {
+      currentLevelRef.current = target;
+      loadLevelRef.current(target);
+      setCurrentLevel(target);
+    }
+  };
 
   // Apply forced camera position (for Play Tour playback)
   useEffect(() => {
@@ -135,7 +284,9 @@ export default function CubeMapViewer({
       controls.lat = forcedCameraPosition.pitch;
       cameraRef.current.fov = forcedCameraPosition.fov;
       cameraRef.current.updateProjectionMatrix();
+      requestDetailForFov(forcedCameraPosition.fov);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [forcedCameraPosition]);
 
   // Expose direct camera control for smooth animations (bypasses React state)
@@ -150,6 +301,7 @@ export default function CubeMapViewer({
             cameraRef.current.fov = fov;
             cameraRef.current.updateProjectionMatrix();
           }
+          requestDetailForFov(fov);
         }
       };
     }
@@ -193,6 +345,7 @@ export default function CubeMapViewer({
     // Parse manifest and handle camera reset
     // Reset camera - use navigation target if we just walked to this scene, otherwise use scene defaults
     if (!isPlaybackMode && !forcedCameraPosition) {
+      const applyCameraReset = () => {
       const controls = controlsRef.current;
 
       // Priority logic:
@@ -275,10 +428,37 @@ export default function CubeMapViewer({
         cameraRef.current.updateProjectionMatrix();
       }
 
+      };
+
+      // Dim the outgoing photo while the next one loads; applyAllTextures() fades the new one in
+      const hasTextures = materialsRef.current.some(material => material.map);
+      if (hasTextures) {
+        const fadeStart = Date.now();
+        const fadeOut = () => {
+          // New scene already swapped in: don't dim it
+          if (!pendingCameraResetRef.current) return;
+          const t = Math.min((Date.now() - fadeStart) / 150, 1);
+          const value = Math.floor(255 - (255 - 0x88) * t);
+          const hex = (value << 16) | (value << 8) | value;
+          materialsRef.current.forEach(material => material.color.setHex(hex));
+          if (t < 1) requestAnimationFrame(fadeOut);
+        };
+        requestAnimationFrame(fadeOut);
+      }
+
+      pendingCameraResetRef.current = applyCameraReset;
+      if (pendingCameraTimeoutRef.current) clearTimeout(pendingCameraTimeoutRef.current);
+      // Safety net: never leave the camera un-reset if textures fail to load
+      pendingCameraTimeoutRef.current = setTimeout(flushPendingCameraReset, 2500);
+
       // Entry animation is handled by applyAllTextures() when new textures are ready
       // This ensures the scene is visible before any animation starts
     }
   }, [currentScene, isManualSceneChange]);
+
+  useEffect(() => () => {
+    if (pendingCameraTimeoutRef.current) clearTimeout(pendingCameraTimeoutRef.current);
+  }, []);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -471,6 +651,15 @@ export default function CubeMapViewer({
               const baseOpacity = (isHighlighted || isHovered) ? 1.0 : 0.8;
               child.material.opacity = baseOpacity + child.userData.glowIntensity * 0.2;
             }
+          } else if (child instanceof THREE.Mesh && child.userData.isFloorDisc) {
+            // Floor discs: grow and brighten on hover, gentle pulse when selected in the editor
+            child.userData.glowIntensity += ((child.userData.targetGlow || 0) - child.userData.glowIntensity) * 0.15;
+            // Keep a steady on-screen size when zooming (like the other markers): base size at F 75
+            let discScale = ((cameraRef.current?.fov ?? 75) / 75) * (1 + child.userData.glowIntensity * 0.18);
+            if (child.userData.isHighlighted) discScale += Math.sin(time * 3) * 0.06;
+            child.scale.set(discScale, discScale, 1);
+            child.visible = !isTransitioningRef.current;
+            (child.material as THREE.MeshBasicMaterial).opacity = 0.85 + child.userData.glowIntensity * 0.15;
           }
         });
       }
@@ -578,7 +767,7 @@ export default function CubeMapViewer({
         for (let y = 0; y < tilesPerSide; y++) {
           for (let x = 0; x < tilesPerSide; x++) {
             const tileKey = `${face}_l1_${x}_${y}`;
-            const tileUrl = `${R2_PUBLIC_URL}/scenes/${targetSceneId}/tiles/${tileKey}.jpg`;
+            const tileUrl = sceneTileUrl(targetSceneId, tileKey);
 
             const img = new Image();
             img.crossOrigin = 'anonymous';
@@ -677,6 +866,38 @@ export default function CubeMapViewer({
     const applyAllTextures = () => {
       console.log('[CubeMapViewer] Applying all 6 face textures at once for smooth transition');
 
+      // Matterport-style cross-fade: when a different scene replaces the photo on screen, keep
+      // the outgoing photo on a "ghost" cube drawn on top and fade it out over the new one
+      const isSceneChange = !!displayedSceneIdRef.current && displayedSceneIdRef.current !== currentScene.id;
+      // Sharper tiles for the room already on screen (loaded after zooming in): keep the user's zoom
+      const isQualityUpgrade = displayedSceneIdRef.current === currentScene.id;
+      const ghostStartLon = controlsRef.current.lon;
+      let ghost: { pivot: THREE.Group; cube: THREE.Mesh; materials: THREE.MeshBasicMaterial[]; oldMaps: THREE.Texture[] } | null = null;
+      ghostCleanupRef.current?.();
+      if (isSceneChange && cubeRef.current && sceneRef.current && materialsRef.current.some(m => m.map)) {
+        const ghostMaterials = materialsRef.current.map(material => {
+          const ghostMaterial = material.clone();
+          ghostMaterial.transparent = true;
+          ghostMaterial.depthTest = false;
+          ghostMaterial.depthWrite = false;
+          return ghostMaterial;
+        });
+        const ghostCube = new THREE.Mesh(cubeRef.current.geometry, ghostMaterials);
+        ghostCube.position.copy(cubeRef.current.position);
+        ghostCube.scale.copy(cubeRef.current.scale);
+        ghostCube.renderOrder = 1;
+        // The pivot counter-rotates when the camera turns to the new scene's angle,
+        // so the old photo stays put on screen instead of whipping around
+        const pivot = new THREE.Group();
+        pivot.add(ghostCube);
+        sceneRef.current.add(pivot);
+        ghost = { pivot, cube: ghostCube, materials: ghostMaterials, oldMaps: [] };
+      }
+      displayedSceneIdRef.current = currentScene.id;
+
+      // Move the camera to the new scene's view in the same frame its photo appears
+      flushPendingCameraReset();
+
       // Apply new textures first
       pendingTextures.forEach((texture, faceIndex) => {
         if (materialsRef.current[faceIndex]) {
@@ -685,12 +906,48 @@ export default function CubeMapViewer({
           materialsRef.current[faceIndex].color.setHex(0xffffff);
           materialsRef.current[faceIndex].needsUpdate = true;
 
-          // Dispose old texture if not cached
+          // Dispose old texture if not cached (after the ghost has faded, if it's still showing it)
           if (oldMap && oldMap !== texture && !Array.from(loadedTexturesRef.current.values()).includes(oldMap)) {
-            oldMap.dispose();
+            if (ghost) ghost.oldMaps.push(oldMap);
+            else oldMap.dispose();
           }
         }
       });
+
+      if (ghost) {
+        const { pivot, cube: ghostCube, materials: ghostMaterials, oldMaps } = ghost;
+        const ghostStartPos = ghostCube.position.clone();
+        // Keep drifting the old photo the way the camera was heading
+        const heading = THREE.MathUtils.degToRad(ghostStartLon + 180);
+        const drift = new THREE.Vector3(-Math.cos(heading), 0, -Math.sin(heading)).multiplyScalar(isTransitioningRef.current ? 10 : 4);
+        const fadeDuration = 700;
+        const fadeStart = Date.now();
+        let finished = false;
+        let frame = 0;
+
+        const cleanup = () => {
+          if (finished) return;
+          finished = true;
+          cancelAnimationFrame(frame);
+          pivot.parent?.remove(pivot);
+          ghostMaterials.forEach(material => material.dispose());
+          oldMaps.forEach(map => map.dispose());
+          if (ghostCleanupRef.current === cleanup) ghostCleanupRef.current = null;
+        };
+        ghostCleanupRef.current = cleanup;
+
+        const fadeGhost = () => {
+          if (finished) return;
+          const t = Math.min((Date.now() - fadeStart) / fadeDuration, 1);
+          const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+          pivot.rotation.y = -THREE.MathUtils.degToRad(controlsRef.current.lon - ghostStartLon);
+          ghostCube.position.copy(ghostStartPos).addScaledVector(drift, eased);
+          ghostMaterials.forEach(material => { material.opacity = 1 - eased; });
+          if (t < 1) frame = requestAnimationFrame(fadeGhost);
+          else cleanup();
+        };
+        frame = requestAnimationFrame(fadeGhost);
+      }
 
       // Smooth scene appearance with fade-in and camera adjustment
       if (isTransitioningRef.current && cubeRef.current && cameraRef.current) {
@@ -712,17 +969,23 @@ export default function CubeMapViewer({
           deltaPitch = targetRotation.pitch - startPitch;
         }
 
-        // Reset cube position immediately (no backward movement)
-        cubeRef.current.position.set(0, 0, 0);
+        // With a ghost cross-fading on top, the new room starts slightly behind the camera and
+        // settles forward into place; without one, reset immediately and fade in from dim
+        const arrivalHeading = THREE.MathUtils.degToRad(controlsRef.current.lon + 180);
+        const arrivalOffset = ghost
+          ? new THREE.Vector3(Math.cos(arrivalHeading), 0, Math.sin(arrivalHeading)).multiplyScalar(8)
+          : new THREE.Vector3();
+        cubeRef.current.position.copy(arrivalOffset);
         cubeRef.current.scale.set(1, 1, 1);
 
-        // Start with slightly dimmed materials for fade-in effect
-        materialsRef.current.forEach(material => {
-          material.color.setHex(0x888888); // Start dimmed
-        });
+        if (!ghost) {
+          materialsRef.current.forEach(material => {
+            material.color.setHex(0x888888); // Start dimmed
+          });
+        }
 
         const startTime = Date.now();
-        const transitionDuration = 400; // 400ms transition
+        const transitionDuration = ghost ? 700 : 400;
 
         const smoothTransition = () => {
           const elapsed = Date.now() - startTime;
@@ -747,8 +1010,13 @@ export default function CubeMapViewer({
             }
           }
 
-          // Smooth fade-in effect for materials
-          const brightness = 0.5 + 0.5 * easedProgress; // From 50% to 100% brightness
+          // Glide the new room into place under the fading ghost
+          if (cubeRef.current) {
+            cubeRef.current.position.copy(arrivalOffset).multiplyScalar(1 - easedProgress);
+          }
+
+          // Smooth fade-in effect for materials (the ghost handles the fade when present)
+          const brightness = ghost ? 1 : 0.5 + 0.5 * easedProgress; // From 50% to 100% brightness
           const colorValue = Math.floor(brightness * 255);
           const hexColor = (colorValue << 16) | (colorValue << 8) | colorValue;
 
@@ -763,7 +1031,8 @@ export default function CubeMapViewer({
             materialsRef.current.forEach(material => {
               material.color.setHex(0xffffff);
             });
-
+            cubeRef.current?.position.set(0, 0, 0);
+            
             setIsTransitioning(false);
             setIsLoading(false);
 
@@ -783,7 +1052,7 @@ export default function CubeMapViewer({
         }
 
         // Only reset FOV/Camera if NOT preserving camera (e.g. on new scene)
-        if (!preserveCamera) {
+        if (!preserveCamera && !isQualityUpgrade) {
           // Reset camera FOV to scene default
           if (cameraRef.current) {
             const targetFov = currentScene.fov || 60;
@@ -896,7 +1165,7 @@ export default function CubeMapViewer({
           }
 
           // Fallback: load tile from network
-          const tileUrl = `${R2_PUBLIC_URL}/scenes/${currentScene.id}/tiles/${tileKey}.jpg`;
+          const tileUrl = sceneTileUrl(currentScene.id, tileKey);
 
           const img = new Image();
           img.crossOrigin = 'anonymous';
@@ -918,6 +1187,7 @@ export default function CubeMapViewer({
       }
     });
   }, [manifest, currentScene.id]);
+  loadLevelRef.current = loadCubeMapLevel;
 
   // Load cube map tiles
   useEffect(() => {
@@ -1076,6 +1346,35 @@ export default function CubeMapViewer({
         x = distance * Math.cos(pitch) * Math.cos(yaw);
         y = distance * Math.sin(pitch);
         z = distance * Math.cos(pitch) * Math.sin(yaw);
+      }
+
+      // Navigation hotspots: a flat disc lying on the floor (Matterport style)
+      if (isGroundHotspot) {
+        const isDiscHighlighted = highlightedHotspotId === hotspot.id;
+        const disc = new THREE.Mesh(
+          new THREE.CircleGeometry(2.4, 48),
+          new THREE.MeshBasicMaterial({
+            map: createFloorDiscTexture(),
+            transparent: true,
+            opacity: 0.85,
+            depthTest: false,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+          })
+        );
+        placeFloorDisc(disc, hotspot.yaw || 0, hotspot.pitch || 0);
+        disc.renderOrder = isDiscHighlighted ? 2 : 1;
+        disc.userData = {
+          hotspot,
+          type: 'hotspot',
+          isGround: true,
+          isFloorDisc: true,
+          glowIntensity: isDiscHighlighted ? 1 : 0,
+          targetGlow: isDiscHighlighted ? 1 : 0,
+          isHighlighted: isDiscHighlighted,
+        };
+        hotspotsRef.current?.add(disc);
+        return;
       }
 
       // Helper to draw rounded rect for compatibility
@@ -1344,13 +1643,15 @@ export default function CubeMapViewer({
     // Level 1 is now 2x2 tiles (512px each) per face
     const faces = ['front', 'back', 'left', 'right', 'top', 'bottom'];
     hotspots.forEach(h => {
-      if (h.kind === 'navigation' && h.target_scene_id) {
+      const targetSceneId = h.target_scene_id;
+      if (h.kind === 'navigation' && targetSceneId) {
         faces.forEach(face => {
           // Preload all 4 tiles (2x2) for each face
           for (let y = 0; y < 2; y++) {
             for (let x = 0; x < 2; x++) {
-              const tileUrl = `${R2_PUBLIC_URL}/scenes/${h.target_scene_id}/tiles/${face}_l1_${x}_${y}.jpg`;
+              const tileUrl = sceneTileUrl(targetSceneId, `${face}_l1_${x}_${y}`);
               const img = new Image();
+              img.crossOrigin = 'anonymous'; // must match the viewer's CORS load or the cached copy is unusable
               img.src = tileUrl;
             }
           }
@@ -1358,6 +1659,274 @@ export default function CubeMapViewer({
       }
     });
   }, [hotspots, highlightedHotspotId, isLoading]);
+
+  // Play Tour camera path: the curve the camera will follow, with S, numbered and E markers.
+  // Drawn on top of the photo and never hit-tested, so it can't block clicks.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !cameraPath || cameraPath.length < 2) return;
+
+    const radius = 40;
+    const toVector = (yaw: number, pitch: number, r = radius) => {
+      const y = THREE.MathUtils.degToRad(yaw + 180);
+      const p = THREE.MathUtils.degToRad(pitch);
+      return new THREE.Vector3(r * Math.cos(p) * Math.cos(y), r * Math.sin(p), r * Math.cos(p) * Math.sin(y));
+    };
+
+    const group = new THREE.Group();
+    const disposables: { dispose: () => void }[] = [];
+    const overlayMaterial = (color: number) => {
+      const material = new THREE.MeshBasicMaterial({ color, depthTest: false, depthWrite: false, transparent: true, opacity: 0.95 });
+      disposables.push(material);
+      return material;
+    };
+
+    // The same curve playback follows
+    const steps = Math.max(48, (cameraPath.length - 1) * 48);
+    const samples: THREE.Vector3[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const point = sampleCameraPath(cameraPath, i / steps);
+      samples.push(toVector(point.yaw, point.pitch));
+    }
+    const tubeGeometry = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(samples), steps, 0.18, 8, false);
+    disposables.push(tubeGeometry);
+    const tube = new THREE.Mesh(tubeGeometry, overlayMaterial(0x6366f1));
+    tube.renderOrder = 3;
+    group.add(tube);
+
+    // Arrow head showing which way the camera moves
+    const tip = samples[samples.length - 1];
+    const beforeTip = samples[Math.max(samples.length - 4, 0)];
+    const coneGeometry = new THREE.ConeGeometry(0.7, 1.8, 16);
+    disposables.push(coneGeometry);
+    const arrow = new THREE.Mesh(coneGeometry, overlayMaterial(0x0d9488));
+    arrow.position.copy(tip);
+    arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tip.clone().sub(beforeTip).normalize());
+    arrow.renderOrder = 3;
+    group.add(arrow);
+
+    // S → 1, 2, 3… → E markers
+    const lastIndex = cameraPath.length - 1;
+    const markers: THREE.Sprite[] = [];
+    cameraPath.forEach((point, index) => {
+      const label = index === 0 ? 'S' : index === lastIndex ? 'E' : String(index);
+      const color = index === 0 ? '#7c3aed' : index === lastIndex ? '#0d9488' : '#4f46e5';
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.beginPath();
+      ctx.arc(32, 32, 28, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 30px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 32, 34);
+      const texture = new THREE.CanvasTexture(canvas);
+      const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false, transparent: true });
+      disposables.push(texture, spriteMaterial);
+      const sprite = new THREE.Sprite(spriteMaterial);
+      sprite.position.copy(toVector(point.yaw, point.pitch, radius - 0.5));
+      sprite.scale.set(2.6, 2.6, 1);
+      sprite.renderOrder = 4;
+      sprite.userData.pathIndex = index;
+      markers.push(sprite);
+      group.add(sprite);
+    });
+
+    scene.add(group);
+    pathMarkersRef.current = markers;
+    return () => {
+      scene.remove(group);
+      disposables.forEach(item => item.dispose());
+      pathMarkersRef.current = [];
+    };
+  }, [cameraPath]);
+
+  // Edit mode: drag a hotspot to move it; it saves when released. A press without moving stays a
+  // normal click. Window capture listeners run before the viewer's own handlers, so the camera
+  // stops rotating once the hotspot starts moving.
+  const isEditModeRef = useRef(isEditMode);
+  isEditModeRef.current = isEditMode;
+  const hotspotUpdateRef = useRef(onHotspotUpdate);
+  hotspotUpdateRef.current = onHotspotUpdate;
+  const hotspotMoveEndRef = useRef(onHotspotMoveEnd);
+  hotspotMoveEndRef.current = onHotspotMoveEnd;
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let candidate: { object: THREE.Object3D; hotspot: Hotspot; x: number; y: number } | null = null;
+    let dragging = false;
+    let latest: { yaw: number; pitch: number } | null = null;
+
+    const hotspotAt = (event: PointerEvent) => {
+      if (!cameraRef.current || !hotspotsRef.current) return null;
+      const rect = container.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(ndc, cameraRef.current);
+      const hit = raycaster.intersectObjects(hotspotsRef.current.children, true)
+        .find(h => h.object.userData?.hotspot);
+      return hit ? hit.object : null;
+    };
+
+    const moveObject = (object: THREE.Object3D, yaw: number, pitch: number) => {
+      if (object.userData.isFloorDisc) placeFloorDisc(object, yaw, pitch);
+      else object.position.copy(directionFromYawPitch(yaw, pitch).multiplyScalar(45));
+    };
+
+    const onMove = (event: PointerEvent) => {
+      if (!candidate) return;
+      if (!dragging) {
+        if (Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) < 5) return;
+        dragging = true;
+        const controls = controlsRef.current;
+        controls.isUserInteracting = false;
+        controls.isDragging = true; // so the viewer doesn't treat the release as a click
+        controls.lonSpeed = 0;
+        controls.latSpeed = 0;
+        container.style.cursor = 'grabbing';
+      }
+      event.stopPropagation();
+      if (!cameraRef.current) return;
+      latest = pointerToYawPitch(event, container, cameraRef.current);
+      moveObject(candidate.object, latest.yaw, latest.pitch);
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      if (dragging && candidate && latest) {
+        const moved = { ...candidate.hotspot, yaw: latest.yaw, pitch: latest.pitch };
+        hotspotUpdateRef.current?.(moved);
+        hotspotMoveEndRef.current?.(moved);
+      }
+      candidate = null;
+      dragging = false;
+      latest = null;
+    };
+
+    const onPointerDownCapture = (event: PointerEvent) => {
+      if (!isEditModeRef.current || !hotspotMoveEndRef.current || event.shiftKey) return;
+      const object = hotspotAt(event);
+      if (!object) return;
+      candidate = { object, hotspot: object.userData.hotspot as Hotspot, x: event.clientX, y: event.clientY };
+      window.addEventListener('pointermove', onMove, true);
+      window.addEventListener('pointerup', onUp, true);
+    };
+
+    // Show a move cursor over hotspots in edit mode (only when no button is held)
+    const onHoverCapture = (event: PointerEvent) => {
+      if (candidate || event.buttons !== 0 || !isEditModeRef.current || !hotspotMoveEndRef.current) return;
+      if (hotspotAt(event)) {
+        container.style.cursor = 'move';
+        event.stopPropagation();
+      }
+    };
+
+    container.addEventListener('pointerdown', onPointerDownCapture, true);
+    container.addEventListener('pointermove', onHoverCapture, true);
+    return () => {
+      container.removeEventListener('pointerdown', onPointerDownCapture, true);
+      container.removeEventListener('pointermove', onHoverCapture, true);
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+    };
+  }, []);
+
+  // Drag a path marker to move that point. Capture-phase listeners run before the viewer's own
+  // handlers, so grabbing a marker doesn't rotate the camera or add a new point.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let dragIndex: number | null = null;
+    let frame = 0;
+    let pending: { yaw: number; pitch: number } | null = null;
+
+    const toNdc = (event: PointerEvent) => {
+      const rect = container.getBoundingClientRect();
+      return new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+      );
+    };
+
+    // Same conversion as Shift+click hotspot placement
+    const toYawPitch = (event: PointerEvent) => {
+      const camera = cameraRef.current;
+      if (!camera) return null;
+      const ndc = toNdc(event);
+      const direction = new THREE.Vector3(ndc.x, ndc.y, 0.5).unproject(camera).sub(camera.position).normalize();
+      return {
+        yaw: Math.atan2(direction.z, direction.x) * 180 / Math.PI - 180,
+        pitch: Math.max(-85, Math.min(85, Math.asin(direction.y) * 180 / Math.PI)),
+      };
+    };
+
+    const markerIndexAt = (event: PointerEvent): number | null => {
+      if (!pathPointMoveRef.current || !cameraRef.current || pathMarkersRef.current.length === 0) return null;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(toNdc(event), cameraRef.current);
+      const hit = raycaster.intersectObjects(pathMarkersRef.current, false)[0];
+      return hit ? (hit.object.userData.pathIndex as number) : null;
+    };
+
+    const onDragMove = (event: PointerEvent) => {
+      if (dragIndex === null) return;
+      pending = toYawPitch(event);
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (pending && dragIndex !== null) pathPointMoveRef.current?.(dragIndex, pending.yaw, pending.pitch);
+      });
+    };
+
+    const onDragEnd = () => {
+      dragIndex = null;
+      container.style.cursor = '';
+      window.removeEventListener('pointermove', onDragMove);
+      window.removeEventListener('pointerup', onDragEnd);
+    };
+
+    const onPointerDownCapture = (event: PointerEvent) => {
+      const index = markerIndexAt(event);
+      if (index === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dragIndex = index;
+      container.style.cursor = 'grabbing';
+      window.addEventListener('pointermove', onDragMove);
+      window.addEventListener('pointerup', onDragEnd);
+    };
+
+    // Show a grab cursor over markers (and keep the viewer's hover logic from overriding it)
+    const onPointerMoveCapture = (event: PointerEvent) => {
+      if (dragIndex !== null) return;
+      if (markerIndexAt(event) !== null) {
+        container.style.cursor = 'grab';
+        event.stopPropagation();
+      }
+    };
+
+    container.addEventListener('pointerdown', onPointerDownCapture, true);
+    container.addEventListener('pointermove', onPointerMoveCapture, true);
+    return () => {
+      container.removeEventListener('pointerdown', onPointerDownCapture, true);
+      container.removeEventListener('pointermove', onPointerMoveCapture, true);
+      onDragEnd();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
 
   // Handle external preloading requests (e.g. from Play Tour)
   useEffect(() => {
@@ -1378,6 +1947,39 @@ export default function CubeMapViewer({
     const container = containerRef.current;
     if (!container) return;
 
+    // Place a hotspot / path point at a screen position (with a short visual pulse)
+    const placeAt = (clientX: number, clientY: number) => {
+      const rect = container.getBoundingClientRect();
+      mouseRef.current.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      mouseRef.current.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      if (!cameraRef.current || !onHotspotCreate) return;
+
+      // Calculate yaw/pitch from click position on the sphere
+      const vector = new THREE.Vector3(mouseRef.current.x, mouseRef.current.y, 0.5);
+      vector.unproject(cameraRef.current);
+      vector.sub(cameraRef.current.position).normalize();
+
+      // Convert to spherical coordinates
+      // Use atan2(z, x) to match cos/sin coordinate system, subtract 180° for camera offset
+      const yaw = Math.atan2(vector.z, vector.x) * 180 / Math.PI - 180;
+      const pitch = Math.asin(vector.y) * 180 / Math.PI;
+      onHotspotCreate(yaw, pitch);
+
+      // Visual feedback - create temporary marker
+      const tempMarker = document.createElement('div');
+      tempMarker.style.position = 'absolute';
+      tempMarker.style.left = `${clientX - rect.left - 10}px`;
+      tempMarker.style.top = `${clientY - rect.top - 10}px`;
+      tempMarker.style.width = '20px';
+      tempMarker.style.height = '20px';
+      tempMarker.style.borderRadius = '50%';
+      tempMarker.style.backgroundColor = '#4CAF50';
+      tempMarker.style.animation = 'pulse 0.5s ease-out';
+      tempMarker.style.pointerEvents = 'none';
+      container.appendChild(tempMarker);
+      setTimeout(() => tempMarker.remove(), 500);
+    };
+
     const onPointerDown = (event: PointerEvent) => {
       // Disable interaction ONLY during transitions. 
       // Playback mode should still allow initial coordinate capture for clicks.
@@ -1390,44 +1992,13 @@ export default function CubeMapViewer({
       // Reset drag flag
       controls.isDragging = false;
 
-      // Edit mode: create hotspot with Shift + Click (matching your editor controls)
+      // Edit mode: Shift + Click places right away. In placement mode (adding a hotspot or drawing a
+      // path) a click places on release, so dragging still turns the view.
       if (isEditMode && event.shiftKey) {
-        const rect = container.getBoundingClientRect();
-        mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-        if (cameraRef.current) {
-          // Calculate yaw/pitch from click position on the sphere
-          const vector = new THREE.Vector3(mouseRef.current.x, mouseRef.current.y, 0.5);
-          vector.unproject(cameraRef.current);
-          vector.sub(cameraRef.current.position).normalize();
-
-          // Convert to spherical coordinates
-          // Use atan2(z, x) to match cos/sin coordinate system, subtract 180° for camera offset
-          const yaw = Math.atan2(vector.z, vector.x) * 180 / Math.PI - 180;
-          const pitch = Math.asin(vector.y) * 180 / Math.PI;
-
-          if (onHotspotCreate) {
-            onHotspotCreate(yaw, pitch);
-
-            // Visual feedback - create temporary marker
-            const tempMarker = document.createElement('div');
-            tempMarker.style.position = 'absolute';
-            tempMarker.style.left = `${event.clientX - rect.left - 10}px`;
-            tempMarker.style.top = `${event.clientY - rect.top - 10}px`;
-            tempMarker.style.width = '20px';
-            tempMarker.style.height = '20px';
-            tempMarker.style.borderRadius = '50%';
-            tempMarker.style.backgroundColor = '#4CAF50';
-            tempMarker.style.animation = 'pulse 0.5s ease-out';
-            tempMarker.style.pointerEvents = 'none';
-            container.appendChild(tempMarker);
-
-            setTimeout(() => container.removeChild(tempMarker), 500);
-          }
-        }
+        placeAt(event.clientX, event.clientY);
         return; // Don't start camera rotation when placing hotspot
       }
+      pendingPlacementRef.current = isEditMode && placementModeRef.current;
 
       controls.isUserInteracting = true;
       controls.onPointerDownX = event.clientX;
@@ -1494,8 +2065,9 @@ export default function CubeMapViewer({
             if (hotspotData?.kind === 'navigation' && hotspotData?.target_scene_id) {
               const faces = ['front', 'back', 'left', 'right', 'top', 'bottom'];
               faces.forEach(face => {
-                const tileUrl = `${R2_PUBLIC_URL}/scenes/${hotspotData.target_scene_id}/tiles/${face}_l1_0_0.jpg`;
+                const tileUrl = sceneTileUrl(hotspotData.target_scene_id, `${face}_l1_0_0`);
                 const img = new Image();
+                img.crossOrigin = 'anonymous'; // must match the viewer's CORS load or the cached copy is unusable
                 img.src = tileUrl;
               });
             }
@@ -1543,6 +2115,13 @@ export default function CubeMapViewer({
       controls.isUserInteracting = false;
       controls.isDragging = false;
       container.style.cursor = 'default';
+
+      // Placement mode: a click (no drag) places the hotspot / path point; a drag only turned the view
+      if (pendingPlacementRef.current) {
+        pendingPlacementRef.current = false;
+        if (!wasDragging) placeAt(event.clientX, event.clientY);
+        return;
+      }
 
       // Handle interactions (clicks)
       if (!wasDragging) {
@@ -1666,11 +2245,14 @@ export default function CubeMapViewer({
                   }
                 }
 
-                // Use target values if defined, otherwise calculate natural viewing direction
+                // Use target values if defined, otherwise arrive at the target scene's starting view
+                const arrivalScene = scenesRef.current.find(s => s.id === targetSceneId);
                 let finalYaw, finalPitch;
 
                 if (targetYaw !== undefined) {
                   finalYaw = targetYaw;
+                } else if (arrivalScene) {
+                  finalYaw = arrivalScene.yaw || 0;
                 } else {
                   const controls = controlsRef.current;
                   finalYaw = controls.lon; // Keep facing the same direction you were looking
@@ -1681,7 +2263,7 @@ export default function CubeMapViewer({
                 } else {
                   // For navigation hotspots, maintain a natural eye-level view
                   // Reset to horizon (0) instead of preserving downward look
-                  finalPitch = 0;
+                  finalPitch = arrivalScene?.pitch || 0;
                 }
 
                 navigationTargetRef.current = {
@@ -1730,8 +2312,9 @@ export default function CubeMapViewer({
             // Matterport-style navigation with two phases:
             // Phase 1: Smooth rotation toward hotspot (if needed)
             // Phase 2: Slow forward movement
-            const rotationDuration = Math.min(Math.abs(deltaYaw) * 6, 800); // Slower rotation
-            const moveDuration = 3000; // Slower, forward movement
+            // Short turn + glide; the cross-fade in applyAllTextures carries the rest of the move
+            const rotationDuration = Math.min(Math.abs(deltaYaw) * 4, 600);
+            const moveDuration = 900;
             const startTime = Date.now();
 
             // Easing functions

@@ -4,22 +4,15 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import axios from 'axios';
 import { setGlobalLogoutFunction } from '../utils/axios-config';
 import { setTourServiceLogoutFunction } from '../services/tourService';
-
-interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-  propertyId?: string;
-  stripeCustomerId?: string;
-}
+import { AuthUser, apiBaseUrl } from '@/lib/auth-user';
 
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   token: string | null;
   isAuthenticated: boolean;
+  isAdmin: boolean;
   isLoading: boolean;
-  setAuth: (token: string, user: User) => void;
+  setAuth: (token: string, user: AuthUser) => void;
   logout: () => void;
   checkPaymentRequired: () => Promise<boolean>;
   getAuthHeaders: () => { Authorization: string };
@@ -37,223 +30,110 @@ export const useAuth = () => {
 
 interface AuthProviderProps {
   children: ReactNode;
-  mainBackendUrl?: string;
-  microserviceUrl?: string;
 }
 
-export const AuthProvider: React.FC<AuthProviderProps> = ({
-  children,
-  mainBackendUrl = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL || 'http://localhost:3000',
-  microserviceUrl = process.env.NEXT_PUBLIC_MICROSERVICE_URL || 'http://localhost:8080'
-}) => {
-  const [user, setUser] = useState<User | null>(null);
+const PUBLIC_PATHS = ['/', '/showcase', '/tours', '/embed', '/login', '/contact', '/privacy', '/terms'];
+
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const logout = React.useCallback(() => {
-    console.log('Logging out user...');
     setToken(null);
     setUser(null);
     localStorage.removeItem('auth_token');
     localStorage.removeItem('accessToken');
     localStorage.removeItem('user_data');
 
-    // Clean up any userType cache entries
+    // Clear user-specific caches
     Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('userType_')) {
-        localStorage.removeItem(key);
-      }
-    });
-
-    // Clear tours cache and other user-specific data
-    localStorage.removeItem('tours_cache');
-    localStorage.removeItem('tours_cache_time');
-
-    // Clear any other user-specific cache entries
-    Object.keys(localStorage).forEach(key => {
-      if (key.includes('_cache') || key.includes('user_') || key.includes('tour_')) {
+      if (key.startsWith('userType_') || key.includes('_cache') || key.includes('tour_')) {
         localStorage.removeItem(key);
       }
     });
 
     delete axios.defaults.headers.common['Authorization'];
 
-    // Notify parent if in iframe
-    if (window.parent !== window) {
-      window.parent.postMessage({ type: 'LOGOUT' }, '*');
-    }
-
-    // Redirect to login page ONLY if not on a public page
     if (typeof window !== 'undefined') {
-      const publicPaths = ['/', '/showcase', '/tours'];
       const currentPath = window.location.pathname;
-      const isPublicPath = publicPaths.some(path =>
+      const isPublicPath = PUBLIC_PATHS.some(path =>
         currentPath === path || (path !== '/' && currentPath.startsWith(path))
       );
-
       if (!isPublicPath) {
-        console.log('Not on a public path, redirecting to login...');
         window.location.href = '/login';
-      } else {
-        console.log('Already on a public path, staying here after logout/token clear.');
       }
     }
   }, []);
 
   useEffect(() => {
-    // Set the global logout function for axios and tour service
     setGlobalLogoutFunction(logout);
     setTourServiceLogoutFunction(logout);
 
-    // Clean up any existing userType cache entries on app start
-    Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('userType_')) {
-        localStorage.removeItem(key);
-      }
-    });
-
-    // Check for token in localStorage or from parent app
-    // NestJS typically stores as 'accessToken'
     const storedToken = localStorage.getItem('accessToken') || localStorage.getItem('auth_token');
-    const parentToken = window.parent !== window ? checkParentToken() : null;
-
-    const authToken = parentToken || storedToken;
-
-    if (authToken) {
-      validateAndSetToken(authToken);
-    } else {
+    if (!storedToken) {
       setIsLoading(false);
+      return;
     }
 
-    // Listen for messages from parent (main app)
-    window.addEventListener('message', handleParentMessage);
+    // Show the cached user immediately, then confirm the session with the API
+    try {
+      const cached = localStorage.getItem('user_data');
+      if (cached) {
+        setUser(JSON.parse(cached));
+        setToken(storedToken);
+      }
+    } catch {
+      // ignore a corrupt cache; /auth/me below decides
+    }
+
+    let cancelled = false;
+    fetch(`${apiBaseUrl()}auth/me`, { headers: { Authorization: `Bearer ${storedToken}` } })
+      .then(async (response) => {
+        if (cancelled) return;
+        if (response.status === 401) {
+          logout();
+          return;
+        }
+        if (!response.ok) return; // API down: keep the cached session
+        const data = await response.json();
+        setUser(data.user);
+        setToken(storedToken);
+        localStorage.setItem('user_data', JSON.stringify(data.user));
+        axios.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
+      })
+      .catch(() => {
+        // Network error: keep the cached session
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
 
     return () => {
-      window.removeEventListener('message', handleParentMessage);
+      cancelled = true;
     };
   }, [logout]);
 
-  const checkParentToken = (): string | null => {
-    // Check if running inside iframe/microfrontend
-    try {
-      // Request token from parent
-      window.parent.postMessage({ type: 'REQUEST_AUTH_TOKEN' }, '*');
-
-      // This would typically be handled asynchronously
-      // For now, check sessionStorage set by parent
-      return sessionStorage.getItem('parent_auth_token');
-    } catch (error) {
-      console.error('Error checking parent token:', error);
-      return null;
-    }
-  };
-
-  const handleParentMessage = (event: MessageEvent) => {
-    // Validate origin
-    const allowedOrigins = [mainBackendUrl, 'http://localhost:3001'];
-    if (!allowedOrigins.includes(event.origin)) return;
-
-    if (event.data.type === 'AUTH_TOKEN') {
-      validateAndSetToken(event.data.token);
-    } else if (event.data.type === 'LOGOUT') {
-      logout();
-    } else if (event.data.type === 'USER_UPDATE') {
-      setUser(event.data.user);
-    }
-  };
-
-  const validateAndSetToken = async (authToken: string) => {
-    try {
-      const storedUserData = localStorage.getItem('user_data');
-      if (storedUserData) {
-        try {
-          const userData = JSON.parse(storedUserData);
-          setToken(authToken);
-          setUser(userData);
-          axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
-          setIsLoading(false);
-          return;
-        } catch (error) {
-          console.error('Error parsing stored user data:', error);
-        }
-      }
-
-      // Validate token with Go microservice backend
-      const response = await axios.post(`${microserviceUrl}/api/auth/validate`, {}, {
-        headers: {
-          'Authorization': `Bearer ${authToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.data.valid && response.data.user) {
-        setToken(authToken);
-        setUser(response.data.user);
-        localStorage.setItem('auth_token', authToken);
-        localStorage.setItem('user_data', JSON.stringify(response.data.user));
-
-        // Set default axios header
-        axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
-      } else {
-        // Token is invalid
-        logout();
-      }
-    } catch (error: unknown) {
-      console.error('Token validation failed:', error);
-
-      if ((error as unknown as { response?: { status?: number } })?.response?.status === 401) {
-        return;
-      }
-
-      if ((error as unknown as { code?: string })?.code === 'ECONNREFUSED' || (error as unknown as { message?: string })?.message?.includes('ECONNREFUSED')) {
-        const storedUserData = localStorage.getItem('user_data');
-        if (storedUserData && authToken) {
-          try {
-            const userData = JSON.parse(storedUserData);
-            setToken(authToken);
-            setUser(userData);
-            axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
-            setIsLoading(false);
-            return;
-          } catch (parseError) {
-            console.error('Error parsing stored user data:', parseError);
-          }
-        }
-      }
-
-      logout();
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const setAuth = (authToken: string, userData: User) => {
+  const setAuth = (authToken: string, userData: AuthUser) => {
     setToken(authToken);
     setUser(userData);
-    // Store as both for compatibility
+    // Stored under both keys for older code that reads either
     localStorage.setItem('accessToken', authToken);
     localStorage.setItem('auth_token', authToken);
     localStorage.setItem('user_data', JSON.stringify(userData));
     axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
+  };
 
-    // Notify parent if in iframe
-    if (window.parent !== window) {
-      window.parent.postMessage({
-        type: 'AUTH_UPDATE',
-        token: authToken,
-        user: userData
-      }, '*');
-    }
+  const getAuthHeaders = (): { Authorization: string } => {
+    return { Authorization: token ? `Bearer ${token}` : '' };
   };
 
   const checkPaymentRequired = async (): Promise<boolean> => {
     if (!user) return true;
-
     try {
-      const response = await axios.get(`${microserviceUrl}/api/payment/check-limit`, {
+      const response = await axios.get(`${apiBaseUrl()}payment/check-limit`, {
         headers: getAuthHeaders()
       });
-
       return response.data.paymentRequired;
     } catch (error) {
       console.error('Payment check failed:', error);
@@ -261,14 +141,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     }
   };
 
-  const getAuthHeaders = (): { Authorization: string } => {
-    return { Authorization: token ? `Bearer ${token}` : '' };
-  };
-
   const value = {
     user,
     token,
     isAuthenticated: !!token && !!user,
+    isAdmin: user?.role === 'admin',
     isLoading,
     setAuth,
     logout,

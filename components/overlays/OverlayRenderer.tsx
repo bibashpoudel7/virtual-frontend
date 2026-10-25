@@ -5,6 +5,12 @@ import * as THREE from 'three';
 import { Overlay } from '@/types/tour';
 import { SPHERE_RADIUS } from '../viewer/multires/constants';
 import { useUrlParams } from '@/hooks/useUrlParams';
+import {
+  createModelOverlay,
+  disposeModelOverlay,
+  ensureModelLights,
+  updateModelOverlays,
+} from '@/lib/glb-model';
 
 interface OverlayRendererProps {
   overlays: Overlay[];
@@ -405,6 +411,10 @@ export default function OverlayRenderer({
       const child = overlayGroup.children.pop();
       if (!child) continue;
       overlayGroup.remove(child);
+      if (child.userData.isModelOverlay) {
+        disposeModelOverlay(child);
+        continue;
+      }
       child.traverse((node) => {
         if (node instanceof THREE.Sprite && node.material instanceof THREE.Material) {
           node.material.dispose();
@@ -413,11 +423,18 @@ export default function OverlayRenderer({
     }
     overlaySpritesRef.current.clear();
 
+    if (overlays.some(o => o.kind === 'model')) {
+      ensureModelLights(scene);
+    }
+
     // Add overlay sprites for current scene
     overlays.forEach((overlay) => {
       if (!overlay.id) return;
 
-      const sprite = createOverlaySprite(overlay, radius);
+      // GLB models are rendered as real 3D objects instead of icon sprites
+      const sprite = overlay.kind === 'model'
+        ? createModelOverlay(overlay)
+        : createOverlaySprite(overlay, radius);
       overlayGroup.add(sprite);
       overlaySpritesRef.current.set(overlay.id, sprite);
 
@@ -455,6 +472,22 @@ export default function OverlayRenderer({
     // Ensure the overlay group itself is visible
     overlayGroup.visible = true;
   }, [overlays, scene, overlayGroup, radius]);
+
+  // Drive GLB model animations / auto-rotation (the viewer's render loop draws the result)
+  useEffect(() => {
+    if (!overlayGroup || !overlays.some(o => o.kind === 'model')) return;
+
+    let frameId: number;
+    let lastTime = performance.now();
+    const tick = (now: number) => {
+      updateModelOverlays(overlayGroup, (now - lastTime) / 1000);
+      lastTime = now;
+      frameId = requestAnimationFrame(tick);
+    };
+    frameId = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(frameId);
+  }, [overlays, overlayGroup]);
 
   // Handle advanced hover functionality with better throttling
   const handleOverlayHover = (overlay: Overlay, position: { x: number; y: number }) => {
@@ -726,8 +759,13 @@ export default function OverlayRenderer({
       payload = {};
     }
 
+    // Models only show a tooltip when they have something to say
+    const isModel = hoveredOverlay.kind === 'model';
+    if (isModel && !payload.title && !payload.description) return null;
+    const isCompact = hoveredOverlay.kind === 'text' || isModel;
+
     // Calculate tooltip position to avoid going off-screen
-    let tooltipWidth = hoveredOverlay.kind === 'text' ? 280 : 400;
+    let tooltipWidth = isCompact ? 280 : 400;
 
     if ((hoveredOverlay.kind === 'image' || hoveredOverlay.kind === 'video') && payload.width) {
       const customWidth = parseInt(payload.width, 10);
@@ -736,8 +774,8 @@ export default function OverlayRenderer({
       }
     }
 
-    const tooltipHeight = hoveredOverlay.kind === 'text' ? 110 : 300;
-    const arrowSize = hoveredOverlay.kind === 'text' ? 12 : 8;
+    const tooltipHeight = isCompact ? 110 : 300;
+    const arrowSize = isCompact ? 12 : 8;
 
     // Get the overlay icon's 3D position and convert to screen coordinates
     let iconScreenPosition = { x: hoverPosition.x, y: hoverPosition.y };
@@ -771,8 +809,8 @@ export default function OverlayRenderer({
 
     // Estimate total tooltip height and width
     // Content height (video/image)
-    const contentHeight = payload.height ? parseInt(payload.height, 10) : (hoveredOverlay.kind === 'text' ? 100 : 200);
-    const chromeBufferHeight = hoveredOverlay.kind === 'text' ? 120 : 300;
+    const contentHeight = payload.height ? parseInt(payload.height, 10) : (isCompact ? 100 : 200);
+    const chromeBufferHeight = isCompact ? 120 : 300;
     const estimatedHeight = contentHeight + chromeBufferHeight;
     const estimatedWidth = tooltipWidth;
 
@@ -939,6 +977,13 @@ export default function OverlayRenderer({
                 </svg>
               </div>
             )}
+            {isModel && (
+              <div className="w-6 h-6 bg-purple-500 rounded flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+                </svg>
+              </div>
+            )}
             {hoveredOverlay.kind === 'video' && (
               <div className="w-6 h-6 bg-red-500 rounded flex items-center justify-center shadow-sm">
                 <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
@@ -953,7 +998,8 @@ export default function OverlayRenderer({
               {hoveredOverlay.kind === 'image' ? 'Image' :
                 hoveredOverlay.kind === 'video' ? 'Video' :
                   hoveredOverlay.kind === 'text' ? 'Text' :
-                    hoveredOverlay.kind}
+                    isModel ? (payload.title || '3D Model') :
+                      hoveredOverlay.kind}
             </span>
           </div>
 
@@ -1114,6 +1160,12 @@ export default function OverlayRenderer({
                 >
                   {payload.text || 'BADGE'}
                 </div>
+              </div>
+            )}
+
+            {isModel && payload.description && (
+              <div className="text-gray-200 text-sm leading-relaxed whitespace-pre-line">
+                {payload.description}
               </div>
             )}
 

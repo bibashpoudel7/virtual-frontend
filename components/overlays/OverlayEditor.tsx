@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Overlay } from '@/types/tour';
 import { tourService } from '@/services/tourService';
 import { storageUploader } from '@/lib/storage-upload';
+import { glbContentType, isGlbFile, MAX_MODEL_FILE_SIZE } from '@/lib/glb-model';
+import ModelOverlayFields from './ModelOverlayFields';
 
 interface OverlayEditorProps {
   sceneId: string;
@@ -109,6 +111,7 @@ export default function OverlayEditor({
   const [error, setError] = useState<string | null>(null);
   const [uploadedImage, setUploadedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploadedModel, setUploadedModel] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Update formData when pendingPosition changes
@@ -126,6 +129,7 @@ export default function OverlayEditor({
     { value: 'text', label: 'Text Overlay', icon: '📝', description: 'Display text information' },
     { value: 'image', label: 'Image Overlay', icon: '🖼️', description: 'Show an image' },
     { value: 'video', label: 'Video Overlay', icon: '🎥', description: 'Embed a video' },
+    { value: 'model', label: '3D Model', icon: '🧊', description: 'Place a 3D GLB model inside the scene' },
     // { value: 'html', label: 'Custom HTML', icon: '�', edescription: 'Custom HTML content' },
     // { value: 'badge', label: 'Badge/Label', icon: '🏷️', description: 'Show a badge or label' },
     // { value: 'tooltip', label: 'Tooltip', icon: '💬', description: 'Hover tooltip' },
@@ -179,6 +183,35 @@ export default function OverlayEditor({
     }
   };
 
+  const handleModelSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!isGlbFile(file)) {
+      setError('Please select a .glb or .gltf file');
+      return;
+    }
+    if (file.size > MAX_MODEL_FILE_SIZE) {
+      setError('3D model must be less than 50MB. Compress it with gltf-transform first.');
+      return;
+    }
+    setError(null);
+    setUploadedModel(file);
+  };
+
+  // Uploads the selected GLB (if any) and returns the payload with modelUrl set
+  const withUploadedModel = async (payload: Record<string, any>) => {
+    if (!uploadedModel) return payload;
+    try {
+      const cleanFileName = uploadedModel.name.replace(/[^a-zA-Z0-9.]/g, '_');
+      const key = `tours/${tourId}/models/${Date.now()}-${cleanFileName}`;
+      const modelUrl = await storageUploader.uploadFile(uploadedModel, key, glbContentType(uploadedModel));
+      return { ...payload, modelUrl };
+    } catch (uploadError) {
+      console.error('Failed to upload model to R2:', uploadError);
+      throw new Error('Failed to upload 3D model to cloud storage. Please try again.');
+    }
+  };
+
   const handleEditOverlay = (overlay: Overlay) => {
     setSelectedOverlay(overlay);
     setIsEditing(true);
@@ -219,7 +252,12 @@ export default function OverlayEditor({
     setError(null);
 
     try {
-      const finalPayload = { ...editFormData.payload };
+      let finalPayload = { ...editFormData.payload };
+
+      if (editFormData.kind === 'model') {
+        finalPayload = await withUploadedModel(finalPayload);
+        if (!finalPayload.modelUrl) throw new Error('Please select a .glb file or enter a model URL');
+      }
 
       // Handle image upload if needed
       if (editFormData.kind === 'image' && uploadedImage) {
@@ -265,6 +303,7 @@ export default function OverlayEditor({
       setSelectedOverlay(null);
       setEditFormData(null);
       setUploadedImage(null);
+      setUploadedModel(null);
       setImagePreview(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update overlay');
@@ -278,6 +317,7 @@ export default function OverlayEditor({
     setSelectedOverlay(null);
     setEditFormData(null);
     setUploadedImage(null);
+    setUploadedModel(null);
     setImagePreview(null);
   };
 
@@ -601,6 +641,16 @@ export default function OverlayEditor({
           </>
         );
 
+      case 'model':
+        return (
+          <ModelOverlayFields
+            payload={editFormData.payload || {}}
+            onChange={(payload) => setEditFormData({ ...editFormData, payload })}
+            selectedFile={uploadedModel}
+            onFileSelect={handleModelSelect}
+          />
+        );
+
       default:
         return (
           <div className="text-center py-4 text-gray-500">
@@ -615,7 +665,12 @@ export default function OverlayEditor({
     setError(null);
 
     try {
-      const finalPayload = { ...formData.payload };
+      let finalPayload = { ...formData.payload };
+
+      if (formData.kind === 'model') {
+        finalPayload = await withUploadedModel(finalPayload);
+        if (!finalPayload.modelUrl) throw new Error('Please select a .glb file or enter a model URL');
+      }
 
       // Handle image upload if needed
       if (formData.kind === 'image' && uploadedImage) {
@@ -664,6 +719,7 @@ export default function OverlayEditor({
         }
       });
       setUploadedImage(null);
+      setUploadedModel(null);
       setImagePreview(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create overlay');
@@ -674,6 +730,16 @@ export default function OverlayEditor({
 
   const renderOverlayFields = () => {
     switch (formData.kind) {
+      case 'model':
+        return (
+          <ModelOverlayFields
+            payload={formData.payload || {}}
+            onChange={(payload) => setFormData({ ...formData, payload })}
+            selectedFile={uploadedModel}
+            onFileSelect={handleModelSelect}
+          />
+        );
+
       case 'text':
         return (
           <>
@@ -1152,6 +1218,7 @@ export default function OverlayEditor({
                 }
               });
               setUploadedImage(null);
+              setUploadedModel(null);
               setImagePreview(null);
               setError(null);
             }
@@ -1175,7 +1242,7 @@ export default function OverlayEditor({
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-semibold mb-2 text-gray-900">Overlay Type</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 {overlayTypes.map(type => (
                   <button
                     key={type.value}
@@ -1186,6 +1253,7 @@ export default function OverlayEditor({
                       if (newKind === 'image') {
                         newPayload.imageSource = 'url';
                       }
+                      setUploadedModel(null);
                       setFormData({
                         ...formData,
                         kind: newKind,
@@ -1314,6 +1382,7 @@ export default function OverlayEditor({
                     payload: { /* Removed unused style and animation properties */ }
                   });
                   setUploadedImage(null);
+                  setUploadedModel(null);
                   setImagePreview(null);
                 }}
                 className="px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-colors cursor-pointer font-semibold"

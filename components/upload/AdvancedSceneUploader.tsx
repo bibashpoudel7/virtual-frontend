@@ -61,6 +61,17 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
   const [totalFiles, setTotalFiles] = useState<number>(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const progressListRef = useRef<HTMLDivElement>(null);
+
+  // Keep the first in-progress file visible in the per-file list while uploading
+  useEffect(() => {
+    const list = progressListRef.current;
+    if (!list) return;
+    const active = list.querySelector<HTMLElement>('[data-uploading="true"]');
+    // list is `relative`, so offsetTop is measured from the list itself
+    const top = active ? active.offsetTop : list.scrollHeight;
+    list.scrollTo({ top, behavior: 'smooth' });
+  }, [uploadProgress]);
 
   // Calculate overall progress
   const overallProgress = (() => {
@@ -649,9 +660,9 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
                   </div>
 
                   {/* Individual Files Scrollable List */}
-                  <div className="max-h-60 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+                  <div ref={progressListRef} className="relative max-h-60 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
                     {Array.from(uploadProgress.entries()).map(([key, progress]) => (
-                      <div key={key} className="bg-white p-2 rounded border border-gray-100 shadow-sm">
+                      <div key={key} data-uploading={progress < 100} className="bg-white p-2 rounded border border-gray-100 shadow-sm">
                         <div className="flex justify-between text-xs text-gray-700 mb-1">
                           <span className="font-medium truncate max-w-[200px]">{key}</span>
                           <span className="font-medium">{progress}%</span>

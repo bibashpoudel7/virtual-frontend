@@ -58,9 +58,8 @@ export default function TourList() {
     if (userData) {
       try {
         const user = JSON.parse(userData);
-        const role = user.roles?.toString() || user.role?.toString() || null;
-        setUserRole(role);
-        setCurrentUserId(user.id || user.user_id || null);
+        setUserRole(user.role === 'admin' ? 'admin' : 'user');
+        setCurrentUserId(user.id || null);
       } catch (error) {
         console.error('Error parsing user data:', error);
       }
@@ -221,12 +220,13 @@ export default function TourList() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Superadmin-only function to change tour publication status
+  // Admins and the tour's owner can change publication status (the API enforces this too)
   const changePublishStatus = async (tourId: string, newStatus: boolean, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent card click
 
-    if (userRole !== '1') {
-      toast.error('Only superadmins can change publication status');
+    const target = tours.find(t => t.id === tourId);
+    if (userRole !== 'admin' && target?.user_id !== currentUserId) {
+      toast.error('Only admins and the tour owner can change publication status');
       return;
     }
 
@@ -427,7 +427,7 @@ export default function TourList() {
         <h2 className="text-3xl font-bold text-gray-900 mb-2">Virtual Tours</h2>
         <div className="flex items-center justify-between">
           <p className="text-gray-600">
-            {userRole === '1' ? 'Manage all virtual tours (Superadmin)' : 'Manage your virtual tour collection'}
+            {userRole === 'admin' ? 'Manage all virtual tours (Admin)' : 'Manage your virtual tour collection'}
           </p>
           {pagination.total > 0 && (
             <div className="text-sm text-gray-500">
@@ -527,10 +527,10 @@ export default function TourList() {
                         )}
 
                         {/* Actions for Superadmins and Tour Owners */}
-                        {(userRole === '1' || tour?.user_id === currentUserId) && (
+                        {(userRole === 'admin' || tour?.user_id === currentUserId) && (
                           <div className="flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
-                            {/* Visibility Toggle - Only for Superadmins */}
-                            {userRole === '1' && (
+                            {/* Visibility Toggle - admins and tour owners */}
+                            {(userRole === 'admin' || tour?.user_id === currentUserId) && (
                               <div className="relative dropdown-container">
                                 <button
                                   onClick={(e) => toggleVisibilityDropdown(tour.id, e)}

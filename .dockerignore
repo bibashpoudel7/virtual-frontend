@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Dependencies
+node_modules
+
+# Next.js build output
+.next
+out
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files (keep .env for CI/CD build)
+# .env
+.env.local
+.env.*.local
+!.env.server.example
+
+# Documentation
+*.md
+!README.md
+
+# Test files
+__tests__
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+coverage
+
+# Development
+.yarn/cache
+.yarn/install-state.gz
+tsconfig.tsbuildinfo
+
+# CI/CD
+.github/
+.do/
