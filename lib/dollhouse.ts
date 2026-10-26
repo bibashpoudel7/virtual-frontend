@@ -40,6 +40,8 @@ export interface DollhouseRoom {
   rotation: number;
   /** Has been placed on the floor plan (unplaced rooms get laid out automatically) */
   placed: boolean;
+  /** Explicit outdoor/exterior mode (building seen from outside, courtyard, etc.) */
+  isExterior?: boolean;
 }
 
 export interface DollhouseProject {
@@ -64,7 +66,7 @@ const INTRO_MODEL_SIZE = 10;
 const MAX_TEXTURE_SIZE = 2048;
 const MAX_ROOM_RADIUS = 60; // meters; farther floor clicks are almost certainly mistakes
 /** Tallest wall: room ceilings, or whole buildings photographed from outside */
-export const MAX_WALL_HEIGHT = 60;
+export const MAX_WALL_HEIGHT = 120;
 
 // Same face order and box as CubeMapViewer, so the photo is oriented exactly as in the tour
 const FACE_ORDER = [CubeFace.RIGHT, CubeFace.LEFT, CubeFace.BOTTOM, CubeFace.TOP, CubeFace.FRONT, CubeFace.BACK];
@@ -489,9 +491,10 @@ function buildRoom(room: DollhouseRoom, cameraHeight: number, baker: TextureBake
   const up = new THREE.Vector3(0, 1, 0);
   const v3 = ([x, z]: PlanPoint, y: number) => new THREE.Vector3(x, y, z);
 
-  // Photo taken outside the traced shape (a building from the street): the photo belongs on
-  // the outside of the walls facing the camera, and the inside can't be seen at all
-  if (!pointInPolygon([0, 0], corners)) {
+  // Photo taken outside the traced shape (a building from the street) or marked outdoor:
+  // the photo belongs on the outside of the walls facing the camera, with courtyard ground
+  const isExterior = room.isExterior ?? (!pointInPolygon([0, 0], corners));
+  if (isExterior) {
     return buildExterior(room, eye, baker, pxPerMeter, shellMaterials);
   }
 
@@ -577,13 +580,15 @@ function buildRoom(room: DollhouseRoom, cameraHeight: number, baker: TextureBake
   return group;
 }
 
-/** A building seen from outside: photo on the walls facing the camera, plain sides and roof. */
+/** A building seen from outside: photo on the walls facing the camera, courtyard ground, plain sides and roof. */
 function buildExterior(room: DollhouseRoom, eye: THREE.Vector3, baker: TextureBaker | null, pxPerMeter: number, shellMaterials: THREE.Material[]) {
   const group = new THREE.Group();
   const corners = room.corners;
   const height = room.ceilingHeight;
   const up = new THREE.Vector3(0, 1, 0);
   const v3 = ([x, z]: PlanPoint, y: number) => new THREE.Vector3(x, y, z);
+
+  const facingEdges: { a: PlanPoint; b: PlanPoint }[] = [];
 
   corners.forEach((a, i) => {
     const b = corners[(i + 1) % corners.length];
@@ -595,6 +600,9 @@ function buildExterior(room: DollhouseRoom, eye: THREE.Vector3, baker: TextureBa
     const midX = (a[0] + b[0]) / 2;
     const midZ = (a[1] + b[1]) / 2;
     const facesCamera = outward.x * -midX + outward.z * -midZ > 0;
+    if (facesCamera) {
+      facingEdges.push({ a, b });
+    }
     const map = facesCamera ? baker?.bake(
       v3(a, 0), new THREE.Vector3(b[0] - a[0], 0, b[1] - a[1]), new THREE.Vector3(0, height, 0), eye,
       textureSize(wallLength, pxPerMeter), textureSize(height, pxPerMeter)
@@ -605,6 +613,44 @@ function buildExterior(room: DollhouseRoom, eye: THREE.Vector3, baker: TextureBa
     wallMesh.name = `Facade ${i + 1}`;
     group.add(wallMesh);
   });
+
+  // Courtyard / ground paving connecting camera (0,0) to all facades facing the camera
+  if (facingEdges.length > 0) {
+    const groundPoints: PlanPoint[] = [[0, 0]];
+    facingEdges.forEach(e => groundPoints.push(e.a, e.b));
+    const { minX, maxX, minZ, maxZ } = polygonBounds(groundPoints);
+    const width = Math.max(maxX - minX, 0.01);
+    const depth = Math.max(maxZ - minZ, 0.01);
+
+    const ground = new MeshBuilder();
+    facingEdges.forEach(({ a, b }) => {
+      ground.addTriangle(
+        [new THREE.Vector3(0, 0, 0), v3(a, 0), v3(b, 0)],
+        [
+          [(0 - minX) / width, (0 - minZ) / depth],
+          [(a[0] - minX) / width, (a[1] - minZ) / depth],
+          [(b[0] - minX) / width, (b[1] - minZ) / depth],
+        ],
+        up
+      );
+    });
+
+    const groundMap = baker?.bake(
+      new THREE.Vector3(minX, 0, minZ),
+      new THREE.Vector3(width, 0, 0),
+      new THREE.Vector3(0, 0, depth),
+      eye,
+      textureSize(width, pxPerMeter),
+      textureSize(depth, pxPerMeter)
+    );
+
+    const groundMesh = new THREE.Mesh(
+      ground.toGeometry(),
+      groundMap ? new THREE.MeshBasicMaterial({ map: groundMap }) : shellMaterials[0]
+    );
+    groundMesh.name = 'Courtyard / Ground';
+    group.add(groundMesh);
+  }
 
   const roof = new MeshBuilder();
   THREE.ShapeUtils.triangulateShape(corners.map(([x, z]) => new THREE.Vector2(x, z)), []).forEach((triangle) => {
@@ -677,10 +723,11 @@ export async function buildDollhouse(
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
   const scale = INTRO_MODEL_SIZE / Math.max(size.x, size.y, size.z, 1e-6);
-  const labels: IntroModelRoom[] = labelAnchors.map(({ sceneId, object }) => {
+  const labels: IntroModelRoom[] = labelAnchors.map(({ sceneId, object }, idx) => {
     const p = object.getWorldPosition(new THREE.Vector3());
     return {
       sceneId,
+      number: idx + 1,
       position: [
         +((p.x - center.x) * scale).toFixed(3),
         +((p.y - box.min.y) * scale).toFixed(3),

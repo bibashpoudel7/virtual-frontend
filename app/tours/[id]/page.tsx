@@ -11,7 +11,7 @@ import CubeMapViewer from '@/components/viewer/CubeMapViewer';
 import PlayTourOverlay from '@/components/tours/PlayTourOverlay';
 import IntroModelScreen from '@/components/viewer/IntroModelScreen';
 import { getSceneThumbnail } from '@/lib/scene-thumbnail';
-import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, X, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Maximize, Minimize, X, Share2, Volume2, VolumeX, Facebook, Twitter, Linkedin, Mail, Copy, Box } from 'lucide-react';
 
 const calculateTransitionOffsets = (direction: string, progress: number) => {
   // Arc: 0 at the start, peak at the midpoint, back to 0 at the end, so the camera lands on the end position
@@ -393,6 +393,7 @@ export default function PublicTourViewer() {
   const [showRoomStrip, setShowRoomStrip] = useState(true);
   // The tour's 3D intro model (if any) is shown once, before the 360° view
   const [introDone, setIntroDone] = useState(false);
+  const [showDollhouseModal, setShowDollhouseModal] = useState(false);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
@@ -1335,21 +1336,33 @@ export default function PublicTourViewer() {
     >
       {/* Tour Viewer */}
       <div className={`${isFullscreen ? 'h-screen' : 'h-screen'} relative`}>
-        {tour.intro_model_url && !introDone && (
+        {tour.intro_model_url && (!introDone || showDollhouseModal) && (
           <IntroModelScreen
             modelUrl={tour.intro_model_url}
             title={tour.name}
-            rooms={(tour.intro_model_rooms || []).flatMap(room => {
+            rooms={(tour.intro_model_rooms || []).flatMap((room, idx) => {
               const scene = scenes.find(s => s.id === room.sceneId);
-              return scene ? [{ ...room, label: room.label || scene.name || 'Room' }] : [];
+              return scene
+                ? [
+                    {
+                      ...room,
+                      number: room.number ?? (idx + 1),
+                      label: room.label || scene.name || 'Room',
+                      description: room.description,
+                    },
+                  ]
+                : [];
             })}
+            onClose={introDone ? () => setShowDollhouseModal(false) : undefined}
             onEnter={() => {
               setIntroDone(true);
+              setShowDollhouseModal(false);
               handleCenterPlayClick();
             }}
             onEnterRoom={(sceneId) => {
               // Open the tour at the clicked room (no autoplay, so visitors can look around)
               setIntroDone(true);
+              setShowDollhouseModal(false);
               setShowControls(true);
               const index = scenes.findIndex(s => s.id === sceneId);
               if (index !== -1) handleSceneChange(index);
@@ -1429,6 +1442,17 @@ export default function PublicTourViewer() {
         {/* Top Right Controls - Only show when controls are active */}
         {showControls && (
           <div className="absolute top-4 right-4 z-30 flex gap-2">
+            {/* 3D Dollhouse & Floor Plan button */}
+            {tour.intro_model_url && (
+              <button
+                onClick={() => setShowDollhouseModal(true)}
+                className="bg-black/50 backdrop-blur-sm text-white p-2 rounded-full hover:bg-black/70 transition-colors cursor-pointer group relative"
+                title="View 3D Dollhouse & Floor Plan"
+              >
+                <Box className="w-5 h-5 text-blue-400 group-hover:scale-110 transition-transform" />
+              </button>
+            )}
+
             {/* Share Button */}
             <button
               onClick={handleShare}

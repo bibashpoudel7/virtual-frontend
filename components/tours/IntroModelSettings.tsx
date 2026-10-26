@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { Layers, EyeOff } from 'lucide-react';
 import { IntroModelRoom, Scene, Tour } from '@/types/tour';
 import { tourService } from '@/services/tourService';
 import { storageUploader } from '@/lib/storage-upload';
@@ -29,7 +30,9 @@ export default function IntroModelSettings({ tour, scenes, onTourUpdate }: Intro
   const savedRooms = tour.intro_model_rooms || [];
   const [rooms, setRooms] = useState<IntroModelRoom[]>(savedRooms);
   const [placingSceneId, setPlacingSceneId] = useState<string | null>(null);
+  const [highlightedSceneId, setHighlightedSceneId] = useState<string | null>(null);
   const [savingRooms, setSavingRooms] = useState(false);
+  const [hideOuterLayer, setHideOuterLayer] = useState(false);
   const roomsDirty = JSON.stringify(rooms) !== JSON.stringify(savedRooms);
 
   useEffect(() => {
@@ -67,8 +70,14 @@ export default function IntroModelSettings({ tour, scenes, onTourUpdate }: Intro
     setSavingRooms(true);
     setError(null);
     try {
-      // Keep labels for scenes not loaded here (scenes are paginated); the viewer skips deleted ones
-      const cleaned = rooms.map(({ sceneId, label, position }) => (label?.trim() ? { sceneId, label: label.trim(), position } : { sceneId, position }));
+      // Keep labels, descriptions, and numbers for scenes not loaded here (scenes are paginated)
+      const cleaned = rooms.map(({ sceneId, label, description, number, position }) => {
+        const item: IntroModelRoom = { sceneId, position };
+        if (label?.trim()) item.label = label.trim();
+        if (description?.trim()) item.description = description.trim();
+        if (typeof number === 'number' && !isNaN(number)) item.number = number;
+        return item;
+      });
       const payload = cleaned.length ? cleaned : null;
       const updated = await tourService.updateTour(tour.id, { intro_model_rooms: payload });
       onTourUpdate({ ...tour, ...updated, intro_model_rooms: payload });
@@ -82,9 +91,18 @@ export default function IntroModelSettings({ tour, scenes, onTourUpdate }: Intro
     }
   };
 
-  const viewerRooms: IntroRoomLabel[] = rooms.flatMap(room => {
+  const viewerRooms: IntroRoomLabel[] = rooms.flatMap((room, idx) => {
     const scene = scenes.find(s => s.id === room.sceneId);
-    return scene ? [{ ...room, label: room.label?.trim() || scene.name || 'Room' }] : [];
+    return scene
+      ? [
+          {
+            ...room,
+            number: room.number ?? (idx + 1),
+            label: room.label?.trim() || scene.name || 'Room',
+            description: room.description?.trim(),
+          },
+        ]
+      : [];
   });
   const placingScene = scenes.find(s => s.id === placingSceneId);
 
@@ -235,11 +253,28 @@ export default function IntroModelSettings({ tour, scenes, onTourUpdate }: Intro
             autoRotate={false}
             rooms={viewerRooms}
             activeSceneId={placingSceneId}
+            hideOuterLayer={hideOuterLayer}
             onModelClick={placingSceneId ? (position) => {
               updateRoom(placingSceneId, { position });
               setPlacingSceneId(null);
             } : undefined}
           />
+          {/* Outer Layer / Cutaway toggle */}
+          <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10">
+            <button
+              type="button"
+              onClick={() => setHideOuterLayer(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold shadow-lg backdrop-blur transition-all cursor-pointer ${
+                hideOuterLayer
+                  ? 'bg-blue-600 text-white ring-2 ring-blue-400/50'
+                  : 'bg-black/60 text-white/90 hover:bg-black/80 border border-white/10'
+              }`}
+              title="Toggle outer walls & roof to display the inner layer"
+            >
+              {hideOuterLayer ? <EyeOff className="w-3.5 h-3.5 text-blue-200" /> : <Layers className="w-3.5 h-3.5 text-blue-400" />}
+              <span>{hideOuterLayer ? 'Inner Layer (Cutaway)' : 'Remove Outer Layer'}</span>
+            </button>
+          </div>
           {placingScene && (
             <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white shadow-lg">
               Click the model where “{placingScene.name || 'this room'}” is
@@ -291,47 +326,83 @@ export default function IntroModelSettings({ tour, scenes, onTourUpdate }: Intro
             <p className="mt-2 text-xs text-gray-500">Add 360° photos first, then pin them to the model here.</p>
           ) : (
             <ul className="mt-2 divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
-              {scenes.map(scene => {
+              {scenes.map((scene, sceneIdx) => {
                 const room = rooms.find(r => r.sceneId === scene.id);
                 const placing = placingSceneId === scene.id;
+                const roomNum = room?.number ?? (sceneIdx + 1);
                 return (
-                  <li key={scene.id} className={`flex flex-wrap items-center gap-2 px-3 py-2 ${placing ? 'bg-blue-50' : ''}`}>
-                    <span
-                      className={`w-2 h-2 rounded-full shrink-0 ${room ? 'bg-green-500' : 'bg-gray-300'}`}
-                      title={room ? 'Pinned on the model' : 'Not pinned'}
-                    />
-                    <span className="flex-1 min-w-[120px] truncate text-sm text-gray-900">{scene.name || 'Untitled'}</span>
-                    {room && (
-                      <input
-                        type="text"
-                        value={room.label || ''}
-                        onChange={(e) => updateRoom(scene.id, { label: e.target.value })}
-                        placeholder={scene.name || 'Label'}
-                        maxLength={40}
-                        aria-label={`Label for ${scene.name || 'room'}`}
-                        className="w-36 px-2 py-1 text-xs border border-gray-300 rounded-md bg-white text-gray-900"
+                  <li key={scene.id} className={`flex flex-col gap-2 p-3 ${placing ? 'bg-blue-50/70' : ''}`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`w-2.5 h-2.5 rounded-full shrink-0 ${room ? 'bg-green-500' : 'bg-gray-300'}`}
+                        title={room ? 'Pinned on the model' : 'Not pinned'}
                       />
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setPlacingSceneId(placing ? null : scene.id)}
-                      disabled={savingRooms}
-                      className={`px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer disabled:opacity-50 ${placing
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
-                        }`}
-                    >
-                      {placing ? 'Click the model…' : room ? 'Move' : 'Place'}
-                    </button>
-                    {room && (
+                      {room && (
+                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-[11px] font-bold shrink-0">
+                          {roomNum}
+                        </span>
+                      )}
+                      <span className="flex-1 min-w-[120px] truncate text-sm font-medium text-gray-900">{scene.name || 'Untitled'}</span>
+                      {room && (
+                        <input
+                          type="text"
+                          value={room.label || ''}
+                          onChange={(e) => updateRoom(scene.id, { label: e.target.value })}
+                          placeholder={scene.name || 'Room Label'}
+                          maxLength={40}
+                          aria-label={`Label for ${scene.name || 'room'}`}
+                          className="w-36 px-2.5 py-1 text-xs border border-gray-300 rounded-md bg-white text-gray-900"
+                        />
+                      )}
                       <button
                         type="button"
-                        onClick={() => removeRoom(scene.id)}
+                        onClick={() => setPlacingSceneId(placing ? null : scene.id)}
                         disabled={savingRooms}
-                        className="px-2 py-1 rounded-md text-xs font-medium text-red-600 hover:bg-red-50 cursor-pointer disabled:opacity-50"
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer disabled:opacity-50 ${placing
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
+                          }`}
                       >
-                        Remove
+                        {placing ? 'Click the model…' : room ? 'Move Pin' : 'Place Pin'}
                       </button>
+                      {room && (
+                        <button
+                          type="button"
+                          onClick={() => removeRoom(scene.id)}
+                          disabled={savingRooms}
+                          className="px-2 py-1 rounded-md text-xs font-medium text-red-600 hover:bg-red-50 cursor-pointer disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Room Description & Number mapping inputs */}
+                    {room && (
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 pl-5 pt-1.5 border-t border-gray-100">
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-[11px] font-medium text-gray-500">No:</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={99}
+                            value={room.number ?? (rooms.indexOf(room) + 1)}
+                            onChange={(e) => updateRoom(scene.id, { number: parseInt(e.target.value) || 1 })}
+                            className="w-14 px-2 py-1 text-xs border border-gray-300 rounded-md bg-white text-gray-900 font-bold"
+                            title="Number mapping for this room"
+                          />
+                        </div>
+                        <div className="flex-1 w-full">
+                          <input
+                            type="text"
+                            value={room.description || ''}
+                            onChange={(e) => updateRoom(scene.id, { description: e.target.value })}
+                            placeholder="Add room description (e.g. Dimensions, king bed, sea view)"
+                            maxLength={200}
+                            className="w-full px-2.5 py-1 text-xs border border-gray-300 rounded-md bg-white text-gray-900 placeholder:text-gray-400"
+                          />
+                        </div>
+                      </div>
                     )}
                   </li>
                 );

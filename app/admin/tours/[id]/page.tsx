@@ -50,7 +50,7 @@ export default function TourDetailsPage() {
     const newStatus = !tour.is_published;
     setPublishing(true);
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
       const separator = baseUrl.endsWith('/') ? '' : '/';
       const response = await fetch(`${baseUrl}${separator}tours/${tourId}/publish`, {
         method: 'PUT',
@@ -94,7 +94,7 @@ export default function TourDetailsPage() {
       if (append) setLoadingMore(true);
       else setScenesLoading(true);
 
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
       const separator = baseUrl.endsWith('/') ? '' : '/';
       const sceneLimit = 10;
 

@@ -132,8 +132,10 @@ export default function DollhouseBuilder({ tour, onClose, onSaved }: DollhouseBu
   );
   const selectedScene = scenes?.find(s => s.id === selectedSceneId) || null;
   const selectedRoom = project?.rooms.find(r => r.sceneId === selectedSceneId) || null;
-  // Photo taken outside the traced shape: a building from the street, so walls can be much taller
-  const selectedIsExterior = !!selectedRoom && selectedRoom.corners.length >= 3 && !pointInPolygon([0, 0], selectedRoom.corners);
+  // Photo taken outside the traced shape (or marked as outdoor): walls can be much taller (up to 120m)
+  const selectedIsExterior = selectedRoom?.isExterior ?? (
+    !!selectedRoom && selectedRoom.corners.length >= 3 && !pointInPolygon([0, 0], selectedRoom.corners)
+  );
   const projectJson = useMemo(() => JSON.stringify({ ...project, rooms: tracedRooms }), [project, tracedRooms]);
   const builtIsCurrent = !!built && built.projectJson === projectJson;
 
@@ -288,7 +290,15 @@ export default function DollhouseBuilder({ tour, onClose, onSaved }: DollhouseBu
                     >
                       <span className={`h-2 w-2 shrink-0 rounded-full ${traced ? 'bg-green-500' : room?.corners.length ? 'bg-amber-400' : 'bg-gray-300'}`} />
                       <span className="flex-1 truncate">{scene.name || 'Untitled'}</span>
-                      <span className="text-xs text-gray-500">{room?.fromPlan ? 'From floor plan' : traced ? `${room!.corners.length} corners` : 'Not traced'}</span>
+                      <span className="text-xs text-gray-500">
+                        {room?.isExterior
+                          ? (traced ? `🏛️ Outdoor (${room.corners.length})` : '🏛️ Outdoor')
+                          : room?.fromPlan
+                            ? 'From plan'
+                            : traced
+                              ? `${room!.corners.length} corners`
+                              : 'Not traced'}
+                      </span>
                     </button>
                   </li>
                 );
@@ -302,12 +312,12 @@ export default function DollhouseBuilder({ tour, onClose, onSaved }: DollhouseBu
                   id="dollhouse-camera-height"
                   type="number"
                   min={0.3}
-                  max={3}
+                  max={30}
                   step={0.05}
                   value={project.cameraHeight}
                   onChange={(e) => {
                     const value = Number(e.target.value);
-                    if (value >= 0.3 && value <= 3) setProject({ ...project, cameraHeight: value });
+                    if (value >= 0.3 && value <= 30) setProject({ ...project, cameraHeight: value });
                   }}
                   className="w-20 rounded-md border border-gray-300 px-2 py-1 text-sm"
                 />
@@ -320,12 +330,38 @@ export default function DollhouseBuilder({ tour, onClose, onSaved }: DollhouseBu
           {selectedScene && (
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-3 py-2 text-sm">
-                <p className="mr-auto text-gray-700">
+                <div className="flex items-center gap-1 rounded-lg bg-gray-100 p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => updateRoom(selectedScene.id, {
+                      isExterior: false,
+                      ceilingHeight: selectedRoom?.ceilingHeight && selectedRoom.ceilingHeight <= 6 ? selectedRoom.ceilingHeight : DOLLHOUSE_DEFAULTS.ceilingHeight,
+                    })}
+                    className={`rounded-md px-2.5 py-1 font-medium transition cursor-pointer ${!selectedIsExterior ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    🏠 Indoor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateRoom(selectedScene.id, {
+                      isExterior: true,
+                      ceilingHeight: selectedRoom?.ceilingHeight && selectedRoom.ceilingHeight > 6 ? selectedRoom.ceilingHeight : 8,
+                    })}
+                    className={`rounded-md px-2.5 py-1 font-medium transition cursor-pointer ${selectedIsExterior ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    🏛️ Outdoor
+                  </button>
+                </div>
+                <p className="mr-auto text-gray-700 text-xs md:text-sm">
                   {pickingCeiling
-                    ? 'Click a spot where a wall meets the ceiling.'
+                    ? (selectedIsExterior
+                        ? 'Click a spot where a wall meets the roof line or top of the facade.'
+                        : 'Click a spot where a wall meets the ceiling.')
                     : selectedRoom?.fromPlan
                       ? 'From the floor plan: turn the photo until the outline sits on the walls. If it is off-centre, move the camera spot in Arrange.'
-                      : 'Click each corner where the walls meet the floor, going around the room. Drag a number to move it; click on a line to add a corner in it.'}
+                      : selectedIsExterior
+                        ? 'Outdoor: click corners along the base of the building where walls meet the ground. Close the shape behind the building.'
+                        : 'Click each corner where the walls meet the floor, going around the room. Drag a number to move it; click on a line to add a corner in it.'}
                 </p>
                 {selectedRoom?.fromPlan ? (
                   <>
@@ -387,18 +423,36 @@ export default function DollhouseBuilder({ tour, onClose, onSaved }: DollhouseBu
                 />
               </div>
               <div className="flex flex-wrap items-center gap-3 border-t border-gray-200 px-3 py-2 text-sm">
-                <label htmlFor="dollhouse-ceiling" className="text-gray-700">{selectedIsExterior ? 'Building height' : 'Ceiling height'}</label>
+                <label htmlFor="dollhouse-ceiling" className="text-gray-700 font-medium">
+                  {selectedIsExterior ? 'Building height' : 'Ceiling height'}
+                </label>
                 <input
                   id="dollhouse-ceiling"
                   type="range"
                   min={1.8}
                   max={selectedIsExterior ? MAX_WALL_HEIGHT : 6}
-                  step={0.05}
-                  value={selectedRoom?.ceilingHeight || DOLLHOUSE_DEFAULTS.ceilingHeight}
+                  step={selectedIsExterior ? 0.2 : 0.05}
+                  value={selectedRoom?.ceilingHeight || (selectedIsExterior ? 8 : DOLLHOUSE_DEFAULTS.ceilingHeight)}
                   onChange={(e) => updateRoom(selectedScene.id, { ceilingHeight: Number(e.target.value) })}
-                  className="w-40"
+                  className="w-32 md:w-44"
                 />
-                <span className="w-14 tabular-nums text-gray-700">{(selectedRoom?.ceilingHeight || DOLLHOUSE_DEFAULTS.ceilingHeight).toFixed(2)} m</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={MAX_WALL_HEIGHT}
+                    step={0.1}
+                    value={Number((selectedRoom?.ceilingHeight || (selectedIsExterior ? 8 : DOLLHOUSE_DEFAULTS.ceilingHeight)).toFixed(2))}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (val >= 0.5 && val <= MAX_WALL_HEIGHT) {
+                        updateRoom(selectedScene.id, { ceilingHeight: val });
+                      }
+                    }}
+                    className="w-16 rounded border border-gray-300 px-1.5 py-0.5 text-xs text-right font-mono"
+                  />
+                  <span className="text-xs text-gray-600">m</span>
+                </div>
                 <button
                   type="button"
                   disabled={(selectedRoom?.corners.length || 0) < 3}
@@ -408,9 +462,11 @@ export default function DollhouseBuilder({ tour, onClose, onSaved }: DollhouseBu
                   }}
                   className={`rounded-md px-2.5 py-1 text-xs font-medium cursor-pointer disabled:opacity-40 ${pickingCeiling ? 'bg-amber-500 text-white' : 'border border-gray-300 text-gray-700 hover:bg-gray-100'}`}
                 >
-                  {pickingCeiling ? 'Cancel' : 'Click the ceiling'}
+                  {pickingCeiling ? 'Cancel' : (selectedIsExterior ? 'Click roof line' : 'Click the ceiling')}
                 </button>
-                <span className="text-xs text-gray-500">The yellow line should sit on the ceiling edge.</span>
+                <span className="text-xs text-gray-500">
+                  {selectedIsExterior ? 'The yellow line marks the roof / top edge of the building.' : 'The yellow line should sit on the ceiling edge.'}
+                </span>
                 {ceilingHint && <span className="text-xs text-amber-700">{ceilingHint}</span>}
                 <div className="flex-1" />
                 <button

@@ -12,7 +12,7 @@ import {
   FloorPlanAnalysis
 } from '@/types/tour';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
 
 // Global logout function reference
 let globalLogoutFunction: (() => void) | null = null;

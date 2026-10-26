@@ -9,6 +9,8 @@ export interface BaseModel {
 export interface IntroModelRoom {
   sceneId: string;
   label?: string;
+  description?: string; // Manually added room description / details
+  number?: number;      // Number mapping (e.g. 1, 2, 3...)
   position: [number, number, number]; // in the intro viewer's normalized model space
 }
 

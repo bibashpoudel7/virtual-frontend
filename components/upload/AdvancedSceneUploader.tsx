@@ -332,6 +332,12 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
         5 // Upload 5 files concurrently
       );
 
+      // uploadMultiple records failed uploads as '' instead of throwing; don't report success if any failed
+      const failedKeys = filesToUpload.map(f => f.key).filter(key => !uploadedUrls.get(key));
+      if (failedKeys.length > 0) {
+        throw new Error(`${failedKeys.length} of ${filesToUpload.length} files failed to upload. Check the Next.js server log for the upload-to-r2 error.`);
+      }
+
       // Store URLs with correct keys
       const urls = new Map<string, string>();
       urls.set('main', uploadedUrls.get(mainKey) || '');
@@ -349,7 +355,7 @@ export default function AdvancedSceneUploader({ sceneId: initialSceneId, tourId,
       setCurrentStage('save');
       saveState();
     } catch (error) {
-      updateStage('upload', 'error');
+      updateStage('upload', 'error', { error: error instanceof Error ? error.message : String(error) });
       saveState();
       console.error('Upload error:', error);
     }
