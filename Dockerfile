@@ -37,6 +37,8 @@ RUN adduser --system --uid 1001 nextjs
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# Copy .env generated during GitHub Actions build into the runner container
+COPY --from=builder /app/.env* ./
 
 # Set correct permissions
 RUN chown -R nextjs:nodejs /app
