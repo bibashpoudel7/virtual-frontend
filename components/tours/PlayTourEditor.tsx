@@ -9,7 +9,7 @@ import { tourService } from '@/services/tourService';
 import { getSceneThumbnail } from '@/lib/scene-thumbnail';
 import { buildCameraPath, parseWaypoints, CameraPoint, createCameraPathPlayer, hasPointTiming, DEFAULT_POINT_MOVE_MS } from '@/lib/camera-path';
 
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://tour.thenimto.com';
 
 // Seconds field you can clear and retype freely: shows your typing as-is, saves each valid
 // value (in ms) as you type, and snaps back to the saved value when you leave the field

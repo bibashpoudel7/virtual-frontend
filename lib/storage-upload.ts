@@ -3,7 +3,7 @@
  * Uses presigned URLs for secure direct uploads
  */
 
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://tour.thenimto.com';
 
 interface UploadProgress {
   loaded: number;

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import OverlayRenderer from '../overlays/OverlayRenderer';
 
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://tour.thenimto.com';
 import { calculateVisibleTiles, getAppropriateLevel } from '@/lib/multires-utils';
 import {
   MAX_CONCURRENT_TILE_LOADS,

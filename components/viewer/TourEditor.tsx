@@ -9,7 +9,7 @@ import { createCameraPathPlayer, CameraPoint } from '@/lib/camera-path';
 import PlayTourEditor from '../tours/PlayTourEditor';
 import PlayTourOverlay from '../tours/PlayTourOverlay';
 
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://tour.thenimto.com';
 import { HotspotsAPI } from '@/lib/api/hotspots';
 import { tourService } from '@/services/tourService';
 import { getSceneThumbnail } from '@/lib/scene-thumbnail';

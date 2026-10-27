@@ -7,7 +7,7 @@ import { CubeFace, CubeMapManifest } from '@/lib/cubemap-types';
 import OverlayRenderer from '../overlays/OverlayRenderer';
 import { CameraPoint, sampleCameraPath } from '@/lib/camera-path';
 
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://tour.thenimto.com';
 
 // Tiles are always loaded in CORS mode. The query string gives them their own browser-cache
 // entry, so a copy cached earlier without CORS headers can never block (black out) a scene.

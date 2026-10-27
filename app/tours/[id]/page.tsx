@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { createCameraPathPlayer } from '@/lib/camera-path';
 
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://tour.thenimto.com';
 import CubeMapViewer from '@/components/viewer/CubeMapViewer';
 import PlayTourOverlay from '@/components/tours/PlayTourOverlay';
 import IntroModelScreen from '@/components/viewer/IntroModelScreen';

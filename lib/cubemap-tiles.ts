@@ -7,7 +7,7 @@
 import sharp from 'sharp';
 import { CubeFace, CubeTile, CubeMapManifest } from './cubemap-types';
 
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://tour.thenimto.com';
 
 /**
  * Convert cube face coordinates to equirectangular coordinates
