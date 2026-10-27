@@ -10,18 +10,50 @@ export function yawPitchToVector(yaw: number, pitch: number, radius: number = SP
   // Convert yaw and pitch to spherical coordinates
   // Yaw: horizontal rotation (0 = front, positive = right)
   // Pitch: vertical rotation (0 = horizon, positive = up)
+  // Add 180 degrees to yaw to align with the sphere texture orientation
   const phi = THREE.MathUtils.degToRad(90 - pitch);
   const theta = THREE.MathUtils.degToRad(yaw + 180);
   const x = radius * Math.sin(phi) * Math.cos(theta);
   const y = radius * Math.cos(phi);
   const z = radius * Math.sin(phi) * Math.sin(theta);
+  
   return new THREE.Vector3(x, y, z);
 }
 
 export function vectorToYawPitch(vector: THREE.Vector3): { yaw: number; pitch: number } {
   const normalized = vector.clone().normalize();
-  const yaw = THREE.MathUtils.radToDeg(Math.atan2(normalized.z, normalized.x)) - 180;
-  const pitch = THREE.MathUtils.radToDeg(Math.asin(normalized.y));
+  
+  // Reverse the exact math from yawPitchToVector
+  // From yawPitchToVector:
+  // phi = THREE.MathUtils.degToRad(90 - pitch)
+  // theta = THREE.MathUtils.degToRad(yaw)
+  // x = radius * Math.sin(phi) * Math.cos(theta)
+  // y = radius * Math.cos(phi)  
+  // z = radius * Math.sin(phi) * Math.sin(theta)
+  
+  // Calculate phi from y coordinate
+  // y = radius * Math.cos(phi) => phi = Math.acos(y / radius)
+  const phi = Math.acos(Math.max(-1, Math.min(1, normalized.y)));
+  
+  // Calculate pitch from phi
+  // phi = THREE.MathUtils.degToRad(90 - pitch) => pitch = 90 - THREE.MathUtils.radToDeg(phi)
+  const pitch = 90 - THREE.MathUtils.radToDeg(phi);
+  
+  // Calculate theta from x and z coordinates
+  // x = radius * Math.sin(phi) * Math.cos(theta)
+  // z = radius * Math.sin(phi) * Math.sin(theta)
+  // theta = Math.atan2(z / (radius * Math.sin(phi)), x / (radius * Math.sin(phi)))
+  // theta = Math.atan2(z, x)
+  const theta = Math.atan2(normalized.z, normalized.x);
+  
+  // Calculate yaw from theta
+  // theta = THREE.MathUtils.degToRad(yaw + 180) => yaw = THREE.MathUtils.radToDeg(theta) - 180
+  let yaw = THREE.MathUtils.radToDeg(theta) - 180;
+  
+  // Normalize yaw to [-180, 180] range
+  while (yaw > 180) yaw -= 360;
+  while (yaw < -180) yaw += 360;
+  
   return { yaw, pitch };
 }
 
@@ -43,13 +75,15 @@ export function createTileGeometry(
   const phiOverlap = tilePhi * overlapRatio;
   const thetaOverlap = tileTheta * overlapRatio;
 
-  // Correct phi calculation - tiles go from left to right in texture
-  // But sphere phi goes counterclockwise from +X axis
-  // We need to map texture columns correctly
+  // Phi calculation for equirectangular projection
+  // In equirectangular: left edge = 0, right edge = 2*PI
+  // Three.js sphere: phi goes from 0 to 2*PI around the equator
+  // The tiles are created left-to-right, so col 0 = leftmost
   let phiStart = col * tilePhi - phiOverlap;
   let phiLength = tilePhi + phiOverlap * 2;
   const fullPhi = Math.PI * 2;
 
+  // Clamp to valid range
   if (phiStart < 0) {
     phiLength += phiStart;
     phiStart = 0;
@@ -70,8 +104,10 @@ export function createTileGeometry(
     thetaLength = maxTheta - thetaStart;
   }
 
-  const widthSegments = Math.max(32, (levelInfo.cols || 1) * 4);
-  const heightSegments = Math.max(16, (levelInfo.rows || 1) * 4);
+  // More segments for smoother rendering, especially at lower levels
+  const segmentMultiplier = levelInfo.level <= 1 ? 8 : 4;
+  const widthSegments = Math.max(64, segmentMultiplier * 8);
+  const heightSegments = Math.max(32, segmentMultiplier * 4);
 
   const geometry = new THREE.SphereGeometry(
     SPHERE_RADIUS,
@@ -82,18 +118,9 @@ export function createTileGeometry(
     thetaStart,
     thetaLength,
   );
-  geometry.scale(-1, 1, 1);
   
-  console.log('[createTileGeometry] Created tile geometry:', {
-    col,
-    row,
-    phiStart,
-    phiLength,
-    thetaStart,
-    thetaLength,
-    radius: SPHERE_RADIUS,
-    segments: { width: widthSegments, height: heightSegments }
-  });
+  // Scale to create inside-out sphere
+  geometry.scale(-1, 1, 1);
   
   return geometry;
 }

@@ -83,7 +83,7 @@ export default function Home() {
         <button 
           onClick={createTour}
           disabled={!name.trim()}
-          className={`px-4 py-2 text-white rounded transition-colors ${
+          className={`px-4 py-2 text-white rounded transition-colors cursor-pointer ${
             !name.trim() 
               ? 'bg-gray-400 cursor-not-allowed' 
               : 'bg-blue-500 hover:bg-blue-600'

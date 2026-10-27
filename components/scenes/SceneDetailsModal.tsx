@@ -14,12 +14,12 @@ interface SceneDetailsModalProps {
   onSceneCreated: (scene: Scene) => void;
 }
 
-export default function SceneDetailsModal({ 
-  tourId, 
-  imageFile, 
-  previewUrl, 
-  onClose, 
-  onSceneCreated 
+export default function SceneDetailsModal({
+  tourId,
+  imageFile,
+  previewUrl,
+  onClose,
+  onSceneCreated
 }: SceneDetailsModalProps) {
   const [sceneName, setSceneName] = useState('');
   const [sceneType, setSceneType] = useState<'image' | 'video' | '360'>('360');
@@ -36,7 +36,7 @@ export default function SceneDetailsModal({
   useEffect(() => {
     const fetchExistingScenes = async () => {
       try {
-        const scenes = await tourService.getScenes(tourId);
+        const scenes = await tourService.getAllScenes(tourId);
         const maxOrder = scenes.reduce((max, scene) => Math.max(max, scene.order), 0);
         setOrder(maxOrder + 1);
       } catch (err) {
@@ -66,7 +66,7 @@ export default function SceneDetailsModal({
         priority,
         tour_id: tourId,
       };
-      
+
       const newScene = await tourService.createScene(tourId, sceneData);
       setCreatedSceneId(newScene.id);
 
@@ -274,7 +274,7 @@ export default function SceneDetailsModal({
           {showAdvancedUploader && createdSceneId && (
             <div className="mt-6">
               <h3 className="font-medium mb-4">Upload and Process Image</h3>
-              <AdvancedSceneUploader 
+              <AdvancedSceneUploader
                 sceneId={createdSceneId}
                 onComplete={(data) => {
                   // Scene already exists, just update it with the URLs

@@ -1,221 +1,1273 @@
 'use client';
 
-import { useState } from 'react';
-import { Scene } from '@/types/tour';
+import { useState, useEffect, useCallback } from 'react';
+import { Scene, Tour } from '@/types/tour';
+import { HotspotsAPI } from '@/lib/api/hotspots';
 import AdvancedSceneUploader from '../upload/AdvancedSceneUploader';
-import SceneCreationFlow from './SceneCreationFlow';
+import SimplePanoramaPreview from './SimplePanoramaPreview';
+import DeleteModal from '@/components/modals/DeleteModal';
+import { toast } from 'react-toastify';
+import { tourService } from '@/services/tourService';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface SceneManagerProps {
   tourId: string;
   scenes: Scene[];
   onSceneUpdate?: (scenes: Scene[]) => void;
   handleSceneAdded?: (scene: Scene) => void;
+  isActive?: boolean;
+  currentPage: number;
+  totalPages: number;
+  totalScenes: number;
+  onPageChange: (page: number) => void;
+  onRefresh?: () => void;
+  loadingMore?: boolean;
+  tour?: Tour | null;
+  onTourUpdate?: (tour: Tour) => void;
 }
 
-export default function SceneManager({ tourId, scenes, onSceneUpdate, handleSceneAdded }: SceneManagerProps) {
+export default function SceneManager({
+  tourId,
+  scenes,
+  onSceneUpdate,
+  handleSceneAdded,
+  isActive = true,
+  currentPage,
+  totalPages,
+  totalScenes,
+  onPageChange,
+  onRefresh,
+  loadingMore,
+  tour,
+  onTourUpdate
+}: SceneManagerProps) {
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null);
   const [showUploader, setShowUploader] = useState(false);
-  const [showCreationFlow, setShowCreationFlow] = useState(false);
+  const [showInlineCreation, setShowInlineCreation] = useState(false);
+  const [tempPreviewUrl, setTempPreviewUrl] = useState<string | null>(null);
+  const [newSceneName, setNewSceneName] = useState('');
+  const [newSceneType, setNewSceneType] = useState<'360' | 'image' | 'video'>('360');
+  const [error, setError] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState('');
+  const [draggedScene, setDraggedScene] = useState<Scene | null>(null);
+  const [dragOverScene, setDragOverScene] = useState<Scene | null>(null);
+  const [editedValues, setEditedValues] = useState<{ yaw: number, pitch: number, fov: number, order: number, type: string }>({
+    yaw: 0,
+    pitch: 0,
+    fov: 75,
+    order: 1,
+    type: '360'
+  });
+  const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [tourOwnership, setTourOwnership] = useState<{
+    isOwner: boolean;
+    isSuperadmin: boolean;
+    loading: boolean;
+  }>({
+    isOwner: false,
+    isSuperadmin: false,
+    loading: true
+  });
+  const [deleteModal, setDeleteModal] = useState<{
+    open: boolean;
+    sceneId: string | null;
+    sceneName: string;
+    isLoading: boolean;
+  }>({
+    open: false,
+    sceneId: null,
+    sceneName: '',
+    isLoading: false
+  });
 
-  const handleSceneClick = (scene: Scene) => {
+
+  // Get current user ID and check tour ownership for delete permissions
+  useEffect(() => {
+    const checkTourOwnership = async () => {
+      const userData = localStorage.getItem('user_data');
+      if (!userData) {
+        setTourOwnership({ isOwner: false, isSuperadmin: false, loading: false });
+        return;
+      }
+
+      try {
+        const user = JSON.parse(userData);
+        const userId = user.id || null;
+        const role = user.role === 'admin' ? 'admin' : 'user';
+
+        setCurrentUserId(userId);
+        setUserRole(role);
+
+        // Admins can edit every tour
+        const isSuperadmin = role === 'admin';
+
+        if (isSuperadmin) {
+          setTourOwnership({ isOwner: true, isSuperadmin: true, loading: false });
+          return;
+        }
+
+        if (!userId) {
+          setTourOwnership({ isOwner: false, isSuperadmin: false, loading: false });
+          return;
+        }
+
+        // Check tour ownership by fetching tour details
+        const tour = await tourService.getTour(tourId);
+        const isOwner = tour.user_id === userId;
+        setTourOwnership({ isOwner, isSuperadmin: false, loading: false });
+      } catch (error) {
+        console.error('Error checking tour ownership:', error);
+        setTourOwnership({ isOwner: false, isSuperadmin: false, loading: false });
+      }
+    };
+
+    checkTourOwnership();
+  }, [tourId]);
+
+
+  const handleSceneClick = async (scene: Scene) => {
     setSelectedScene(scene);
     setShowUploader(false);
+    setShowInlineCreation(false);
+    setTempPreviewUrl(null);
+    setEditedValues({
+      yaw: scene.yaw || 0,
+      pitch: scene.pitch || 0,
+      fov: scene.fov || 75,
+      order: scene.order || 1,
+      type: scene.type || '360'
+    });
   };
 
-  const handleUploadComplete = (manifestUrl: string) => {
+
+  const createNewScene = async () => {
+    if (!newSceneName.trim()) {
+      setError('Scene name is required');
+      return;
+    }
+
+    try {
+      setIsCreating(true);
+      setError(null);
+
+      const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
+      const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
+
+      if (!token) {
+        throw new Error('Authentication required. Please log in.');
+      }
+
+      // Fetch ALL scenes to get the correct max order number
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+      const separator = baseUrl.endsWith('/') ? '' : '/';
+      const allScenesResponse = await fetch(`${baseUrl}${separator}tours/${tourId}/scenes?page=1&limit=1000`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const allScenesData = await allScenesResponse.json();
+      const allScenes = allScenesData.datas || [];
+
+      // Calculate the next order number by finding the max order across ALL scenes
+      const maxOrder = allScenes.length > 0
+        ? Math.max(...allScenes.map((s: Scene) => s.order || 0))
+        : 0;
+      const nextOrder = maxOrder + 1;
+
+      const response = await fetch(`${backendUrl}tours/${tourId}/scenes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: newSceneName,
+          type: newSceneType,
+          yaw: 0,
+          pitch: 0,
+          fov: 75,
+          order: nextOrder,
+          priority: 1
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error || `Failed to create scene (${response.status}: ${response.statusText})`;
+        throw new Error(errorMessage);
+      }
+
+      const newScene = await response.json();
+
+      // Refresh the scene list from server to get correct ordering
+      if (onRefresh) {
+        onRefresh();
+      } else {
+        // Fallback: Add to scenes list and sort by order
+        const updatedScenes = [...(scenes || []), newScene].sort((a, b) => a.order - b.order);
+        onSceneUpdate?.(updatedScenes);
+      }
+
+      handleSceneAdded?.(newScene);
+
+      // Select the new scene and show uploader
+      setSelectedScene(newScene);
+      setShowInlineCreation(false);
+      setShowUploader(true);
+
+      // Reset form
+      setNewSceneName('');
+      setNewSceneType('360');
+
+    } catch (error) {
+      console.error('Scene creation error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to create scene');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  // Function to open delete modal
+  const openDeleteModal = (sceneId: string, sceneName: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent scene selection
+    event.preventDefault();
+
+    setDeleteModal({
+      open: true,
+      sceneId,
+      sceneName,
+      isLoading: false
+    });
+  };
+
+  // Function to confirm delete scene
+  const confirmDeleteScene = async () => {
+    if (!deleteModal.sceneId) return;
+
+    setDeleteModal(prev => ({ ...prev, isLoading: true }));
+
+    try {
+      const token = localStorage.getItem('accessToken');
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+      const separator = baseUrl.endsWith('/') ? '' : '/';
+
+      // First, fetch ALL scenes for this tour (not just the current page)
+      const allScenesResponse = await fetch(`${baseUrl}${separator}tours/${tourId}/scenes?page=1&limit=1000`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const allScenesData = await allScenesResponse.json();
+      const allScenes = allScenesData.datas || [];
+
+      // Delete the scene
+      await tourService.deleteScene(deleteModal.sceneId);
+
+      // Remove the deleted scene and reorder ALL remaining scenes
+      const filteredScenes = allScenes.filter((scene: Scene) => scene.id !== deleteModal.sceneId);
+
+      // Reorder scenes to fill gaps (1, 2, 3, 4, ... without gaps)
+      const reorderedScenes = filteredScenes
+        .sort((a: Scene, b: Scene) => a.order - b.order)
+        .map((scene: Scene, index: number) => ({
+          ...scene,
+          order: index + 1
+        }));
+
+      // Find scenes whose order changed
+      const scenesWithChangedOrder = reorderedScenes.filter((updatedScene: Scene) => {
+        const originalScene = filteredScenes.find((s: Scene) => s.id === updatedScene.id);
+        return originalScene && originalScene.order !== updatedScene.order;
+      });
+
+      // Update only scenes with changed order in the backend
+      if (scenesWithChangedOrder.length > 0) {
+        const updatePromises = scenesWithChangedOrder.map((scene: Scene) =>
+          fetch(`${baseUrl}${separator}scenes/${scene.id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(scene)
+          }).then(async (response) => {
+            if (!response.ok) {
+              const error = await response.text();
+              console.error(`Failed to update scene ${scene.name}:`, error);
+            }
+            return response.ok;
+          })
+        );
+
+        await Promise.all(updatePromises);
+      }
+
+      // Update the local scenes list with only the scenes from the current page
+      const updatedLocalScenes = reorderedScenes.filter((scene: Scene) =>
+        scenes?.some(s => s.id === scene.id)
+      );
+      onSceneUpdate?.(updatedLocalScenes);
+
+      // Refresh to get the correct data from server
+      if (onRefresh) {
+        onRefresh();
+      }
+
+      // If the deleted scene was selected, clear selection
+      if (selectedScene?.id === deleteModal.sceneId) {
+        setSelectedScene(null);
+        setShowUploader(false);
+        setShowInlineCreation(false);
+      }
+
+      // Show success toast
+      toast.success(`Scene "${deleteModal.sceneName}" deleted successfully!`);
+
+      // Close modal
+      setDeleteModal({
+        open: false,
+        sceneId: null,
+        sceneName: '',
+        isLoading: false
+      });
+
+    } catch (error) {
+      console.error('Error deleting scene:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to delete scene');
+      setDeleteModal(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+
+  // Close delete modal
+  const closeDeleteModal = () => {
+    if (deleteModal.isLoading) return; // Prevent closing while deleting
+
+    setDeleteModal({
+      open: false,
+      sceneId: null,
+      sceneName: '',
+      isLoading: false
+    });
+  };
+
+  // Drag and drop handlers for reordering
+  const handleDragStart = (e: React.DragEvent, scene: Scene) => {
+    setDraggedScene(scene);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, scene: Scene) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverScene(scene);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverScene(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetScene: Scene) => {
+    e.preventDefault();
+    setDragOverScene(null);
+
+    if (!draggedScene || draggedScene.id === targetScene.id) {
+      setDraggedScene(null);
+      return;
+    }
+
+    try {
+      // Create a copy of scenes array
+      const reorderedScenes = [...scenes];
+      const draggedIndex = reorderedScenes.findIndex(s => s.id === draggedScene.id);
+      const targetIndex = reorderedScenes.findIndex(s => s.id === targetScene.id);
+
+      // Remove dragged scene and insert at target position
+      const [removed] = reorderedScenes.splice(draggedIndex, 1);
+      reorderedScenes.splice(targetIndex, 0, removed);
+
+      // Update order numbers based on new positions
+      const scenesToUpdate = reorderedScenes.map((scene, index) => ({
+        ...scene,
+        order: index + 1
+      }));
+
+      // Update UI immediately for better UX
+      onSceneUpdate?.(scenesToUpdate);
+
+      // Update all affected scenes in the backend
+      const token = localStorage.getItem('accessToken');
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+      const separator = baseUrl.endsWith('/') ? '' : '/';
+
+      // Find scenes whose order actually changed by comparing with original
+      const scenesWithChangedOrder = scenesToUpdate.filter(updatedScene => {
+        const originalScene = scenes.find(s => s.id === updatedScene.id);
+        return originalScene && originalScene.order !== updatedScene.order;
+      });
+
+      console.log('Updating scenes:', scenesWithChangedOrder.map(s => ({ id: s.id, name: s.name, oldOrder: scenes.find(os => os.id === s.id)?.order, newOrder: s.order })));
+
+      // Update only scenes with changed order
+      const updatePromises = scenesWithChangedOrder.map(scene =>
+        fetch(`${baseUrl}${separator}scenes/${scene.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(scene)
+        }).then(async (response) => {
+          if (!response.ok) {
+            const error = await response.text();
+            console.error(`Failed to update scene ${scene.name}:`, error);
+            throw new Error(`Failed to update scene ${scene.name}`);
+          }
+          return response.json();
+        })
+      );
+
+      await Promise.all(updatePromises);
+      toast.success('Scene order updated successfully!');
+    } catch (error) {
+      console.error('Failed to reorder scenes:', error);
+      toast.error('Failed to update scene order');
+      // Revert on error
+      onRefresh?.();
+    } finally {
+      setDraggedScene(null);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedScene(null);
+    setDragOverScene(null);
+  };
+
+  // Update edited values when selected scene changes
+  useEffect(() => {
     if (selectedScene) {
+      setEditedValues({
+        yaw: selectedScene.yaw || 0,
+        pitch: selectedScene.pitch || 0,
+        fov: selectedScene.fov || 75,
+        order: selectedScene.order || 1,
+        type: selectedScene.type || '360'
+      });
+    }
+  }, [selectedScene]);
+
+  // Update selected scene when scenes array changes (to reflect updates)
+  useEffect(() => {
+    if (selectedScene && scenes) {
+      const updatedSelectedScene = scenes.find(s => s.id === selectedScene.id);
+      if (updatedSelectedScene &&
+        (updatedSelectedScene.yaw !== selectedScene.yaw ||
+          updatedSelectedScene.pitch !== selectedScene.pitch ||
+          updatedSelectedScene.fov !== selectedScene.fov)) {
+        setSelectedScene(updatedSelectedScene);
+      }
+    }
+  }, [scenes, selectedScene]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeout) {
+        clearTimeout(saveTimeout);
+      }
+    };
+  }, [saveTimeout]);
+
+  const handleValueChange = (field: 'yaw' | 'pitch' | 'fov' | 'order', value: number) => {
+    setEditedValues(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleTypeChange = (type: string) => {
+    setEditedValues(prev => ({
+      ...prev,
+      type
+    }));
+  };
+
+  const saveSceneChanges = async () => {
+    if (!selectedScene) return;
+
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
+      const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
+
+      const sceneTourId = selectedScene.tour_id || tourId;
+      if (!sceneTourId) {
+        throw new Error('Missing tour_id for scene update');
+      }
+
+      const updateData = {
+        ...selectedScene,
+        tour_id: sceneTourId,
+        yaw: editedValues.yaw,
+        pitch: editedValues.pitch,
+        fov: editedValues.fov,
+        order: editedValues.order,
+        type: editedValues.type,
+        name: selectedScene.name,
+        priority: selectedScene.priority || 1,
+        hotspots: selectedScene.hotspots || [],
+        overlays: selectedScene.overlays || []
+      };
+
+      const response = await fetch(`${backendUrl}scenes/${selectedScene.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(updateData)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API Error:', errorText);
+        throw new Error(`Failed to update scene in database: ${response.status}`);
+      }
+
+      const apiResponse = await response.json();
+
       const updatedScene = {
         ...selectedScene,
-        cubemap_manifest_url: manifestUrl
+        ...apiResponse,
+        tour_id: sceneTourId,
+        yaw: editedValues.yaw,
+        pitch: editedValues.pitch,
+        fov: editedValues.fov,
+        order: editedValues.order,
+        type: editedValues.type as 'image' | 'video' | '360'
       };
-      const updatedScenes  = scenes?.map(s => 
+
+      // Update local state
+      const updatedScenes = scenes?.map(s =>
         s.id === selectedScene.id ? updatedScene : s
       );
       onSceneUpdate?.(updatedScenes);
       setSelectedScene(updatedScene);
+    } catch (error) {
+      console.error('Failed to update scene:', error);
     }
-    setShowUploader(false);
   };
 
-  const handleSceneCreated = (newScene: Scene) => {
-    const updatedScenes = [...(scenes || []), newScene];
-    onSceneUpdate?.(updatedScenes);
-    handleSceneAdded?.(newScene);
-    setShowCreationFlow(false);
-    setSelectedScene(newScene);
+  const handleSetAsCover = async () => {
+    if (!selectedScene || !selectedScene.src_original_url) {
+      toast.error('Scene must have an image to be set as cover');
+      return;
+    }
+
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
+      const token = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
+
+      const response = await fetch(`${backendUrl}tours/${tourId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          ...tour,
+          cover_image_url: selectedScene.src_original_url
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to set cover image');
+      }
+
+      const updatedTour = await response.json();
+      if (onTourUpdate) {
+        onTourUpdate(updatedTour);
+      }
+      toast.success('Tour cover image updated successfully!');
+    } catch (error) {
+      console.error('Failed to set cover image:', error);
+      toast.error('Failed to update tour cover image');
+    }
+  };
+
+  const debouncedSave = useCallback(() => {
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+    }
+    const timeout = setTimeout(() => {
+      saveSceneChanges();
+    }, 500);
+    setSaveTimeout(timeout);
+  }, [saveTimeout, selectedScene, editedValues]);
+
+  const immediateSave = () => {
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+      setSaveTimeout(null);
+    }
+    saveSceneChanges();
   };
 
   return (
-    <div className="flex h-full">
-      <div className="w-1/3 border-r p-4 overflow-y-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">Scenes</h3>
-          <button
-            className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
-            onClick={() => setShowCreationFlow(true)}
-          >
-            Add Scene
-          </button>
-        </div>
-        
-        <div className="space-y-2">
-          {scenes?.map((scene) => (
-            <div
-              key={scene.id}
-              onClick={() => handleSceneClick(scene)}
-              className={`p-3 rounded cursor-pointer transition-colors ${
-                selectedScene?.id === scene.id
+    <>
+      <style jsx>{`
+        .slider::-webkit-slider-thumb {
+          appearance: none;
+          height: 20px;
+          width: 20px;
+          border-radius: 50%;
+          background: #3b82f6;
+          cursor: pointer;
+          border: 2px solid #ffffff;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .slider::-moz-range-thumb {
+          height: 20px;
+          width: 20px;
+          border-radius: 50%;
+          background: #3b82f6;
+          cursor: pointer;
+          border: 2px solid #ffffff;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .slider::-webkit-slider-track {
+          height: 8px;
+          background: #e5e7eb;
+          border-radius: 4px;
+        }
+        .slider::-moz-range-track {
+          height: 8px;
+          background: #e5e7eb;
+          border-radius: 4px;
+        }
+      `}</style>
+      <div className="flex flex-col md:flex-row md:overflow-hidden md:h-[calc(100vh-320px)] md:min-h-[600px]">
+        <div
+          className="w-full md:w-1/3 max-h-72 md:max-h-none border-b md:border-b-0 md:border-r p-4 overflow-y-auto bg-gray-50/30"
+          onScroll={(e) => {
+            const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+            if (scrollHeight - scrollTop <= clientHeight + 50) {
+              if (currentPage < totalPages && !loadingMore) {
+                onPageChange(currentPage + 1);
+              }
+            }
+          }}
+        >
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-lg font-semibold text-gray-900">Photos</h3>
+            <button
+              className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer whitespace-nowrap"
+              onClick={() => {
+                setShowInlineCreation(true);
+                setSelectedScene(null);
+                setShowUploader(false);
+                setTempPreviewUrl(null);
+              }}
+            >
+              + Add photo
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mb-4 flex items-center gap-1">
+            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z"></path>
+            </svg>
+            Drag photos to change their order
+          </p>
+
+          <div className="space-y-2">
+            {scenes?.map((scene) => (
+              <div
+                key={scene.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, scene)}
+                onDragOver={(e) => handleDragOver(e, scene)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, scene)}
+                onDragEnd={handleDragEnd}
+                className={`p-3 rounded cursor-move transition-all relative group ${selectedScene?.id === scene.id
                   ? 'bg-blue-100 border-blue-500 border'
                   : 'bg-gray-50 hover:bg-gray-100'
-              }`}
-            >
-              <div className="font-medium">{scene.name}</div>
-              <div className="text-sm text-gray-600">
-                Type: {scene.type} | Order: {scene.order}
-              </div>
-              {scene.src_original_url && (
-                <div className="text-xs text-green-600 mt-1">✓ Has image</div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+                  } ${draggedScene?.id === scene.id ? 'opacity-50' : ''} ${dragOverScene?.id === scene.id ? 'border-2 border-blue-400 border-dashed' : ''
+                  }`}
+              >
+                {/* Drag handle icon */}
+                <div className="absolute left-1 top-1/2 transform -translate-y-1/2 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z"></path>
+                  </svg>
+                </div>
 
-      <div className="flex-1 p-4">
-        {selectedScene ? (
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-xl font-semibold mb-4">{selectedScene.name}</h3>
-              
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Scene Type</label>
-                  <input
-                    type="text"
-                    value={selectedScene.type}
-                    readOnly
-                    className="w-full px-3 py-2 border rounded-md bg-gray-50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Order</label>
-                  <input
-                    type="number"
-                    value={selectedScene.order}
-                    readOnly
-                    className="w-full px-3 py-2 border rounded-md bg-gray-50"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Yaw</label>
-                  <input
-                    type="number"
-                    value={selectedScene.yaw}
-                    step="0.1"
-                    className="w-full px-3 py-2 border rounded-md"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Pitch</label>
-                  <input
-                    type="number"
-                    value={selectedScene.pitch}
-                    step="0.1"
-                    className="w-full px-3 py-2 border rounded-md"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">FOV</label>
-                  <input
-                    type="number"
-                    value={selectedScene.fov}
-                    step="1"
-                    min="30"
-                    max="120"
-                    className="w-full px-3 py-2 border rounded-md"
-                  />
-                </div>
-              </div>
-
-              {!showUploader ? (
-                <div className="space-y-4">
-                  {selectedScene.src_original_url ? (
-                    <div className="p-4 bg-green-50 rounded">
-                      <p className="text-green-700 font-medium">Scene has 360° image</p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        URL: {selectedScene.src_original_url.substring(0, 50)}...
-                      </p>
-                      <button
-                        onClick={() => setShowUploader(true)}
-                        className="mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                      >
-                        Replace Image
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowUploader(true)}
-                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                    >
-                      Upload Scene Image
-                    </button>
+                <div onClick={() => handleSceneClick(scene)} className="flex-1 pl-4">
+                  <div className="font-medium text-gray-900">{scene.name}</div>
+                  <div className="text-sm text-gray-700">
+                    Type: {scene.type} | Order: {scene.order}
+                  </div>
+                  {scene.src_original_url && (
+                    <div className="text-xs text-green-600 mt-1">✓ Has image</div>
                   )}
                 </div>
-              ) : (
-                <AdvancedSceneUploader
-                  sceneId={selectedScene.id}
-                  onComplete={(data) => {
-                    // Update scene with the uploaded URLs
-                    const updatedScene = {
-                      ...selectedScene,
-                      src_original_url: data.mainImageUrl,
-                      tiles_manifest: data.tilesManifest ? JSON.stringify(data.tilesManifest) : undefined
-                    };
-                    const updatedScenes = scenes?.map(s => 
-                      s.id === selectedScene.id ? updatedScene : s
-                    );
-                    onSceneUpdate?.(updatedScenes);
-                    setSelectedScene(updatedScene);
-                    setShowUploader(false);
-                  }}
-                />
-              )}
 
-              <div className="mt-6 pt-6 border-t">
-                <h4 className="font-medium mb-2">Statistics</h4>
-                <div className="text-sm text-gray-600 space-y-1">
-                  <p>Hotspots: {selectedScene.hotspots?.length || 0}</p>
-                  <p>Overlays: {selectedScene.overlays?.length || 0}</p>
-                  <p>Priority: {selectedScene.priority}</p>
+                {/* Delete button - show always for selected scene, on hover for others */}
+                {(tourOwnership.isOwner || tourOwnership.isSuperadmin) && !tourOwnership.loading && (
+                  <button
+                    onClick={(e) => openDeleteModal(scene.id, scene.name, e)}
+                    className={`absolute top-2 right-2 p-1 rounded bg-red-50 text-red-600 hover:bg-red-100 transition-opacity cursor-pointer ${selectedScene?.id === scene.id
+                      ? 'opacity-100' // Always visible for selected scene
+                      : 'opacity-0 group-hover:opacity-100' // Show on hover for non-selected scenes
+                      }`}
+                    title="Delete scene"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {loadingMore && (
+            <div className="py-4 flex justify-center">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex-1 p-4 md:p-6 overflow-y-auto">
+          {showInlineCreation ? (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-semibold mb-4 text-gray-900">Create New Scene</h3>
+
+                <div className="space-y-6">
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-gray-900">
+                      Scene Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newSceneName}
+                      onChange={(e) => {
+                        setNewSceneName(e.target.value);
+                        if (error) setError(null); // Clear error when user types
+                      }}
+                      placeholder="e.g., Living Room, Entrance Hall"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-gray-900">Scene Type</label>
+                    <select
+                      value={newSceneType}
+                      onChange={(e) => setNewSceneType(e.target.value as '360' | 'image' | 'video')}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                    >
+                      <option value="360">360° Panorama</option>
+                      <option value="image">Static Image</option>
+                      <option value="video">Video</option>
+                    </select>
+                  </div>
+
+                  {/* Error Display */}
+                  {error && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-red-700 text-sm">{error}</p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={createNewScene}
+                      disabled={!newSceneName.trim() || isCreating}
+                      className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
+                    >
+                      {isCreating && (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      )}
+                      {isCreating ? 'Creating...' : 'Create Scene & Upload Image'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowInlineCreation(false);
+                        setNewSceneName('');
+                        setNewSceneType('360');
+                        setError(null);
+                      }}
+                      disabled={isCreating}
+                      className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <h4 className="font-medium text-blue-900 mb-2">What happens next?</h4>
+                    <ul className="text-sm text-blue-800 space-y-1">
+                      <li>• Scene will be created with the name and type you specified</li>
+                      <li>• You'll be taken to the image upload interface</li>
+                      <li>• Upload your 360° panoramic image</li>
+                      <li>• Adjust viewing angles and settings in real-time</li>
+                    </ul>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <div className="text-gray-500 mb-4">No scene selected</div>
-              <button
-                onClick={() => setShowCreationFlow(true)}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Create Your First Scene
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+          ) : selectedScene ? (
+            <div className="space-y-6">
+              <div>
+                {/* Editable Scene Name */}
+                <div className="flex justify-between items-start mb-4">
+                  {isEditingName ? (
+                    <div className="flex-1 flex flex-col gap-2">
+                      <input
+                        type="text"
+                        value={editedName}
+                        onChange={(e) => setEditedName(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter') {
+                            if (editedName.trim() && editedName !== selectedScene.name) {
+                              try {
+                                const token = localStorage.getItem('accessToken');
+                                const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+                                const separator = baseUrl.endsWith('/') ? '' : '/';
 
-      {showCreationFlow && (
-        <SceneCreationFlow
-          tourId={tourId}
-          onSceneCreated={handleSceneCreated}
-          onClose={() => setShowCreationFlow(false)}
-        />
-      )}
-    </div>
+                                const response = await fetch(`${baseUrl}${separator}scenes/${selectedScene.id}`, {
+                                  method: 'PUT',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${token}`
+                                  },
+                                  body: JSON.stringify({
+                                    ...selectedScene,
+                                    name: editedName.trim()
+                                  })
+                                });
+
+                                if (response.ok) {
+                                  const updatedScene = { ...selectedScene, name: editedName.trim() };
+                                  setSelectedScene(updatedScene);
+                                  const updatedScenes = scenes.map(s =>
+                                    s.id === selectedScene.id ? updatedScene : s
+                                  );
+                                  onSceneUpdate?.(updatedScenes);
+                                }
+                              } catch (error) {
+                                console.error('Failed to update scene name:', error);
+                              }
+                            }
+                            setIsEditingName(false);
+                          } else if (e.key === 'Escape') {
+                            setIsEditingName(false);
+                            setEditedName(selectedScene.name);
+                          }
+                        }}
+                        onBlur={async () => {
+                          if (editedName.trim() && editedName !== selectedScene.name) {
+                            try {
+                              const token = localStorage.getItem('accessToken');
+                              const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+                              const separator = baseUrl.endsWith('/') ? '' : '/';
+
+                              const response = await fetch(`${baseUrl}${separator}scenes/${selectedScene.id}`, {
+                                method: 'PUT',
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  'Authorization': `Bearer ${token}`
+                                },
+                                body: JSON.stringify({
+                                  ...selectedScene,
+                                  name: editedName.trim()
+                                })
+                              });
+
+                              if (response.ok) {
+                                const updatedScene = { ...selectedScene, name: editedName.trim() };
+                                setSelectedScene(updatedScene);
+                                const updatedScenes = scenes.map(s =>
+                                  s.id === selectedScene.id ? updatedScene : s
+                                );
+                                onSceneUpdate?.(updatedScenes);
+                              }
+                            } catch (error) {
+                              console.error('Failed to update scene name:', error);
+                            }
+                          }
+                          setIsEditingName(false);
+                        }}
+                        autoFocus
+                        className="w-full text-xl font-semibold px-2 py-1 border-2 border-blue-500 rounded text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-xs text-gray-500">Press Enter to save, Esc to cancel</span>
+                    </div>
+                  ) : (
+                    <h3
+                      className="text-xl font-semibold text-gray-900 cursor-pointer hover:text-blue-600 inline-flex items-center gap-2 group"
+                      onClick={() => {
+                        setIsEditingName(true);
+                        setEditedName(selectedScene.name);
+                      }}
+                      title="Click to edit scene name"
+                    >
+                      {selectedScene.name}
+                      <svg className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    </h3>
+                  )}
+
+                  {selectedScene.src_original_url && (
+                    <div className="flex flex-col items-end">
+                      <button
+                        onClick={handleSetAsCover}
+                        disabled={tour?.cover_image_url === selectedScene.src_original_url}
+                        className={`px-4 py-2 rounded text-sm font-medium transition-colors cursor-pointer ${tour?.cover_image_url === selectedScene.src_original_url
+                          ? 'bg-green-100 text-green-700 cursor-default flex items-center gap-1'
+                          : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                          }`}
+                      >
+                        {tour?.cover_image_url === selectedScene.src_original_url ? (
+                          <>
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                            Current Cover
+                          </>
+                        ) : 'Set as Tour Cover'}
+                      </button>
+                      {tour?.cover_image_url === selectedScene.src_original_url && (
+                        <p className="text-[10px] text-gray-500 mt-1 italic">This image will be used as the tour thumbnail</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Interactive 360° Preview */}
+                {(selectedScene.src_original_url || tempPreviewUrl) && (
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium mb-2 text-gray-900">
+                      360° Interactive Preview
+                      {tempPreviewUrl && !selectedScene.src_original_url && (
+                        <span className="ml-2 text-xs text-orange-600 font-normal">
+                          (Preview - not saved yet)
+                        </span>
+                      )}
+                    </label>
+                    <div className="relative h-64 bg-gray-100 rounded-lg overflow-hidden border">
+                      <SimplePanoramaPreview
+                        imageUrl={selectedScene.src_original_url || tempPreviewUrl!}
+                        yaw={editedValues.yaw}
+                        pitch={editedValues.pitch}
+                        fov={editedValues.fov}
+                        onCameraChange={(newYaw, newPitch, newFov) => {
+                          setEditedValues(prev => ({
+                            ...prev,
+                            yaw: newYaw,
+                            pitch: newPitch,
+                            fov: newFov
+                          }));
+                          // Only auto-save if the scene is already saved to database
+                          if (selectedScene.src_original_url) {
+                            debouncedSave();
+                          }
+                        }}
+                      />
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Drag to rotate • Scroll to zoom • Changes are reflected in real-time
+                      {tempPreviewUrl && !selectedScene.src_original_url && (
+                        <span className="text-orange-600"> • Save image to persist changes</span>
+                      )}
+                    </p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-gray-900">Scene Type</label>
+                    <select
+                      value={editedValues.type}
+                      onChange={(e) => {
+                        handleTypeChange(e.target.value);
+                        immediateSave();
+                      }}
+                      className="w-full px-3 py-2 border rounded-md text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="360">360° Panorama</option>
+                      <option value="image">Static Image</option>
+                      <option value="video">Video</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-gray-900">Order</label>
+                    <input
+                      type="number"
+                      value={editedValues.order}
+                      onChange={(e) => handleValueChange('order', parseInt(e.target.value) || 1)}
+                      onBlur={immediateSave}
+                      min="1"
+                      className="w-full px-3 py-2 border rounded-md text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-6 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium mb-3 text-gray-900">
+                      Yaw (Horizontal Rotation): {editedValues.yaw.toFixed(1)}°
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        value={editedValues.yaw}
+                        onChange={(e) => {
+                          const newValue = parseFloat(e.target.value);
+                          handleValueChange('yaw', newValue);
+                          debouncedSave();
+                        }}
+                        onMouseUp={immediateSave}
+                        onTouchEnd={immediateSave}
+                        min="-180"
+                        max="180"
+                        step="0.1"
+                        className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                      />
+                      <input
+                        type="number"
+                        value={editedValues.yaw.toFixed(1)}
+                        onChange={(e) => handleValueChange('yaw', parseFloat(e.target.value) || 0)}
+                        onBlur={immediateSave}
+                        step="0.1"
+                        min="-180"
+                        max="180"
+                        className="w-20 px-2 py-1 border rounded text-sm text-gray-900"
+                      />
+                      <span className="text-sm text-gray-500">°</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-3 text-gray-900">
+                      Pitch (Vertical Rotation): {editedValues.pitch.toFixed(1)}°
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        value={editedValues.pitch}
+                        onChange={(e) => {
+                          const newValue = parseFloat(e.target.value);
+                          handleValueChange('pitch', newValue);
+                          debouncedSave();
+                        }}
+                        onMouseUp={immediateSave}
+                        onTouchEnd={immediateSave}
+                        min="-90"
+                        max="90"
+                        step="0.1"
+                        className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                      />
+                      <input
+                        type="number"
+                        value={editedValues.pitch.toFixed(1)}
+                        onChange={(e) => handleValueChange('pitch', parseFloat(e.target.value) || 0)}
+                        onBlur={immediateSave}
+                        step="0.1"
+                        min="-90"
+                        max="90"
+                        className="w-20 px-2 py-1 border rounded text-sm text-gray-900"
+                      />
+                      <span className="text-sm text-gray-500">°</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-3 text-gray-900">
+                      Field of View (FOV): {editedValues.fov.toFixed(0)}°
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        value={editedValues.fov}
+                        onChange={(e) => {
+                          const newValue = parseFloat(e.target.value);
+                          handleValueChange('fov', newValue);
+                          debouncedSave(); // Debounced save during dragging
+                        }}
+                        onMouseUp={immediateSave}
+                        onTouchEnd={immediateSave}
+                        min="30"
+                        max="120"
+                        step="1"
+                        className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                      />
+                      <input
+                        type="number"
+                        value={editedValues.fov.toFixed(0)}
+                        onChange={(e) => handleValueChange('fov', parseFloat(e.target.value) || 75)}
+                        onBlur={immediateSave}
+                        step="1"
+                        min="30"
+                        max="120"
+                        className="w-20 px-2 py-1 border rounded text-sm text-gray-900"
+                      />
+                      <span className="text-sm text-gray-500">°</span>
+                    </div>
+                  </div>
+                </div>
+
+                {!showUploader ? (
+                  <div className="space-y-4">
+                    {selectedScene.src_original_url ? (
+                      <div className="p-4 bg-green-50 rounded">
+                        <p className="text-green-700 font-medium">Scene has 360° image</p>
+                        <p className="text-sm text-gray-700 mt-1">
+                          URL: {selectedScene.src_original_url.substring(0, 50)}...
+                        </p>
+                        <button
+                          onClick={() => {
+                            setShowUploader(true);
+                            setTempPreviewUrl(null);
+                          }}
+                          className="mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
+                        >
+                          Replace Image
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setShowUploader(true);
+                          setTempPreviewUrl(null);
+                        }}
+                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
+                      >
+                        Upload Scene Image
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <AdvancedSceneUploader
+                    sceneId={selectedScene.id}
+                    onPreviewReady={(previewUrl) => {
+                      setTempPreviewUrl(previewUrl);
+                    }}
+                    onComplete={(data) => {
+                      // Update scene with the uploaded URLs AND current edited values
+                      const updatedScene = {
+                        ...selectedScene,
+                        src_original_url: data.mainImageUrl,
+                        tiles_manifest: data.tilesManifest ? JSON.stringify(data.tilesManifest) : undefined,
+                        // Apply any changes made during preview
+                        yaw: editedValues.yaw,
+                        pitch: editedValues.pitch,
+                        fov: editedValues.fov,
+                        order: editedValues.order,
+                        type: editedValues.type as 'image' | 'video' | '360'
+                      };
+                      const updatedScenes = scenes?.map(s =>
+                        s.id === selectedScene.id ? updatedScene : s
+                      );
+                      onSceneUpdate?.(updatedScenes);
+                      setSelectedScene(updatedScene);
+                      setTempPreviewUrl(null);
+                      setShowUploader(false);
+                    }}
+                    onCancel={() => {
+                      setTempPreviewUrl(null);
+                      setShowUploader(false);
+                    }}
+                  />
+                )}
+
+                <div className="mt-6 pt-6 border-t">
+                  <h4 className="font-medium mb-2 text-gray-900">Scene Details</h4>
+                  <div className="text-sm text-gray-700 space-y-1">
+                    <p>Hotspots: {selectedScene.hotspots?.length || 0}</p>
+                    <p>Overlays: {selectedScene.overlays?.length || 0}</p>
+                    <p>Priority: {selectedScene.priority}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center max-w-md mx-auto">
+                {scenes && scenes.length === 0 ? (
+                  <div className="space-y-6">
+                    {/* Icon */}
+                    <div className="mx-auto w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center">
+                      <svg className="w-10 h-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+
+                    {/* Title and Description */}
+                    <div>
+                      <h3 className="text-xl font-semibold text-gray-900 mb-2">Upload your first 360° photo</h3>
+                      <p className="text-gray-600 mb-6 leading-relaxed">
+                        Each 360° photo becomes a room or spot visitors can look around in.
+                        Start with the entrance or the main room.
+                      </p>
+                    </div>
+
+                    {/* Action Button */}
+                    <button
+                      onClick={() => {
+                        setShowInlineCreation(true);
+                        setSelectedScene(null);
+                        setShowUploader(false);
+                        setTempPreviewUrl(null);
+                      }}
+                      className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer font-medium shadow-sm mb-8"
+                    >
+                      Upload 360° photo
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Icon for scene selection */}
+                    <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
+                      <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    </div>
+
+                    <div className='mb-8'>
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">No Scene Selected</h3>
+                      <p className="text-gray-600 text-sm leading-relaxed">
+                        Select a scene from the left panel to view and edit its details,
+                        adjust viewing angles, or upload new images.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+
+      </div >
+
+      {/* Delete Modal */}
+      < DeleteModal
+        open={deleteModal.open}
+        isLoading={deleteModal.isLoading}
+        title="Delete Scene"
+        message={`Are you sure you want to delete "${deleteModal.sceneName}"? This action cannot be undone and will permanently remove the scene and all its associated hotspots and overlays.`
+        }
+        onConfirm={confirmDeleteScene}
+        onCancel={closeDeleteModal}
+      />
+    </>
   );
 }

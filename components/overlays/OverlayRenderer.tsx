@@ -1,0 +1,1688 @@
+'use client';
+
+import { useState, useEffect, useRef, useCallback } from 'react';
+import * as THREE from 'three';
+import { Overlay } from '@/types/tour';
+import { SPHERE_RADIUS } from '../viewer/multires/constants';
+import { useUrlParams } from '@/hooks/useUrlParams';
+import {
+  createModelOverlay,
+  disposeModelOverlay,
+  ensureModelLights,
+  updateModelOverlays,
+} from '@/lib/glb-model';
+
+interface OverlayRendererProps {
+  overlays: Overlay[];
+  onOverlayClick?: (overlay: Overlay) => void;
+  onOverlayUpdate?: (overlay: Overlay) => void;
+  onModalStateChange?: (isOpen: boolean) => void;
+  isEditMode?: boolean;
+  viewerWidth: number;
+  viewerHeight: number;
+  currentYaw: number;
+  currentPitch: number;
+  fov: number;
+  camera?: THREE.PerspectiveCamera | null;
+  scene?: THREE.Scene | null;
+  overlayGroup?: THREE.Group | null;
+  isFullscreen?: boolean;
+  isAutoplay?: boolean;
+  onPause?: () => void;
+  radius?: number;
+  isTransitioning?: boolean;
+}
+
+// Helper function to format URLs
+const formatUrl = (url: string): string => {
+  if (!url) return url;
+
+  // If URL already has protocol, return as is
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+
+  if (url.startsWith('www.') || url.includes('.')) {
+    return `https://${url}`;
+  }
+  return `https://${url}`;
+};
+
+// Create 3D overlay sprite
+function createOverlaySprite(overlay: Overlay, radius: number = 450): THREE.Group {
+  const group = new THREE.Group();
+
+  // Check for invalid coordinates
+  if (isNaN(overlay.yaw) || isNaN(overlay.pitch)) {
+    overlay.yaw = 0;
+    overlay.pitch = 0;
+  }
+
+  // Use raw values to match CubeMapViewer hotspot logic
+  // pitch/yaw are in degrees
+  // Align with yawPitchToVector logic from multires/geometry.ts
+  const phi = THREE.MathUtils.degToRad(90 - (overlay.pitch || 0));
+  const theta = THREE.MathUtils.degToRad((overlay.yaw || 0) + 180);
+
+  // Calculate position using spherical coordinates
+  const x = radius * Math.sin(phi) * Math.cos(theta);
+  const y = radius * Math.cos(phi);
+  const z = radius * Math.sin(phi) * Math.sin(theta);
+
+  const position = new THREE.Vector3(x, y, z);
+  group.position.copy(position);
+  group.userData.overlay = overlay;
+  group.visible = true;
+  group.frustumCulled = false;
+
+  // Create overlay icon based on type
+  const iconTexture = createOverlayIconTexture(overlay.kind);
+  const iconMaterial = new THREE.SpriteMaterial({
+    map: iconTexture,
+    transparent: true,
+    depthWrite: false,  // Don't write to depth buffer
+    depthTest: false,   // Don't check depth buffer - ALWAYS render on top
+    alphaTest: 0.05,    // Lower alpha threshold to ensure softer edges show
+    sizeAttenuation: false, // Keep fixed size on screen
+  });
+  const iconSprite = new THREE.Sprite(iconMaterial);
+  // Default base scale for overlays
+  const baseScale = 0.12;
+  iconSprite.scale.setScalar(baseScale);
+  iconSprite.renderOrder = 9999;
+  iconSprite.frustumCulled = false;
+
+  // Store baseScale for the viewer's animate loop to use
+  iconSprite.userData.baseScale = baseScale;
+
+  group.add(iconSprite);
+
+  return group;
+}
+
+// Helper to draw rounded rect for compatibility
+function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+// Create overlay icon texture with enhanced quality
+function createOverlayIconTexture(kind: string): THREE.Texture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    return new THREE.Texture();
+  }
+
+  // Enable high-quality rendering
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+
+  context.clearRect(0, 0, size, size);
+
+  // Get color based on overlay type
+  const colors = {
+    text: '#3B82F6',
+    image: '#10B981',
+    video: '#EF4444',
+    badge: '#F59E0B',
+    tooltip: '#8B5CF6',
+    html: '#6366F1'
+  };
+
+  const color = colors[kind as keyof typeof colors] || '#6B7280';
+
+  // Draw main circle
+  context.beginPath();
+  context.arc(size / 2, size / 2, size * 0.42, 0, 2 * Math.PI);
+  context.fillStyle = color;
+  context.fill();
+
+  // Draw white border
+  context.beginPath();
+  context.arc(size / 2, size / 2, size * 0.42, 0, 2 * Math.PI);
+  context.strokeStyle = '#ffffff';
+  context.lineWidth = 8;
+  context.stroke();
+
+  // Draw white icon in center
+  context.fillStyle = '#ffffff';
+  context.strokeStyle = '#ffffff';
+  context.lineWidth = 4;
+
+  const centerX = size / 2;
+  const centerY = size / 2;
+  const iconSize = size * 0.16;
+
+  if (kind === 'text') {
+    // Enhanced chat/message icon with better clarity
+    context.fillStyle = '#ffffff';
+
+    // Draw main chat bubble with rounded corners
+    const bubbleWidth = iconSize * 2.4;
+    const bubbleHeight = iconSize * 1.8;
+    const bubbleX = centerX - bubbleWidth / 2;
+    const bubbleY = centerY - bubbleHeight / 2;
+    const cornerRadius = 6;
+
+    roundedRect(context, bubbleX, bubbleY, bubbleWidth, bubbleHeight, cornerRadius);
+    context.fill();
+
+    context.beginPath();
+    context.moveTo(bubbleX + bubbleWidth * 0.15, bubbleY + bubbleHeight);
+    context.lineTo(bubbleX + bubbleWidth * 0.35, bubbleY + bubbleHeight);
+    context.lineTo(bubbleX + bubbleWidth * 0.2, bubbleY + bubbleHeight + iconSize * 0.5);
+    context.closePath();
+    context.fill();
+
+    // Draw enhanced text lines inside bubble with better spacing
+    context.fillStyle = color;
+    const lineWidth = bubbleWidth * 0.65;
+    const lineHeight = 3;
+    const startX = centerX - lineWidth / 2;
+    const lineSpacing = iconSize * 0.35;
+
+    context.fillRect(startX, centerY - lineSpacing, lineWidth, lineHeight);
+    context.fillRect(startX, centerY, lineWidth * 0.85, lineHeight);
+    context.fillRect(startX, centerY + lineSpacing, lineWidth * 0.75, lineHeight);
+
+  } else if (kind === 'video') {
+    // Play button icon
+    context.beginPath();
+    context.moveTo(centerX - iconSize * 0.5, centerY - iconSize * 0.8);
+    context.lineTo(centerX - iconSize * 0.5, centerY + iconSize * 0.8);
+    context.lineTo(centerX + iconSize * 0.8, centerY);
+    context.closePath();
+    context.fill();
+
+  } else if (kind === 'image') {
+    // Image icon
+    context.strokeStyle = '#ffffff';
+    context.lineWidth = 3;
+    context.fillStyle = '#ffffff';
+
+    // Image container
+    roundedRect(context, centerX - iconSize * 1.0, centerY - iconSize * 0.8, iconSize * 2.0, iconSize * 1.6, 3);
+    context.stroke();
+
+    context.beginPath();
+    context.arc(centerX + iconSize * 0.4, centerY - iconSize * 0.4, iconSize * 0.25, 0, 2 * Math.PI);
+    context.fill();
+
+    context.beginPath();
+    context.moveTo(centerX - iconSize * 0.6, centerY + iconSize * 0.6);
+    context.lineTo(centerX - iconSize * 0.2, centerY - iconSize * 0.1);
+    context.lineTo(centerX + iconSize * 0.2, centerY + iconSize * 0.6);
+    context.closePath();
+    context.fill();
+
+  } else {
+    // Default icon
+    context.font = `bold ${iconSize * 2}px Arial`;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText('?', centerX, centerY);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+export default function OverlayRenderer({
+  overlays,
+  onOverlayClick,
+  onOverlayUpdate,
+  onModalStateChange,
+  isEditMode = false,
+  viewerWidth,
+  viewerHeight,
+  currentYaw,
+  currentPitch,
+  fov,
+  camera = null,
+  scene = null,
+  overlayGroup = null,
+  isFullscreen = false,
+  isAutoplay = false,
+  onPause,
+  radius = 450,
+  isTransitioning = false
+}: OverlayRendererProps) {
+  const overlaySpritesRef = useRef<Map<string, THREE.Group>>(new Map());
+  const [hoveredOverlay, setHoveredOverlay] = useState<Overlay | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
+  const [expandedOverlay, setExpandedOverlay] = useState<Overlay | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+
+  // URL parameter support for direct overlay links
+  const { overlayId: urlOverlayId, sceneId: urlSceneId } = useUrlParams();
+
+  // Auto-open overlay from URL parameters
+  useEffect(() => {
+    if (urlOverlayId && urlSceneId && overlays.length > 0) {
+      const targetOverlay = overlays.find(overlay =>
+        overlay.id === urlOverlayId && overlay.scene_id === urlSceneId
+      );
+
+      if (targetOverlay && !isModalOpen) {
+        setExpandedOverlay(targetOverlay);
+        setIsModalOpen(true);
+
+        // Clear any existing hover states when modal opens
+        setHoveredOverlay(null);
+        setHoverPosition(null);
+
+        // Clear URL parameters after opening
+        const url = new URL(window.location.href);
+        url.searchParams.delete('overlay');
+        url.searchParams.delete('scene');
+        window.history.replaceState({}, '', url.toString());
+      }
+    }
+  }, [urlOverlayId, urlSceneId, overlays, isModalOpen]);
+
+  // Handle keyboard events for modal
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && isModalOpen) {
+        setIsModalOpen(false);
+        setExpandedOverlay(null);
+      }
+    };
+
+    const handleMouseDown = (event: MouseEvent) => {
+      if (!isModalOpen) return;
+
+      // Track mouse down position to detect dragging
+      dragStateRef.current = {
+        isDragging: false,
+        startX: event.clientX,
+        startY: event.clientY
+      };
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isModalOpen || !dragStateRef.current) return;
+
+      // Check if mouse has moved significantly (indicating a drag)
+      const deltaX = Math.abs(event.clientX - dragStateRef.current.startX);
+      const deltaY = Math.abs(event.clientY - dragStateRef.current.startY);
+
+      if (deltaX > 5 || deltaY > 5) {
+        dragStateRef.current.isDragging = true;
+      }
+    };
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!isModalOpen) return;
+
+      const target = event.target as HTMLElement;
+
+      // Don't close if clicking on the sidebar itself
+      if (target.closest('[data-sidebar="true"]')) {
+        return;
+      }
+
+      // Don't close if this click is the result of a drag operation
+      if (dragStateRef.current.isDragging) {
+        // Reset drag state for next interaction
+        dragStateRef.current = { isDragging: false, startX: 0, startY: 0 };
+        return;
+      }
+
+      // Only close on actual clicks (not drag releases)
+      setIsModalOpen(false);
+      setExpandedOverlay(null);
+    };
+
+    if (isModalOpen) {
+      document.addEventListener('keydown', handleKeyDown);
+      document.addEventListener('mousedown', handleMouseDown);
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('click', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [isModalOpen]);
+
+  // Notify parent when modal state changes
+  useEffect(() => {
+    onModalStateChange?.(isModalOpen);
+  }, [isModalOpen, onModalStateChange]);
+
+  // Clear hover states when modal opens/closes
+  useEffect(() => {
+    if (isModalOpen) {
+      // Clear any hover states when modal opens
+      setHoveredOverlay(null);
+      setHoverPosition(null);
+
+      // Clear any pending timeouts
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+        hoverTimeoutRef.current = null;
+      }
+    }
+  }, [isModalOpen]);
+
+  // Simple hover state for video overlays
+  const [videoStates, setVideoStates] = useState<Map<string, {
+    isVideoPlaying: boolean;
+    hasStartedPlaying: boolean;
+  }>>(new Map());
+
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const modalHoverRef = useRef<boolean>(false);
+  const lastHoveredOverlayRef = useRef<string | null>(null);
+  const dragStateRef = useRef<{ isDragging: boolean; startX: number; startY: number }>({
+    isDragging: false,
+    startX: 0,
+    startY: 0
+  });
+  const lastVideoIdsRef = useRef<string>('');
+
+  useEffect(() => {
+    if (!scene || !overlayGroup) {
+      return;
+    }
+
+    while (overlayGroup.children.length) {
+      const child = overlayGroup.children.pop();
+      if (!child) continue;
+      overlayGroup.remove(child);
+      if (child.userData.isModelOverlay) {
+        disposeModelOverlay(child);
+        continue;
+      }
+      child.traverse((node) => {
+        if (node instanceof THREE.Sprite && node.material instanceof THREE.Material) {
+          node.material.dispose();
+        }
+      });
+    }
+    overlaySpritesRef.current.clear();
+
+    if (overlays.some(o => o.kind === 'model')) {
+      ensureModelLights(scene);
+    }
+
+    // Add overlay sprites for current scene
+    overlays.forEach((overlay) => {
+      if (!overlay.id) return;
+
+      // GLB models are rendered as real 3D objects instead of icon sprites
+      const sprite = overlay.kind === 'model'
+        ? createModelOverlay(overlay)
+        : createOverlaySprite(overlay, radius);
+      overlayGroup.add(sprite);
+      overlaySpritesRef.current.set(overlay.id, sprite);
+
+      // Ensure visibility
+      sprite.visible = true;
+      sprite.children.forEach(child => {
+        if (child instanceof THREE.Sprite) {
+          child.visible = true;
+        }
+      });
+    });
+
+    // Initialize video states only if video overlays have changed
+    const videoOverlays = overlays.filter(o => o.kind === 'video' && o.id);
+    const newVideoIds = videoOverlays.map(o => o.id).sort().join(',');
+
+    if (newVideoIds !== lastVideoIdsRef.current) {
+      lastVideoIdsRef.current = newVideoIds;
+
+      const newVideoStates = new Map<string, { isVideoPlaying: boolean; hasStartedPlaying: boolean }>();
+      videoOverlays.forEach(overlay => {
+        if (overlay.id) {
+          newVideoStates.set(overlay.id, {
+            isVideoPlaying: false,
+            hasStartedPlaying: false
+          });
+        }
+      });
+
+      if (newVideoStates.size > 0 || videoStates.size > 0) {
+        setVideoStates(newVideoStates);
+      }
+    }
+
+    // Ensure the overlay group itself is visible
+    overlayGroup.visible = true;
+  }, [overlays, scene, overlayGroup, radius]);
+
+  // Drive GLB model animations / auto-rotation (the viewer's render loop draws the result)
+  useEffect(() => {
+    if (!overlayGroup || !overlays.some(o => o.kind === 'model')) return;
+
+    let frameId: number;
+    let lastTime = performance.now();
+    const tick = (now: number) => {
+      updateModelOverlays(overlayGroup, (now - lastTime) / 1000);
+      lastTime = now;
+      frameId = requestAnimationFrame(tick);
+    };
+    frameId = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(frameId);
+  }, [overlays, overlayGroup]);
+
+  // Handle advanced hover functionality with better throttling
+  const handleOverlayHover = (overlay: Overlay, position: { x: number; y: number }) => {
+    // Prevent spam by checking if we're already hovering this overlay
+    if (lastHoveredOverlayRef.current === overlay.id) {
+      return;
+    }
+
+    lastHoveredOverlayRef.current = overlay.id || null;
+    setHoveredOverlay(overlay);
+    setHoverPosition(position);
+
+    // Clear any pending timeout
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+
+    // Handle video overlay hover - start video with sound attempt
+    if (overlay.kind === 'video' && overlay.id) {
+      const currentState = videoStates.get(overlay.id);
+
+      if (!currentState?.isVideoPlaying) {
+        // Try to create a user interaction context for autoplay with sound
+        const simulateUserInteraction = () => {
+          // Create a temporary button and click it to establish user interaction
+          const tempButton = document.createElement('button');
+          tempButton.style.position = 'absolute';
+          tempButton.style.left = '-9999px';
+          tempButton.style.opacity = '0';
+          document.body.appendChild(tempButton);
+
+          // Simulate click to establish user interaction
+          tempButton.click();
+
+          // Clean up
+          setTimeout(() => {
+            document.body.removeChild(tempButton);
+          }, 100);
+        };
+
+        // Simulate user interaction before starting video
+        simulateUserInteraction();
+
+        setVideoStates(prev => {
+          const newStates = new Map(prev);
+          newStates.set(overlay.id!, {
+            isVideoPlaying: true,
+            hasStartedPlaying: true
+          });
+          return newStates;
+        });
+      }
+    }
+  };
+
+  const handleOverlayHoverEnd = (overlay: Overlay) => {
+    // Reset the last hovered overlay
+    lastHoveredOverlayRef.current = null;
+
+    hoverTimeoutRef.current = setTimeout(() => {
+      if (!modalHoverRef.current) {
+        setHoveredOverlay(null);
+        setHoverPosition(null);
+
+        // Stop video if it's a video overlay
+        if (overlay.kind === 'video' && overlay.id) {
+          const currentState = videoStates.get(overlay.id);
+
+          // Only update state if video is currently playing
+          if (currentState?.isVideoPlaying) {
+            setVideoStates(prev => {
+              const newStates = new Map(prev);
+              newStates.set(overlay.id!, {
+                isVideoPlaying: false,
+                hasStartedPlaying: true
+              });
+              return newStates;
+            });
+          }
+        }
+      }
+    }, 300); // Increased timeout to prevent flickering/hover tunnel issues
+  };
+
+  const handleModalHover = () => {
+    modalHoverRef.current = true;
+
+    // Clear any pending timeout
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+  };
+
+  const handleModalHoverEnd = () => {
+    modalHoverRef.current = false;
+
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredOverlay(null);
+      setHoverPosition(null);
+
+      // Stop video if it's currently playing
+      if (hoveredOverlay?.kind === 'video' && hoveredOverlay.id) {
+        const currentState = videoStates.get(hoveredOverlay.id);
+
+        // Only update state if video is currently playing
+        if (currentState?.isVideoPlaying) {
+          setVideoStates(prev => {
+            const newStates = new Map(prev);
+            newStates.set(hoveredOverlay.id!, {
+              isVideoPlaying: false,
+              hasStartedPlaying: true
+            });
+            return newStates;
+          });
+        }
+      }
+    }, 300);
+  };
+
+  // Handle mouse events for hover detection with improved throttling
+  useEffect(() => {
+    if (!scene || !camera || !overlayGroup) return;
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let currentHoveredOverlay: Overlay | null = null;
+    let lastHoverTime = 0;
+    let lastMousePosition = { x: 0, y: 0 };
+    const HOVER_THROTTLE = 16;
+    const MOUSE_MOVE_THRESHOLD = 3;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      // Don't process hover events when autoplay is active (but allow when modal is open)
+      if (isAutoplay) return;
+
+      const now = Date.now();
+
+      // Check if mouse actually moved significantly
+      const mouseMoved = Math.abs(event.clientX - lastMousePosition.x) > MOUSE_MOVE_THRESHOLD ||
+        Math.abs(event.clientY - lastMousePosition.y) > MOUSE_MOVE_THRESHOLD;
+
+      // Throttle hover detection and only process if mouse moved significantly
+      if (now - lastHoverTime < HOVER_THROTTLE || !mouseMoved) {
+        return;
+      }
+
+      lastHoverTime = now;
+      lastMousePosition = { x: event.clientX, y: event.clientY };
+
+      // Calculate mouse position in normalized device coordinates
+      const rect = (event.target as HTMLElement).getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      // Update the picking ray with the camera and mouse position
+      raycaster.setFromCamera(mouse, camera);
+
+      // Calculate objects intersecting the picking ray
+      const intersects = raycaster.intersectObjects(overlayGroup.children, true);
+
+      if (intersects.length > 0) {
+        // Find the overlay from the intersected object
+        let node: THREE.Object3D | null = intersects[0].object;
+        while (node && !node.userData?.overlay) {
+          node = node.parent;
+        }
+
+        if (node && node.userData?.overlay) {
+          const overlay = node.userData.overlay as Overlay;
+          if (currentHoveredOverlay?.id !== overlay.id) {
+            // End hover on previous overlay
+            if (currentHoveredOverlay) {
+              handleOverlayHoverEnd(currentHoveredOverlay);
+            }
+
+            currentHoveredOverlay = overlay;
+            handleOverlayHover(overlay, { x: event.clientX, y: event.clientY });
+          }
+        }
+      } else {
+        if (currentHoveredOverlay) {
+          handleOverlayHoverEnd(currentHoveredOverlay);
+          currentHoveredOverlay = null;
+        }
+      }
+    };
+
+    const handleMouseLeave = () => {
+      if (currentHoveredOverlay) {
+        handleOverlayHoverEnd(currentHoveredOverlay);
+        currentHoveredOverlay = null;
+      }
+    };
+
+    const handleMouseClick = (event: MouseEvent) => {
+      // Allow clicking even during autoplay, but we should pause it
+      // if (isAutoplay) return; - REPLACED WITH CONDITIONAL PAUSE BELOW
+
+      // Calculate mouse position in normalized device coordinates
+      const rect = (event.target as HTMLElement).getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      // Update the picking ray with the camera and mouse position
+      raycaster.setFromCamera(mouse, camera);
+
+      // Calculate objects intersecting the picking ray
+      const intersects = raycaster.intersectObjects(overlayGroup.children, true);
+
+      if (intersects.length > 0) {
+        // Find the overlay from the intersected object
+        let node: THREE.Object3D | null = intersects[0].object;
+        while (node && !node.userData?.overlay) {
+          node = node.parent;
+        }
+
+        if (node && node.userData?.overlay) {
+          const overlay = node.userData.overlay as Overlay;
+
+          // If we're auto-playing and an overlay is clicked, pause it first
+          if (isAutoplay && onPause) {
+            onPause();
+          }
+
+          // Handle overlay click - open modal for text overlays
+          if (overlay.kind === 'text') {
+            setExpandedOverlay(overlay);
+            setIsModalOpen(true);
+            setHoveredOverlay(null);
+            setHoverPosition(null);
+          }
+
+          // Call the optional click handler
+          onOverlayClick?.(overlay);
+        }
+      }
+    };
+
+    // Find the canvas element
+    const canvasElement = document.querySelector('canvas');
+
+    if (canvasElement) {
+      canvasElement.addEventListener('mousemove', handleMouseMove);
+      canvasElement.addEventListener('mouseleave', handleMouseLeave);
+      canvasElement.addEventListener('click', handleMouseClick);
+
+      return () => {
+        canvasElement.removeEventListener('mousemove', handleMouseMove);
+        canvasElement.removeEventListener('mouseleave', handleMouseLeave);
+        canvasElement.removeEventListener('click', handleMouseClick);
+      };
+    }
+  }, [scene, camera, overlayGroup, isModalOpen, isAutoplay]);
+
+  // Render hover tooltip
+  const renderHoverTooltip = () => {
+    // Show hover tooltip even when modal is open
+    // But don't show if autoplay is active or if we are transitioning
+    if (!hoveredOverlay || !hoverPosition || isAutoplay || isTransitioning) return null;
+
+    let payload: any = {};
+    try {
+      payload = typeof hoveredOverlay.payload === 'string'
+        ? JSON.parse(hoveredOverlay.payload)
+        : hoveredOverlay.payload || {};
+    } catch {
+      payload = {};
+    }
+
+    // Models only show a tooltip when they have something to say
+    const isModel = hoveredOverlay.kind === 'model';
+    if (isModel && !payload.title && !payload.description) return null;
+    const isCompact = hoveredOverlay.kind === 'text' || isModel;
+
+    // Calculate tooltip position to avoid going off-screen
+    let tooltipWidth = isCompact ? 280 : 400;
+
+    if ((hoveredOverlay.kind === 'image' || hoveredOverlay.kind === 'video') && payload.width) {
+      const customWidth = parseInt(payload.width, 10);
+      if (!isNaN(customWidth) && customWidth > 0) {
+        tooltipWidth = Math.max(tooltipWidth, customWidth + 32);
+      }
+    }
+
+    const tooltipHeight = isCompact ? 110 : 300;
+    const arrowSize = isCompact ? 12 : 8;
+
+    // Get the overlay icon's 3D position and convert to screen coordinates
+    let iconScreenPosition = { x: hoverPosition.x, y: hoverPosition.y };
+
+    // Try to get more accurate screen position from the 3D overlay sprite
+    if (camera && hoveredOverlay.id) {
+      const overlaySprite = overlaySpritesRef.current.get(hoveredOverlay.id);
+      if (overlaySprite) {
+        const vector = overlaySprite.position.clone();
+        vector.project(camera);
+
+        // Convert to screen coordinates
+        const canvas = document.querySelector('canvas');
+        if (canvas) {
+          const rect = canvas.getBoundingClientRect();
+          const screenX = (vector.x * 0.5 + 0.5) * rect.width + rect.left;
+          const screenY = (vector.y * -0.5 + 0.5) * rect.height + rect.top;
+
+          // Only use projected position if it's reasonable
+          const distance = Math.sqrt(
+            Math.pow(screenX - hoverPosition.x, 2) +
+            Math.pow(screenY - hoverPosition.y, 2)
+          );
+
+          if (distance < 100) {
+            iconScreenPosition = { x: screenX, y: screenY };
+          }
+        }
+      }
+    }
+
+    // Estimate total tooltip height and width
+    // Content height (video/image)
+    const contentHeight = payload.height ? parseInt(payload.height, 10) : (isCompact ? 100 : 200);
+    const chromeBufferHeight = isCompact ? 120 : 300;
+    const estimatedHeight = contentHeight + chromeBufferHeight;
+    const estimatedWidth = tooltipWidth;
+
+    // Get viewport dimensions
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    // Define spacing constants
+    const gap = 40;
+    const screenPadding = 20;
+
+    // Calculate available space in all 4 directions
+    const spaceTop = iconScreenPosition.y - estimatedHeight - gap - screenPadding;
+    const spaceBottom = viewportHeight - (iconScreenPosition.y + estimatedHeight + gap + screenPadding);
+    const spaceLeft = iconScreenPosition.x - estimatedWidth - gap - screenPadding;
+    const spaceRight = viewportWidth - (iconScreenPosition.x + estimatedWidth + gap + screenPadding);
+
+    // Determine best position
+    let bestPosition: 'top' | 'bottom' | 'left' | 'right' = 'top';
+
+    // Priority: Top -> Bottom -> Right -> Left
+    if (spaceTop > 0) {
+      bestPosition = 'top';
+    } else if (spaceBottom > 0) {
+      bestPosition = 'bottom';
+    } else if (spaceRight > 0) {
+      bestPosition = 'right';
+    } else if (spaceLeft > 0) {
+      bestPosition = 'left';
+    } else {
+      // If none fit perfectly, pick the one with maximum space
+      const spaces = [
+        { pos: 'top', space: spaceTop },
+        { pos: 'bottom', space: spaceBottom },
+        { pos: 'right', space: spaceRight },
+        { pos: 'left', space: spaceLeft }
+      ];
+      spaces.sort((a, b) => b.space - a.space); // Sort descending
+      bestPosition = spaces[0].pos as any;
+    }
+
+    // Calculate coordinates based on best position
+    let finalLeft = 0;
+    let finalTop = 0;
+    let arrowStyle = {};
+
+    switch (bestPosition) {
+      case 'top':
+        finalLeft = iconScreenPosition.x - estimatedWidth / 2;
+        finalTop = iconScreenPosition.y - gap;
+        arrowStyle = {
+          bottom: '-6px',
+          left: '50%',
+          transform: 'translateX(-50%) rotate(45deg)'
+        };
+        break;
+      case 'bottom':
+        finalLeft = iconScreenPosition.x - estimatedWidth / 2;
+        finalTop = iconScreenPosition.y + gap;
+        arrowStyle = {
+          top: '-6px',
+          left: '50%',
+          transform: 'translateX(-50%) rotate(45deg)'
+        };
+        break;
+      case 'left':
+        finalLeft = iconScreenPosition.x - estimatedWidth - gap;
+        finalTop = iconScreenPosition.y - estimatedHeight / 2;
+        arrowStyle = {
+          right: '-6px',
+          top: '50%',
+          transform: 'translateY(-50%) rotate(45deg)'
+        };
+        break;
+      case 'right':
+        finalLeft = iconScreenPosition.x + gap;
+        finalTop = iconScreenPosition.y - estimatedHeight / 2;
+        arrowStyle = {
+          left: '-6px',
+          top: '50%',
+          transform: 'translateY(-50%) rotate(45deg)'
+        };
+        break;
+    }
+
+    // Horizontal clamping for Top/Bottom positions
+    if (bestPosition === 'top' || bestPosition === 'bottom') {
+      if (finalLeft < screenPadding) finalLeft = screenPadding;
+      if (finalLeft + estimatedWidth > viewportWidth - screenPadding) {
+        finalLeft = viewportWidth - estimatedWidth - screenPadding;
+      }
+    }
+    // Vertical clamping for Left/Right positions
+    if (bestPosition === 'left' || bestPosition === 'right') {
+      if (finalTop < screenPadding) finalTop = screenPadding;
+      if (finalTop + estimatedHeight > viewportHeight - screenPadding) {
+        finalTop = viewportHeight - estimatedHeight - screenPadding;
+      }
+    }
+
+    // Calculate Arrow Position relative to tooltip box (for clamped situations)
+    // This allows the arrow to stay pointing at the icon even if the box shifted
+    if (bestPosition === 'top' || bestPosition === 'bottom') {
+      let arrowLeftPos = iconScreenPosition.x - finalLeft;
+      // Clamp arrow to be within the box (with rounded corner buffer)
+      arrowLeftPos = Math.max(12, Math.min(estimatedWidth - 12, arrowLeftPos));
+      arrowStyle = { ...arrowStyle, left: `${arrowLeftPos}px`, transform: 'translateX(-50%) rotate(45deg)' };
+    } else {
+      let arrowTopPos = iconScreenPosition.y - finalTop;
+      arrowTopPos = Math.max(12, Math.min(estimatedHeight - 12, arrowTopPos));
+      arrowStyle = { ...arrowStyle, top: `${arrowTopPos}px`, transform: 'translateY(-50%) rotate(45deg)' };
+    }
+
+
+    return (
+      <div
+        className="fixed pointer-events-auto z-[400] overlay-tooltip"
+        style={{
+          left: finalLeft,
+          top: finalTop,
+          width: estimatedWidth,
+          maxWidth: '90vw',
+          transform: bestPosition === 'top' ? 'translateY(-100%)' :
+            bestPosition === 'left' ? 'translateY(0)' : // Left/Right centered vertically by logic above
+              'none' // Bottom and Right use default
+        }}
+        onMouseEnter={handleModalHover}
+        onMouseLeave={handleModalHoverEnd}
+        data-sidebar="true"
+      >
+        {/* Arrow pointing to the icon - Outside overflow container to prevent clipping */}
+        <div
+          className="absolute w-3 h-3 border-l border-t z-50"
+          style={{
+            backgroundColor: '#0a0a0a',
+            borderColor: '#1f1f1f',
+            ...arrowStyle
+          }}
+        />
+
+        <div
+          className="text-white rounded-lg shadow-2xl relative border overflow-y-auto overflow-x-hidden"
+          style={{
+            backgroundColor: '#0a0a0a',
+            borderColor: '#1f1f1f',
+            width: '100%',
+            maxHeight: '600px'
+          }}
+        >
+          {/* Header with icon and title - like reference screenshot */}
+          <div className="flex items-center gap-3 px-4 py-3">
+            {/* Enhanced icon based on overlay type */}
+            {hoveredOverlay.kind === 'text' && (
+              <div className="w-6 h-6 bg-blue-500 rounded flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-1l-4 4z" />
+                </svg>
+              </div>
+            )}
+            {hoveredOverlay.kind === 'image' && (
+              <div className="w-6 h-6 bg-green-500 rounded flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+            )}
+            {isModel && (
+              <div className="w-6 h-6 bg-purple-500 rounded flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+                </svg>
+              </div>
+            )}
+            {hoveredOverlay.kind === 'video' && (
+              <div className="w-6 h-6 bg-red-500 rounded flex items-center justify-center shadow-sm">
+                <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </div>
+            )}
+            <span
+              className="font-semibold text-white"
+              style={{ fontSize: '16px' }}
+            >
+              {hoveredOverlay.kind === 'image' ? 'Image' :
+                hoveredOverlay.kind === 'video' ? 'Video' :
+                  hoveredOverlay.kind === 'text' ? 'Text' :
+                    isModel ? (payload.title || '3D Model') :
+                      hoveredOverlay.kind}
+            </span>
+          </div>
+
+          {/* Underline separator - like reference screenshot */}
+          <div
+            className="mx-4"
+            style={{
+              borderTop: '1px solid #374151' // Gray-700 equivalent
+            }}
+          ></div>
+
+          {/* Content with larger text - like reference screenshot */}
+          <div className="px-4 py-4">
+            {/* Enhanced text content display with larger font */}
+            {hoveredOverlay.kind === 'text' && (
+              <div
+                className="overlay-text-content"
+                style={{
+                  color: '#f3f4f6', // Light gray text
+                  fontSize: '18px',  // Larger text size
+                  lineHeight: '1.4',
+                  fontWeight: '500'
+                }}
+              >
+                {payload.content || payload.text || 'Hello'}
+              </div>
+            )}
+
+            {hoveredOverlay.kind === 'image' && (
+              <div>
+                {payload.imageUrl && (
+                  <div className="mb-2">
+                    <img
+                      src={payload.imageUrl}
+                      alt={payload.alt || 'Overlay image'}
+                      className={`object-cover rounded w-full ${payload.clickable ? 'cursor-pointer hover:opacity-95 transition-opacity' : ''}`}
+                      style={{
+                        height: payload.height ? `${payload.height}px` : 'auto',
+                        maxHeight: payload.height ? 'none' : '180px' // Remove cap if custom height
+                      }}
+                      onClick={(e) => {
+                        if (payload.clickable) {
+                          e.stopPropagation(); // Prevent opening the expanded modal if clicking the link
+                          const url = payload.clickUrl || payload.imageUrl;
+                          if (url) {
+                            const formatUrl = (url: string) => {
+                              if (!url) return '';
+                              if (url.startsWith('http://') || url.startsWith('https://')) return url;
+                              return `https://${url}`;
+                            };
+                            const formattedUrl = formatUrl(url);
+                            window.open(formattedUrl, '_blank', 'noopener,noreferrer');
+                          }
+                        }
+                      }}
+                      onError={(e) => {
+                        e.currentTarget.src = '/placeholder-image.jpg';
+                      }}
+                    />
+                  </div>
+                )}
+                {payload.description && (
+                  <p className="text-gray-300 text-sm leading-relaxed mb-2 whitespace-pre-wrap max-h-[120px] overflow-y-auto pr-2">
+                    {payload.description}
+                  </p>
+                )}
+                <button
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs font-medium transition-colors cursor-pointer w-full"
+                  onClick={() => {
+                    setExpandedOverlay(hoveredOverlay);
+                    setIsModalOpen(true);
+                    setHoveredOverlay(null);
+                    setHoverPosition(null);
+                  }}
+                >
+                  View More
+                </button>
+              </div>
+            )}
+
+            {hoveredOverlay.kind === 'video' && hoveredOverlay.id && (
+              <div>
+                {/* Video Preview Area */}
+                <div className="mb-3 relative w-full">
+                  {payload.videoUrl ? (
+                    <div
+                      className="w-full"
+                      style={{
+                        height: payload.height ? `${payload.height}px` : undefined,
+                        aspectRatio: payload.height ? undefined : '16/9'
+                      }}
+                    >
+                      <VideoPlayerWithContinuity
+                        videoSrc={payload.videoUrl}
+                        videoId={(() => {
+                          // Extract YouTube video ID from various URL formats
+                          let videoId = null;
+                          let videoSrc = payload.videoUrl;
+
+                          // Handle different YouTube URL formats
+                          if (videoSrc.includes('youtube.com/watch?v=')) {
+                            videoId = videoSrc.split('v=')[1]?.split('&')[0];
+                          } else if (videoSrc.includes('youtu.be/')) {
+                            videoId = videoSrc.split('youtu.be/')[1]?.split('?')[0];
+                          } else if (videoSrc.includes('youtube.com/embed/')) {
+                            videoId = videoSrc.split('/embed/')[1]?.split('?')[0];
+                          }
+
+                          return videoId;
+                        })()}
+                        overlayId={hoveredOverlay.id!}
+                        payload={payload}
+                        videoStates={videoStates}
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      className="bg-gray-800 rounded flex items-center justify-center w-full"
+                      style={{ height: '192px' }}
+                    >
+                      <div className="text-center">
+                        <svg className="w-12 h-12 text-gray-500 mx-auto mb-2" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                        <p className="text-gray-400 text-sm">No video available</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Video Description */}
+                {payload.description && (
+                  <p className="text-gray-300 text-sm leading-relaxed mb-2 whitespace-pre-wrap max-h-[120px] overflow-y-auto pr-2">
+                    {payload.description}
+                  </p>
+                )}
+
+                <button
+                  className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs font-medium transition-colors cursor-pointer w-full"
+                  onClick={() => {
+                    setExpandedOverlay(hoveredOverlay);
+                    setIsModalOpen(true);
+                    setHoveredOverlay(null);
+                    setHoverPosition(null);
+                  }}
+                >
+                  View More
+                </button>
+              </div>
+            )}
+
+
+            {hoveredOverlay.kind === 'badge' && (
+              <div className="text-center">
+                <div
+                  className="inline-block px-3 py-1 rounded-full text-sm font-bold mb-2"
+                  style={{ backgroundColor: payload.color || '#EF4444', color: 'white' }}
+                >
+                  {payload.text || 'BADGE'}
+                </div>
+              </div>
+            )}
+
+            {isModel && payload.description && (
+              <div className="text-gray-200 text-sm leading-relaxed whitespace-pre-line">
+                {payload.description}
+              </div>
+            )}
+
+            {hoveredOverlay.kind === 'tooltip' && (
+              <div className="text-gray-200 text-sm leading-relaxed">
+                {payload.text || 'Tooltip information'}
+              </div>
+            )}
+
+            {hoveredOverlay.kind === 'html' && (
+              <div>
+                <h4 className="font-semibold text-lg mb-2">Custom Content</h4>
+                <div
+                  className="text-sm leading-relaxed text-gray-200"
+                  dangerouslySetInnerHTML={{ __html: payload.html || '<p>Custom HTML content</p>' }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+
+      </div>
+    );
+  };
+
+  // Render expanded modal
+  const renderExpandedModal = () => {
+    if (!isModalOpen || !expandedOverlay) return null;
+
+    let payload: any = {};
+    try {
+      payload = typeof expandedOverlay.payload === 'string'
+        ? JSON.parse(expandedOverlay.payload)
+        : expandedOverlay.payload || {};
+    } catch {
+      payload = {};
+    }
+
+    // Handle copy link functionality
+    const handleCopyLink = async () => {
+      try {
+        const currentUrl = window.location.href;
+        const url = new URL(currentUrl);
+        url.searchParams.set('overlay', expandedOverlay.id || '');
+        url.searchParams.set('scene', expandedOverlay.scene_id);
+
+        await navigator.clipboard.writeText(url.toString());
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      } catch (error) {
+        console.error('Failed to copy link:', error);
+      }
+    };
+
+    // Different layout based on fullscreen mode
+    if (isFullscreen) {
+      // Fullscreen mode: Show as overlay on the viewer with backdrop
+      return (
+        <>
+          {/* Right Sidebar - positioned absolutely, doesn't interfere with canvas */}
+          <div
+            className="fixed top-0 right-0 w-96 h-full bg-white shadow-2xl overflow-hidden z-[500] pointer-events-auto"
+            data-sidebar="true"
+          >
+            {/* Close button - top right with dark color */}
+            <button
+              onClick={() => {
+                setIsModalOpen(false);
+                setExpandedOverlay(null);
+              }}
+              className="absolute top-4 right-4 text-gray-800 hover:text-gray-600 transition-colors z-10 cursor-pointer"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <div className="p-6 pt-16">
+              {/* Horizontal line */}
+              <div className="border-t border-gray-200 mb-6"></div>
+
+              {renderModalContent(payload, handleCopyLink)}
+            </div>
+          </div>
+        </>
+      );
+    } else {
+      // Non-fullscreen mode: Show as floating panel
+      return (
+        <>
+          {/* Floating overlay panel - positioned fixed to viewport, not blocking main content */}
+          <div
+            className="fixed bottom-8 right-4 w-96 max-w-[calc(100vw-2rem)] bg-white shadow-2xl border border-gray-200 rounded-lg z-[500] pointer-events-auto max-h-[80vh] overflow-y-auto"
+            data-sidebar="true"
+          >
+            {/* Close button - top right */}
+            <button
+              onClick={() => {
+                setIsModalOpen(false);
+                setExpandedOverlay(null);
+              }}
+              className="absolute top-3 right-3 text-gray-800 hover:text-gray-600 transition-colors z-10 cursor-pointer bg-white rounded-full p-1 shadow-sm"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <div className="p-4 pt-12">
+              {renderModalContent(payload, handleCopyLink)}
+            </div>
+          </div>
+        </>
+      );
+    }
+  };
+
+  // Extract modal content rendering to avoid duplication
+  const renderModalContent = (payload: any, handleCopyLink: () => Promise<void>) => {
+    if (!expandedOverlay) return null;
+    return (
+      <>
+        {/* Image content */}
+        {expandedOverlay.kind === 'image' && payload.imageUrl && (
+          <div className="mb-4">
+            {/* Image header with icon and text */}
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <span className="text-lg font-medium text-gray-700">Image</span>
+            </div>
+
+            <img
+              src={payload.imageUrl}
+              alt={payload.alt || 'Overlay image'}
+              className={`w-full h-48 object-cover rounded-lg ${payload.clickable ? 'cursor-pointer hover:opacity-95 transition-opacity' : ''}`}
+              onClick={() => {
+                if (payload.clickable) {
+                  const url = payload.clickUrl || payload.imageUrl;
+                  if (url) {
+                    // Start absolute URLs with https/http
+                    const formatUrl = (url: string) => {
+                      if (!url) return '';
+                      if (url.startsWith('http://') || url.startsWith('https://')) return url;
+                      return `https://${url}`;
+                    };
+                    const formattedUrl = formatUrl(url);
+                    window.open(formattedUrl, '_blank', 'noopener,noreferrer');
+                  }
+                }
+              }}
+              onError={(e) => {
+                e.currentTarget.src = '/placeholder-image.jpg';
+              }}
+            />
+          </div>
+        )}
+
+        {/* Video content */}
+        {expandedOverlay.kind === 'video' && payload.videoUrl && (
+          <div className="mb-4">
+            {/* Video header with icon and text */}
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                <svg className="w-5 h-5 text-red-600" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </div>
+              <span className="text-lg font-medium text-gray-700">Video</span>
+            </div>
+
+            {(() => {
+              // Extract YouTube video ID from various URL formats
+              let videoId = null;
+              let videoSrc = payload.videoUrl;
+
+              if (videoSrc.includes('youtube.com/watch?v=')) {
+                videoId = videoSrc.split('v=')[1]?.split('&')[0];
+              } else if (videoSrc.includes('youtu.be/')) {
+                videoId = videoSrc.split('youtu.be/')[1]?.split('?')[0];
+              } else if (videoSrc.includes('youtube.com/embed/')) {
+                videoId = videoSrc.split('/embed/')[1]?.split('?')[0];
+              }
+
+              const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=0&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&loop=0&fs=1&cc_load_policy=0&iv_load_policy=3&autohide=1&start=0&html5=1&wmode=opaque&vq=hd720`;
+
+              return (
+                <iframe
+                  src={embedUrl}
+                  className="w-full h-48 rounded-lg"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                  title="Video content"
+                />
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Title with share icon - NOW BELOW image/video */}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-gray-900 flex-1 pr-4 leading-tight">
+            {payload.title || (
+              expandedOverlay.kind === 'image' ? 'Image Gallery' :
+                expandedOverlay.kind === 'video' ? 'Video Content' :
+                  'Information'
+            )}
+          </h2>
+
+          {/* Share icon with hover tooltip and click feedback */}
+          <div className="relative flex-shrink-0">
+            <button
+              onClick={handleCopyLink}
+              className="p-1 text-gray-600 hover:text-gray-800 transition-colors group cursor-pointer flex items-center justify-center"
+              title="Copy Link"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
+              </svg>
+            </button>
+
+            {/* Hover tooltip */}
+            <div className="absolute bottom-full right-0 mb-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              <div className="bg-gray-800 text-white text-xs px-2 py-1 rounded whitespace-nowrap">
+                Copy Link
+              </div>
+            </div>
+
+            {/* Success message - positioned below the icon to avoid overlap */}
+            {copySuccess && (
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-1">
+                <span className="text-green-600 font-medium text-sm whitespace-nowrap bg-white px-2 py-1 rounded shadow-sm border">
+                  Copied!
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Text content display */}
+        {expandedOverlay.kind === 'text' && (payload.content || payload.text) && (
+          <div className="mb-6">
+            {/* Text header with icon and text */}
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-1l-4 4z" />
+                </svg>
+              </div>
+              <span className="text-lg font-medium text-gray-700">Text</span>
+            </div>
+
+            <div className="p-4 bg-gray-50 rounded-lg">
+              <p className="text-gray-800 leading-relaxed text-lg font-medium">
+                {payload.content || payload.text}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Description - NOW directly below title */}
+        {payload.description && (
+          <div className="mb-6 max-h-[200px] overflow-y-auto pr-2">
+            <p className="text-gray-700 leading-relaxed text-lg font-medium whitespace-pre-wrap">
+              {payload.description}
+            </p>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="space-y-3">
+          {(payload.clickUrl || payload.imageUrl || payload.videoUrl) && (
+            <button
+              onClick={() => {
+                const url = payload.clickUrl || payload.imageUrl || payload.videoUrl;
+                if (url) {
+                  const formattedUrl = formatUrl(url);
+                  window.open(formattedUrl, '_blank', 'noopener,noreferrer');
+                }
+              }}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg transition-colors font-medium cursor-pointer"
+            >
+              {expandedOverlay.kind === 'image' ? 'View Link' : 'View Original'}
+            </button>
+          )}
+        </div>
+      </>
+    );
+  };
+
+  // Cleanup timeouts
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <>
+      {/* Render hover tooltip */}
+      {renderHoverTooltip()}
+
+      {/* Render expanded modal */}
+      {renderExpandedModal()}
+    </>
+  );
+}
+
+// Separate component for video player to avoid hooks in callbacks
+interface VideoPlayerProps {
+  videoSrc: string;
+  videoId: string | null;
+  overlayId: string;
+  payload: any;
+  videoStates: Map<string, any>;
+}
+
+const VideoPlayerWithContinuity: React.FC<VideoPlayerProps> = ({
+  videoSrc,
+  videoId,
+  overlayId,
+  payload,
+  videoStates
+}) => {
+  // All state hooks must be declared first
+  const videoState = videoStates.get(overlayId);
+  const isPlaying = videoState?.isVideoPlaying || false;
+  const [isMuted, setIsMuted] = useState(false);
+  const [hasUserInteracted, setHasUserInteracted] = useState(false);
+  const [useDirectVideo, setUseDirectVideo] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [autoplayFailed, setAutoplayFailed] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // All useEffect hooks must be declared after state hooks
+  useEffect(() => {
+    if (isPlaying && iframeRef.current && !hasUserInteracted) {
+      // Create a hidden video element to test autoplay capabilities
+      const testVideo = document.createElement('video');
+      testVideo.muted = false;
+      testVideo.autoplay = true;
+      testVideo.style.position = 'absolute';
+      testVideo.style.left = '-9999px';
+      testVideo.style.width = '1px';
+      testVideo.style.height = '1px';
+
+      // Test if autoplay with sound is possible
+      const testAutoplay = async () => {
+        try {
+          document.body.appendChild(testVideo);
+          await testVideo.play();
+          // If we get here, autoplay with sound is allowed
+          setAutoplayFailed(false);
+          setIsMuted(false);
+        } catch (e) {
+          // Autoplay with sound failed, fallback to muted
+          setAutoplayFailed(true);
+          setIsMuted(true);
+        } finally {
+          if (document.body.contains(testVideo)) {
+            document.body.removeChild(testVideo);
+          }
+        }
+      };
+
+      testAutoplay();
+
+      // Try to trigger autoplay via postMessage after a short delay
+      const timeoutId = setTimeout(() => {
+        if (iframeRef.current) {
+          try {
+            // Try to play with sound first
+            iframeRef.current.contentWindow?.postMessage(
+              '{"event":"command","func":"playVideo","args":""}',
+              '*'
+            );
+            if (!autoplayFailed) {
+              iframeRef.current.contentWindow?.postMessage(
+                '{"event":"command","func":"unMute","args":""}',
+                '*'
+              );
+            }
+          } catch (e) {
+            // If it fails, try muted autoplay
+            setAutoplayFailed(true);
+            setIsMuted(true);
+          }
+        }
+      }, 800);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isPlaying, videoId, hasUserInteracted, autoplayFailed]);
+
+  // All callback functions must be declared after hooks
+  const handleUnmute = () => {
+    setIsMuted(false);
+    setHasUserInteracted(true);
+    setAutoplayFailed(false);
+
+    // Force iframe reload with unmuted parameters
+    setLoadAttempt(prev => prev + 1);
+  };
+
+  const handleIframeError = () => {
+    setUseDirectVideo(true);
+  };
+
+  // Early returns must come AFTER all hooks are declared
+  if (!isPlaying) {
+    return (
+      <div
+        className="bg-gray-800 rounded flex items-center justify-center"
+        style={{
+          width: '100%',
+          height: '100%'
+        }}
+      >
+        <div className="text-center">
+          <svg className="w-12 h-12 text-gray-500 mx-auto mb-2" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+          <p className="text-gray-400 text-sm">Hover over video icon to play</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!videoId) {
+    return (
+      <div
+        className="bg-red-900 rounded flex items-center justify-center"
+        style={{
+          width: '100%',
+          height: '100%'
+        }}
+      >
+        <div className="text-center">
+          <p className="text-red-400 text-sm">Invalid video URL</p>
+          <p className="text-red-300 text-xs mt-1">Could not extract video ID</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Enhanced embed URL - try with sound first, fallback to muted
+  const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&mute=${(isMuted || autoplayFailed) ? 1 : 0}&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&loop=0&fs=1&cc_load_policy=0&iv_load_policy=3&autohide=1&start=0&html5=1&wmode=opaque&vq=hd720&t=0s`;
+
+  return (
+    <div
+      className="rounded overflow-hidden bg-black relative"
+      style={{
+        width: '100%',
+        height: '100%'
+      }}
+    >
+      {!useDirectVideo ? (
+        // Primary iframe approach with aggressive autoplay
+        <iframe
+          ref={iframeRef}
+          key={`${videoId}-${isMuted ? 'muted' : 'unmuted'}-${loadAttempt}`}
+          src={embedUrl}
+          className="w-full h-full"
+          style={{ border: 'none' }}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          title="Video preview"
+          onLoad={() => {
+            // Silently handle iframe load
+          }}
+          onError={handleIframeError}
+        />
+      ) : (
+        // Fallback: Show thumbnail with direct YouTube link
+        <div className="w-full h-full relative">
+          <img
+            src={`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`}
+            alt="Video thumbnail"
+            className="w-full h-full object-cover"
+            onError={(e) => {
+              e.currentTarget.src = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+            }}
+          />
+          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
+            <button
+              onClick={() => window.open(formatUrl(videoSrc), '_blank')}
+              className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition-colors shadow-lg"
+            >
+              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              Play Video
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Unmute button overlay - only show if autoplay failed or muted */}
+      {!useDirectVideo && (isMuted || autoplayFailed) && !hasUserInteracted && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
+          <button
+            onClick={handleUnmute}
+            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-lg"
+          >
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+            </svg>
+            {autoplayFailed ? 'Click for sound' : 'Click to unmute'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};

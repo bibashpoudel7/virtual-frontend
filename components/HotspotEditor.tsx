@@ -192,7 +192,7 @@ export default function HotspotEditor({ hotspot, onSave, onDelete, onClose }: Ho
           </div>
 
           {hotspot && (
-            <div className="text-sm text-gray-600">
+            <div className="text-sm text-gray-900 ">
               Position: Yaw {hotspot.yaw.toFixed(2)}°, Pitch {hotspot.pitch.toFixed(2)}°
             </div>
           )}

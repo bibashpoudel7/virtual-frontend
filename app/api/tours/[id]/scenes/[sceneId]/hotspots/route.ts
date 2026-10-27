@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api';
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string; sceneId: string } }
+  { params }: { params: Promise<{ id: string; sceneId: string }> }
 ) {
   try {
-    const sceneId = params.sceneId;
+    const { sceneId } = await params;
     const token = request.headers.get('Authorization')?.split('Bearer ')[1];
     
     // Call the backend API to get hotspots for this scene
@@ -39,12 +39,12 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; sceneId: string } }
+  { params }: { params: Promise<{ id: string; sceneId: string }> }
 ) {
   try {
     const url = new URL(request.url);
     const hotspotId = url.pathname.split('/').pop();
-    const sceneId = params.sceneId;
+    const { sceneId } = await params;
     const token = request.headers.get('Authorization')?.split('Bearer ')[1];
     
     if (!hotspotId || hotspotId === 'hotspots') {

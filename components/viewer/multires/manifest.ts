@@ -34,10 +34,8 @@ function normalizeLevelsFromTiles(tiles: any[], tileSize: number): TileLevel[] {
 
 export function parseSceneManifest(scene: Scene): ExtendedManifest | null {
   const raw = scene.tiles_manifest;
-  console.log('[parseSceneManifest] Raw tiles_manifest:', raw);
   
   if (!raw) {
-    console.log('[parseSceneManifest] No tiles_manifest found');
     return null;
   }
 
@@ -51,9 +49,14 @@ export function parseSceneManifest(scene: Scene): ExtendedManifest | null {
     } else {
       manifestLike = typeof raw === 'string' ? JSON.parse(raw) : raw;
     }
-    console.log('[parseSceneManifest] Parsed manifest:', manifestLike);
   } catch (error) {
-    console.error('[parseSceneManifest] Failed to parse tiles_manifest:', error, 'Raw value:', raw);
+    console.error('[parseSceneManifest] Failed to parse tiles_manifest:', error);
+    return null;
+  }
+
+  // Check if manifestLike is null or undefined after parsing
+  if (!manifestLike || typeof manifestLike !== 'object') {
+    console.error('[parseSceneManifest] Parsed manifest is null or not an object:', manifestLike);
     return null;
   }
 
@@ -76,10 +79,17 @@ export function parseSceneManifest(scene: Scene): ExtendedManifest | null {
 
   levels.sort((a, b) => a.level - b.level);
 
+  // Safely access nested properties with fallbacks
   const originalWidth =
-    manifestLike.originalWidth ?? manifestLike.dimensions?.width ?? levels.at(-1)?.width ?? 4096;
+    manifestLike.originalWidth ?? 
+    manifestLike.dimensions?.width ?? 
+    levels.at(-1)?.width ?? 
+    4096;
   const originalHeight =
-    manifestLike.originalHeight ?? manifestLike.dimensions?.height ?? levels.at(-1)?.height ?? 2048;
+    manifestLike.originalHeight ?? 
+    manifestLike.dimensions?.height ?? 
+    levels.at(-1)?.height ?? 
+    2048;
 
   const manifest: ExtendedManifest = {
     type: manifestLike.type ?? 'multires',
@@ -117,11 +127,9 @@ export function buildTileUrl(
 
   if (tileEntry?.url) {
     if (/^https?:\/\//i.test(tileEntry.url)) {
-      console.log('[buildTileUrl] Using absolute URL from tile entry:', tileEntry.url);
       return tileEntry.url;
     }
     const url = new URL(tileEntry.url, window.location.origin).toString();
-    console.log('[buildTileUrl] Using relative URL from tile entry:', url);
     return url;
   }
 
@@ -136,15 +144,6 @@ export function buildTileUrl(
   const normalizedBase = (manifest.basePath ?? baseFromPreview ?? `${window.location.origin}/scenes/${sceneId}/tiles`).replace(/\/$/, '');
   const extension = manifest.format ?? 'jpg';
   const url = `${normalizedBase}/l${level}_${row}_${col}.${extension}`;
-  
-  console.log('[buildTileUrl] Constructed URL:', {
-    basePath: normalizedBase,
-    level,
-    row,
-    col,
-    extension,
-    finalUrl: url
-  });
   
   return url;
 }

@@ -4,8 +4,16 @@ import { useState } from 'react';
 import { Hotspot, CreateHotspotRequest } from '@/types/tour';
 import { tourService } from '@/services/tourService';
 
+interface HotspotFormData {
+  kind: string;
+  yaw: number;
+  pitch: number;
+  payload: Record<string, unknown>;
+}
+
 interface HotspotEditorProps {
   sceneId: string;
+  tourId: string;
   hotspots: Hotspot[];
   onHotspotAdded?: (hotspot: Hotspot) => void;
   onHotspotDeleted?: (hotspotId: string) => void;
@@ -13,13 +21,14 @@ interface HotspotEditorProps {
 
 export default function HotspotEditor({ 
   sceneId, 
+  tourId,
   hotspots, 
   onHotspotAdded,
   onHotspotDeleted 
 }: HotspotEditorProps) {
   const [isAdding, setIsAdding] = useState(false);
   const [selectedHotspot, setSelectedHotspot] = useState<Hotspot | null>(null);
-  const [formData, setFormData] = useState<CreateHotspotRequest>({
+  const [formData, setFormData] = useState<HotspotFormData>({
     kind: 'navigation',
     yaw: 0,
     pitch: 0,
@@ -42,7 +51,18 @@ export default function HotspotEditor({
     setError(null);
 
     try {
-      const hotspot = await tourService.createHotspot(sceneId, formData);
+      // Create the proper request object with required fields
+      const targetSceneId = typeof formData.payload?.targetSceneId === 'string' 
+        ? formData.payload.targetSceneId 
+        : sceneId;
+        
+      const createRequest: CreateHotspotRequest = {
+        ...formData,
+        tour_id: tourId,
+        target_scene_id: targetSceneId
+      };
+      
+      const hotspot = await tourService.createHotspot(sceneId, createRequest);
       onHotspotAdded?.(hotspot);
       setIsAdding(false);
       setFormData({
@@ -66,7 +86,7 @@ export default function HotspotEditor({
             <label className="block text-sm font-medium mb-1">Target Scene ID</label>
             <input
               type="text"
-              value={formData.payload?.targetSceneId || ''}
+              value={(formData.payload?.targetSceneId as string) || ''}
               onChange={(e) => setFormData({
                 ...formData,
                 payload: { ...formData.payload, targetSceneId: e.target.value }
@@ -83,7 +103,7 @@ export default function HotspotEditor({
           <div>
             <label className="block text-sm font-medium mb-1">Text Content</label>
             <textarea
-              value={formData.payload?.text || ''}
+              value={(formData.payload?.text as string) || ''}
               onChange={(e) => setFormData({
                 ...formData,
                 payload: { ...formData.payload, text: e.target.value }
@@ -101,7 +121,7 @@ export default function HotspotEditor({
             <label className="block text-sm font-medium mb-1">Image URL</label>
             <input
               type="url"
-              value={formData.payload?.imageUrl || ''}
+              value={(formData.payload?.imageUrl as string) || ''}
               onChange={(e) => setFormData({
                 ...formData,
                 payload: { ...formData.payload, imageUrl: e.target.value }
@@ -118,7 +138,7 @@ export default function HotspotEditor({
             <label className="block text-sm font-medium mb-1">Video URL</label>
             <input
               type="url"
-              value={formData.payload?.videoUrl || ''}
+              value={(formData.payload?.videoUrl as string) || ''}
               onChange={(e) => setFormData({
                 ...formData,
                 payload: { ...formData.payload, videoUrl: e.target.value }
@@ -136,7 +156,7 @@ export default function HotspotEditor({
               <label className="block text-sm font-medium mb-1">Link URL</label>
               <input
                 type="url"
-                value={formData.payload?.linkUrl || ''}
+                value={(formData.payload?.linkUrl as string) || ''}
                 onChange={(e) => setFormData({
                   ...formData,
                   payload: { ...formData.payload, linkUrl: e.target.value }
@@ -149,7 +169,7 @@ export default function HotspotEditor({
               <label className="block text-sm font-medium mb-1">Link Text</label>
               <input
                 type="text"
-                value={formData.payload?.linkText || ''}
+                value={(formData.payload?.linkText as string) || ''}
                 onChange={(e) => setFormData({
                   ...formData,
                   payload: { ...formData.payload, linkText: e.target.value }
@@ -277,7 +297,9 @@ export default function HotspotEditor({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onHotspotDeleted?.(hotspot.id);
+                  if (hotspot.id) {
+                    onHotspotDeleted?.(hotspot.id);
+                  }
                 }}
                 className="text-red-500 hover:text-red-700"
               >
@@ -289,7 +311,7 @@ export default function HotspotEditor({
         
         {hotspots.length === 0 && !isAdding && (
           <p className="text-gray-500 text-center py-4">
-            No hotspots yet. Click "Add Hotspot" to create one.
+            No hotspots yet. Click &quot;Add Hotspot&quot; to create one.
           </p>
         )}
       </div>

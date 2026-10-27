@@ -16,6 +16,17 @@ interface UploadProgress {
   details?: string;
 }
 
+interface UploadResult {
+  tilesGenerated?: number;
+  dimensions?: {
+    width: number;
+    height: number;
+  };
+  processedSize?: number;
+  url?: string;
+  success: boolean;
+}
+
 export default function SceneImageUploader({
   sceneId,
   onUploadComplete,
@@ -29,7 +40,7 @@ export default function SceneImageUploader({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [enableTiles, setEnableTiles] = useState(true);
-  const [uploadResult, setUploadResult] = useState<any>(null);
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -116,7 +127,7 @@ export default function SceneImageUploader({
 
         xhr.addEventListener('load', () => {
           if (xhr.status === 200) {
-            const response = JSON.parse(xhr.responseText);
+            const response = JSON.parse(xhr.responseText) as UploadResult;
             resolve(response);
           } else {
             reject(new Error(`Upload failed with status ${xhr.status}`));
@@ -135,7 +146,7 @@ export default function SceneImageUploader({
       xhr.open('POST', '/api/process-and-upload');
       xhr.send(formData);
 
-      const result = await uploadPromise;
+      const result = await uploadPromise as UploadResult;
       
       // Stage 3: Complete
       setUploadProgress({
@@ -143,7 +154,7 @@ export default function SceneImageUploader({
         progress: 100,
         message: 'Upload complete!',
         details: enableTiles 
-          ? `Generated ${result.tilesGenerated} tiles for optimal viewing`
+          ? `Generated ${result.tilesGenerated || 0} tiles for optimal viewing`
           : 'Image processed and uploaded successfully'
       });
 
@@ -336,13 +347,17 @@ export default function SceneImageUploader({
             </div>
 
             <div className="bg-gray-50 p-4 rounded-lg space-y-2">
-              <p className="text-sm text-gray-600">
-                <span className="font-medium">Dimensions:</span> {uploadResult.dimensions?.width} × {uploadResult.dimensions?.height}
-              </p>
-              <p className="text-sm text-gray-600">
-                <span className="font-medium">Processed Size:</span> {(uploadResult.processedSize / 1024 / 1024).toFixed(2)} MB
-              </p>
-              {uploadResult.tilesGenerated > 0 && (
+              {uploadResult.dimensions && (
+                <p className="text-sm text-gray-600">
+                  <span className="font-medium">Dimensions:</span> {uploadResult.dimensions.width} × {uploadResult.dimensions.height}
+                </p>
+              )}
+              {uploadResult.processedSize && (
+                <p className="text-sm text-gray-600">
+                  <span className="font-medium">Processed Size:</span> {(uploadResult.processedSize / 1024 / 1024).toFixed(2)} MB
+                </p>
+              )}
+              {uploadResult.tilesGenerated && uploadResult.tilesGenerated > 0 && (
                 <p className="text-sm text-gray-600">
                   <span className="font-medium">Tiles Generated:</span> {uploadResult.tilesGenerated}
                 </p>

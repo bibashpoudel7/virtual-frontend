@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
+import { generateCubeMapTiles } from '@/lib/cubemap-tiles';
 
 // frontend/app/api/process-image/route.ts
 interface TileInfo {
@@ -82,14 +83,14 @@ export async function POST(request: NextRequest) {
       
       // Get image metadata
       const metadata = await sharp(buffer).metadata();
-      console.log({metadata})
       const originalWidth = metadata.width || 4096;
       const originalHeight = metadata.height || 2048;
       
-      console.log(`\n=== Advanced Tile Generation [${new Date().toISOString()}] ===`);
+      console.log(`\n=== Cube Map Tile Generation [${new Date().toISOString()}] ===`);
       console.log(`Image dimensions: ${originalWidth}x${originalHeight}`);
       
-      const tiles = await generateAdvancedTiles(buffer, originalWidth, originalHeight, sceneId);
+      // Generate cube map tiles
+      const { tiles, manifest } = await generateCubeMapTiles(buffer, sceneId);
       
       console.log(`Total tiles generated: ${tiles.length}`);
       
@@ -102,7 +103,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         tiles: tilesObject,
-        count: tiles.length
+        count: tiles.length,
+        manifest: manifest
       });
     }
     

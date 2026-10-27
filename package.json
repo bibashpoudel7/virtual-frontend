@@ -11,16 +11,22 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.883.0",
     "@aws-sdk/s3-request-presigner": "^3.883.0",
+    "@iconify/react": "^6.0.2",
     "@react-three/drei": "^10.7.4",
     "@react-three/fiber": "^9.3.0",
     "@types/three": "^0.180.0",
     "axios": "^1.11.0",
-    "lucide-react": "^0.540.0",
+    "dotenv": "^17.2.3",
+    "lucide-react": "^0.562.0",
     "next": "15.4.6",
     "pannellum-react": "^1.2.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-dropzone": "^14.3.8",
+    "react-hook-form": "^7.71.1",
+    "react-loading-skeleton": "^3.5.0",
+    "react-phone-number-input": "^3.4.14",
+    "react-toastify": "^11.0.5",
     "three": "^0.180.0"
   },
   "devDependencies": {
@@ -33,5 +39,6 @@
     "eslint-config-next": "15.4.6",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "packageManager": "yarn@4.12.0+sha512.f45ab632439a67f8bc759bf32ead036a1f413287b9042726b7cc4818b7b49e14e9423ba49b18f9e06ea4941c1ad062385b1d8760a8d5091a1a31e5f6219afca8"
 }

@@ -2,7 +2,6 @@ import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } f
 import { ApiError, BaseResponse } from '@/types/api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
-const API_BASE_URL_NESTED = process.env.NEXT_PUBLIC_API_BASE_URL_NESTED;
 
 
 
@@ -90,7 +89,6 @@ const createApiInstance = (baseURL?: string): AxiosInstance => {
 // Create API instances
 const api = createApiInstance(API_BASE_URL);
 const apiWithAuth = createApiInstance(API_BASE_URL);
-const nestedApi = createApiInstance(API_BASE_URL_NESTED);
 
 // Helper function to handle API responses
 const handleResponse = <T>(response: AxiosResponse<BaseResponse<T>>): T => {
@@ -134,15 +132,4 @@ export const apiClient = {
   },
 };
 
-export const nestedApiClient = {
-  post: async <T>(
-    url: string,
-    data?: any,
-    config?: AxiosRequestConfig
-  ): Promise<T> => {
-    const response = await nestedApi.post<BaseResponse<T>>(url, data, config);
-    return handleResponse(response);
-  },
-};
-
-export { api, apiWithAuth, nestedApi };
+export { api, apiWithAuth };

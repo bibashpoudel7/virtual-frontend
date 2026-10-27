@@ -3,24 +3,48 @@
 import React from 'react';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
-import Pricing from '../components/Pricing';
-import { 
-  Play, 
-  Globe, 
-  Smartphone, 
-  Camera, 
-  Users, 
-  Shield, 
+// import Pricing from '../components/Pricing';
+import HomeTourViewer from '../components/HomeTourViewer';
+import {
+  Play,
+  Globe,
+  Smartphone,
+  Camera,
+  Users,
+  Shield,
   ArrowRight,
-  CheckCircle,
   Star,
   Zap,
-  Award,
-  BarChart3
+  type LucideIcon
 } from 'lucide-react';
 
-const HomePage = () => {
-  const features = [
+interface HomePageFeature {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+}
+
+interface Stat {
+  number: string;
+  label: string;
+}
+
+interface Testimonial {
+  name: string;
+  role: string;
+  content: string;
+  rating: number;
+  image: string;
+}
+
+interface UseCase {
+  title: string;
+  description: string;
+  icon: string;
+}
+
+const HomePage: React.FC = () => {
+  const features: HomePageFeature[] = [
     {
       icon: Camera,
       title: '360° Immersive Views',
@@ -53,14 +77,14 @@ const HomePage = () => {
     },
   ];
 
-  const stats = [
+  const stats: Stat[] = [
     { number: '10M+', label: 'Virtual Tours Taken' },
     { number: '150+', label: 'Countries Available' },
     { number: '98%', label: 'Customer Satisfaction' },
     { number: '24/7', label: 'Support Available' },
   ];
 
-  const testimonials = [
+  const testimonials: Testimonial[] = [
     {
       name: 'Sarah Johnson',
       role: 'Real Estate Agent',
@@ -84,7 +108,7 @@ const HomePage = () => {
     },
   ];
 
-  const useCases = [
+  const useCases: UseCase[] = [
     {
       title: 'Real Estate',
       description: 'Showcase properties to potential buyers anywhere in the world',
@@ -110,8 +134,8 @@ const HomePage = () => {
   return (
     <div className="min-h-screen bg-white">
       <Header />
-      
-      <section className="relative bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 text-white">
+
+      <section className="relative bg-indigo-600 text-white">
         <div className="absolute inset-0 bg-black opacity-20"></div>
         <div className="relative container mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
@@ -121,18 +145,21 @@ const HomePage = () => {
                 <span className="text-yellow-300"> Virtual Tours</span>
               </h1>
               <p className="text-xl mb-8 text-gray-100">
-                Experience immersive 360° tours from anywhere. Perfect for real estate, 
+                Experience immersive 360° tours from anywhere. Perfect for real estate,
                 tourism, education, and events. Start your journey today!
               </p>
               <div className="flex flex-col sm:flex-row gap-4 mb-8">
-                <button className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors duration-200 flex items-center justify-center gap-2">
+                <button
+                  onClick={() => window.location.href = '/showcase'}
+                  className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer"
+                >
                   <Play className="w-5 h-5" />
+                  Browse Virtual Tours
+                </button>
+                {/* <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-200 flex items-center justify-center gap-2">
                   Start Free Trial
-                </button>
-                <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-200 flex items-center justify-center gap-2">
-                  Watch Demo
                   <ArrowRight className="w-5 h-5" />
-                </button>
+                </button> */}
               </div>
               <div className="flex items-center gap-6">
                 <div className="flex -space-x-2">
@@ -148,7 +175,7 @@ const HomePage = () => {
                 <div>
                   <div className="flex text-yellow-300 mb-1">
                     {[...Array(5)].map((_, i) => (
-                      <Star key={i} className="w-4 h-4 fill-current" />
+                      <Star key={i} className="w-4 h-6 fill-current" />
                     ))}
                   </div>
                   <p className="text-sm text-gray-100">Trusted by 50,000+ users</p>
@@ -156,21 +183,7 @@ const HomePage = () => {
               </div>
             </div>
             <div className="relative">
-              <div className="aspect-video bg-gray-900 rounded-2xl shadow-2xl overflow-hidden">
-                <img 
-                  src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800"
-                  alt="Virtual Tour Preview"
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <button className="bg-white/90 backdrop-blur-sm rounded-full p-6 hover:bg-white transition-all duration-200 transform hover:scale-110">
-                    <Play className="w-8 h-8 text-indigo-600 ml-1" />
-                  </button>
-                </div>
-              </div>
-              <div className="absolute -bottom-6 -right-6 bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg font-bold shadow-lg">
-                <span className="text-2xl">360°</span> Experience
-              </div>
+              <HomeTourViewer className="aspect-video shadow-2xl" />
             </div>
           </div>
         </div>
@@ -185,6 +198,85 @@ const HomePage = () => {
                 <div className="text-gray-600">{stat.label}</div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="py-20 bg-indigo-50">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-12">
+            <h2 className="text-4xl font-bold text-gray-900 mb-4">
+              Featured Virtual Tours
+            </h2>
+            <p className="text-xl text-gray-600">
+              Explore some of our most popular immersive experiences
+            </p>
+          </div>
+          <div className="text-center mb-8">
+            <button
+              onClick={() => window.location.href = '/showcase'}
+              className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors duration-200 inline-flex items-center gap-2 cursor-pointer"
+            >
+              <Globe className="w-5 h-5" />
+              View All Tours
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300">
+              <div className="h-48 bg-indigo-500 flex items-center justify-center">
+                <div className="text-white text-center">
+                  <Camera className="w-12 h-12 mx-auto mb-2" />
+                  <p className="text-sm">360° Experience</p>
+                </div>
+              </div>
+              <div className="p-6">
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Luxury Properties</h3>
+                <p className="text-gray-600 mb-4">Explore stunning real estate with immersive virtual tours</p>
+                <button
+                  onClick={() => window.location.href = '/showcase'}
+                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1 cursor-pointer"
+                >
+                  Explore <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300">
+              <div className="h-48 bg-teal-500 flex items-center justify-center">
+                <div className="text-white text-center">
+                  <Globe className="w-12 h-12 mx-auto mb-2" />
+                  <p className="text-sm">Travel Destinations</p>
+                </div>
+              </div>
+              <div className="p-6">
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Travel & Tourism</h3>
+                <p className="text-gray-600 mb-4">Visit amazing destinations from the comfort of your home</p>
+                <button
+                  onClick={() => window.location.href = '/showcase'}
+                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1 cursor-pointer"
+                >
+                  Discover <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300">
+              <div className="h-48 bg-purple-500 flex items-center justify-center">
+                <div className="text-white text-center">
+                  <Users className="w-12 h-12 mx-auto mb-2" />
+                  <p className="text-sm">Event Venues</p>
+                </div>
+              </div>
+              <div className="p-6">
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Event Spaces</h3>
+                <p className="text-gray-600 mb-4">Preview venues for your special events and celebrations</p>
+                <button
+                  onClick={() => window.location.href = '/showcase'}
+                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1 cursor-pointer"
+                >
+                  Preview <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -216,7 +308,7 @@ const HomePage = () => {
         </div>
       </section>
 
-      <section className="py-20 bg-gradient-to-r from-indigo-50 to-purple-50">
+      <section className="py-20 bg-slate-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
             <h2 className="text-4xl font-bold text-gray-900 mb-4">
@@ -241,9 +333,9 @@ const HomePage = () => {
         </div>
       </section>
 
-      <Pricing />
+      {/* <Pricing /> */}
 
-      <section className="py-20 bg-white">
+      {/* <section className="py-20 bg-white">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
             <h2 className="text-4xl font-bold text-gray-900 mb-4">
@@ -280,7 +372,7 @@ const HomePage = () => {
             ))}
           </div>
         </div>
-      </section>
+      </section> */}
 
       <section className="py-20 bg-indigo-600 text-white">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center">
@@ -291,17 +383,20 @@ const HomePage = () => {
             Join thousands of users creating amazing virtual experiences
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors duration-200 flex items-center justify-center gap-2">
-              Start Your Free Trial
+            <button
+              onClick={() => window.location.href = '/showcase'}
+              className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              Browse Virtual Tours
               <ArrowRight className="w-5 h-5" />
             </button>
-            <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-200">
-              Schedule a Demo
-            </button>
+            {/* <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-200">
+              Start Your Free Trial
+            </button> */}
           </div>
-          <p className="mt-6 text-indigo-200">
+          {/* <p className="mt-6 text-indigo-200">
             No credit card required • 14-day free trial • Cancel anytime
-          </p>
+          </p> */}
         </div>
       </section>
 

@@ -2,55 +2,149 @@
 
 // frontend/app/tours/[id]/page.tsx
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import SceneManager from '@/components/scenes/SceneManager';
-import VirtualTourViewer from '@/components/viewer/VirtualTourViewer';
+import TourEditor from '@/components/viewer/TourEditor';
+import EditTour from '@/components/tours/EditTour';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { tourService } from '@/services/tourService';
+import TourSteps from '@/components/tours/TourSteps';
+import { ArrowLeft, Code, Eye, Globe, Loader2 } from 'lucide-react';
+import EmbedCodeModal from '@/components/tours/EmbedCodeModal';
+import IntroModelSettings from '@/components/tours/IntroModelSettings';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'react-toastify';
 
 export default function TourDetailsPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const tourId = params.id as string;
 
   const [tour, setTour] = useState<Tour | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [selectedScene, setSelectedScene] = useState<Scene>();
-  const [activeTab, setActiveTab] = useState<'scenes' | 'viewer'>('viewer');  // Simplified to just scenes and viewer
-  const [loading, setLoading] = useState(true);
+
+  // Derive active tab from URL query param, default to 'scenes'
+  const activeTab = (searchParams.get('tab') === 'viewer' ? 'viewer' : searchParams.get('tab') === 'edit' ? 'edit' : 'scenes') as 'scenes' | 'viewer' | 'edit';
+  const [tourLoading, setTourLoading] = useState(true);
+  const [scenesLoading, setScenesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalScenes, setTotalScenes] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Full-page spinner only until the first load finishes; later refreshes must not unmount
+  // SceneManager (it opens the uploader right after creating a scene)
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const loading = (!hasLoadedOnce && scenesLoading) || (tourLoading && !tour);
+  const [publishing, setPublishing] = useState(false);
+  const [showEmbed, setShowEmbed] = useState(false);
+  const { user: currentUser, isAdmin } = useAuth();
+
+  // Tour owners and admins can change publication status (enforced by the API too)
+  const canPublish = isAdmin || (!!currentUser && tour?.user_id === currentUser.id);
+
+  const handleTogglePublish = async () => {
+    if (!tour) return;
+    const newStatus = !tour.is_published;
+    setPublishing(true);
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
+      const separator = baseUrl.endsWith('/') ? '' : '/';
+      const response = await fetch(`${baseUrl}${separator}tours/${tourId}/publish`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('accessToken') || localStorage.getItem('auth_token')}`,
+        },
+        body: JSON.stringify({ is_published: newStatus }),
+      });
+      if (!response.ok) throw new Error('Failed to update publication status');
+      setTour({ ...tour, is_published: newStatus });
+      toast.success(`Tour ${newStatus ? 'published' : 'moved back to draft'}`);
+    } catch (err) {
+      console.error('Error updating publication status:', err);
+      toast.error('Failed to update publication status');
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   useEffect(() => {
     fetchTourData();
+    fetchScenes(1); // Load first page initially
   }, [tourId]);
 
   const fetchTourData = async () => {
     try {
-      setLoading(true);
+      setTourLoading(true);
       setError(null);
-      
-      // Fetch tour details
       const tourData = await tourService.getTour(tourId);
       setTour(tourData);
-      
-      // Fetch scenes for this tour
-      const scenesData = await tourService.getScenes(tourId);
-      setScenes(scenesData);
-      
-      // Select first scene by default
-      if (scenesData.length > 0) {
-        setSelectedScene(scenesData[0]);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tour data');
     } finally {
-      setLoading(false);
+      setTourLoading(false);
+    }
+  };
+
+  const fetchScenes = async (page: number, append: boolean = false) => {
+    try {
+      if (append) setLoadingMore(true);
+      else setScenesLoading(true);
+
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5555/api/';
+      const separator = baseUrl.endsWith('/') ? '' : '/';
+      const sceneLimit = 10;
+
+      const response = await fetch(`${baseUrl}${separator}tours/${tourId}/scenes?page=${page}&limit=${sceneLimit}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+        }
+      });
+      const data = await response.json();
+
+      if (data.statusCode !== 200) {
+        throw new Error(data.message || 'Failed to fetch scenes');
+      }
+
+      const scenesData = data.datas || [];
+
+      if (append) {
+        // Only append if these scenes aren't already in the list
+        setScenes(prev => {
+          const existingIds = new Set(prev.map(s => s.id));
+          const newScenes = scenesData.filter((s: Scene) => !existingIds.has(s.id));
+          return [...prev, ...newScenes];
+        });
+      } else {
+        setScenes(scenesData);
+      }
+
+      setTotalScenes(data.total || 0);
+      setTotalPages(Math.ceil((data.total || 0) / sceneLimit));
+      setCurrentPage(page);
+
+      // Select first scene by default if no scene selected
+      if (page === 1 && scenesData.length > 0 && !selectedScene) {
+        setSelectedScene(scenesData[0]);
+      }
+    } catch (err) {
+      console.error('Fetch scenes error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load scenes');
+    } finally {
+      setScenesLoading(false);
+      setLoadingMore(false);
+      setHasLoadedOnce(true);
     }
   };
 
   const handleSceneAdded = async (scene: Scene) => {
     setScenes([...scenes, scene]);
     setSelectedScene(scene);
+    // Update total count when a new scene is added
+    setTotalScenes(prev => prev + 1);
   };
 
   const handleSceneDeleted = async (sceneId: string) => {
@@ -58,13 +152,15 @@ export default function TourDetailsPage() {
     if (selectedScene?.id === sceneId) {
       setSelectedScene(scenes[0] || null);
     }
+    // Update total count when a scene is deleted
+    setTotalScenes(prev => Math.max(0, prev - 1));
   };
 
   const handleSceneSelected = (scene: Scene) => {
     setSelectedScene(scene);
     // Switch to viewer tab when a scene is selected
     if (activeTab === 'scenes') {
-      setActiveTab('viewer');
+      router.push(`/admin/tours/${tourId}?tab=viewer`);
     }
   };
 
@@ -106,20 +202,8 @@ export default function TourDetailsPage() {
     }
   };
 
-  const handleOverlayDeleted = async (overlayId: string) => {
-    if (selectedScene) {
-      try {
-        await tourService.deleteOverlay(selectedScene.id, overlayId);
-        const updatedScene = {
-          ...selectedScene,
-          overlays: selectedScene.overlays.filter(o => o.id !== overlayId)
-        };
-        setSelectedScene(updatedScene);
-        setScenes(scenes.map(s => s.id === selectedScene.id ? updatedScene : s));
-      } catch (err) {
-        console.error('Failed to delete overlay:', err);
-      }
-    }
+  const handleTourUpdate = (updatedTour: Tour) => {
+    setTour(updatedTour);
   };
 
   if (loading) {
@@ -139,7 +223,7 @@ export default function TourDetailsPage() {
         <div className="text-center">
           <p className="text-red-600 mb-4">{error}</p>
           <button
-            onClick={() => router.push('/tours')}
+            onClick={() => router.push('/admin/tours')}
             className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
           >
             Back to Tours
@@ -154,62 +238,109 @@ export default function TourDetailsPage() {
       {/* Header */}
       <header className={`bg-white shadow ${activeTab !== 'viewer' ? 'flex-shrink-0' : ''}`}>
         <div className="px-4 py-3">
-          <div className="flex justify-between items-center">
-            <div>
-              <button
-                onClick={() => router.push('/tours')}
-                className="text-gray-500 hover:text-gray-700 mb-2"
-              >
-                ← Back to Tours
-              </button>
-              <h1 className="text-2xl font-bold text-gray-900">
+          <button
+            onClick={() => router.push('/admin/tours')}
+            className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-2 cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            My Tours
+          </button>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">
                 {tour?.name || 'Tour Details'}
               </h1>
-              <p className="text-sm text-gray-600 mt-1">
-                Tour ID: {tourId}
-              </p>
+              {tour && (
+                <span
+                  className={`flex-shrink-0 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                    tour.is_published ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  {tour.is_published ? 'Published' : 'Draft'}
+                </span>
+              )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => setActiveTab('viewer')}
-                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                onClick={() => setShowEmbed(true)}
+                disabled={scenes.length === 0}
+                title={scenes.length === 0 ? 'Add a 360° photo first' : 'Get code to show this tour on another website'}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white border border-gray-300 text-gray-800 rounded-lg hover:bg-gray-50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Open Viewer
+                <Code className="w-4 h-4" />
+                Embed
               </button>
               <button
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                onClick={() => router.push(`/admin/tours/${tourId}?tab=viewer`)}
+                disabled={scenes.length === 0}
+                title={scenes.length === 0 ? 'Add a 360° photo first' : 'Preview and edit the tour'}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Publish Tour
+                <Eye className="w-4 h-4" />
+                Preview
               </button>
+              {canPublish && tour && (
+                <button
+                  onClick={handleTogglePublish}
+                  disabled={publishing || (!tour.is_published && scenes.length === 0)}
+                  title={!tour.is_published && scenes.length === 0 ? 'Add a 360° photo before publishing' : undefined}
+                  className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                    tour.is_published
+                      ? 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
+                  {tour.is_published ? 'Unpublish' : 'Publish Tour'}
+                </button>
+              )}
             </div>
           </div>
+          <TourSteps current={scenes.length === 0 ? 1 : 2} className="mt-4 max-w-2xl" />
         </div>
       </header>
+
+      {showEmbed && tour && (
+        <EmbedCodeModal
+          tourId={tourId}
+          tourName={tour.name}
+          isPublished={tour.is_published}
+          onClose={() => setShowEmbed(false)}
+        />
+      )}
 
       {/* Navigation Tabs */}
       <div className={`bg-white border-b ${activeTab !== 'viewer' ? 'flex-shrink-0' : ''}`}>
         <div className="px-4">
-          <nav className="flex space-x-8">
+          <nav className="flex space-x-6 sm:space-x-8 overflow-x-auto">
             <button
-              onClick={() => setActiveTab('scenes')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'scenes'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
+              onClick={() => router.push(`/admin/tours/${tourId}?tab=scenes`)}
+              className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-sm cursor-pointer whitespace-nowrap ${activeTab === 'scenes'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
+                }`}
             >
-              Scene Management ({scenes.length})
+              360° Photos ({totalScenes})
             </button>
+            {/* Only show Edit Tour tab when explicitly navigated to edit */}
+            {activeTab === 'edit' && (
+              <button
+                onClick={() => router.push(`/admin/tours/${tourId}?tab=edit`)}
+                className="py-4 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm cursor-pointer"
+              >
+                Edit Tour
+              </button>
+            )}
             <button
-              onClick={() => setActiveTab('viewer')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'viewer'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              } ${scenes.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+              onClick={() => router.push(`/admin/tours/${tourId}?tab=viewer`)}
+              title={scenes.length === 0 ? 'Add a 360° photo first' : undefined}
+              className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-sm cursor-pointer whitespace-nowrap ${activeTab === 'viewer'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
+                } ${scenes.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
               disabled={scenes.length === 0}
             >
-              Viewer & Editor
+              Hotspots &amp; Preview
             </button>
           </nav>
         </div>
@@ -220,17 +351,54 @@ export default function TourDetailsPage() {
         {/* Tab Content */}
         <div className={activeTab === 'viewer' ? "" : "flex-1 flex flex-col"}>
           {activeTab === 'scenes' && (
-            <div className="max-w-7xl mx-auto w-full p-6 bg-white rounded-lg shadow m-4">
+            <div className="max-w-7xl mx-auto w-full bg-white rounded-lg shadow mt-2 p-6 pb-0">
               <div className="mb-4">
-                <h2 className="text-lg font-semibold mb-2">Scene Management</h2>
-                <p className="text-sm text-gray-600">
-                  Add and organize scenes for your virtual tour. Upload 360° images or videos to create immersive experiences.
+                <h2 className="text-lg font-semibold mb-2 text-gray-900">360° Photos</h2>
+                <p className="text-sm text-gray-700">
+                  Each 360° photo becomes one room or spot in your tour. Upload them, then drag to set the order visitors see them in.
                 </p>
               </div>
+              {tour && <IntroModelSettings tour={tour} scenes={scenes} onTourUpdate={setTour} />}
               <SceneManager
                 tourId={tourId}
                 scenes={scenes}
-                onSceneUpdate={(updatedScenes) => setScenes(updatedScenes)}
+                tour={tour}
+                onSceneUpdate={(updatedScenes) => {
+                  // Check if a scene was added (length increased)
+                  if (updatedScenes.length > scenes.length) {
+                    setTotalScenes(prev => prev + 1);
+                  }
+                  // Check if a scene was deleted (length decreased)
+                  else if (updatedScenes.length < scenes.length) {
+                    setTotalScenes(prev => Math.max(0, prev - 1));
+                  }
+                  setScenes(updatedScenes);
+                }}
+                onTourUpdate={handleTourUpdate}
+                onRefresh={() => fetchScenes(1, false)}
+                isActive={activeTab === 'scenes'}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalScenes={totalScenes}
+                onPageChange={(page) => fetchScenes(page, true)}
+                loadingMore={loadingMore}
+              />
+            </div>
+          )}
+
+          {activeTab === 'edit' && tour && (
+            <div className="max-w-4xl mx-auto w-full p-6">
+              <EditTour
+                tour={tour}
+                onSuccess={(updatedTour) => {
+                  setTour(updatedTour);
+                  // Redirect back to scenes tab after successful update
+                  router.push(`/admin/tours/${tourId}?tab=scenes`);
+                }}
+                onCancel={() => {
+                  // Go back to scenes tab
+                  router.push(`/admin/tours/${tourId}?tab=scenes`);
+                }}
               />
             </div>
           )}
@@ -239,7 +407,7 @@ export default function TourDetailsPage() {
             <div className="w-full overflow-auto p-4">
               <div className="max-w-7xl mx-auto w-full bg-white rounded-lg shadow overflow-hidden">
                 <div className="p-4 bg-gray-50 border-b">
-                  <h2 className="text-lg font-semibold mb-2">360° Viewer & Editor</h2>
+                  <h2 className="text-lg font-semibold mb-2 text-gray-900">360° Viewer & Editor</h2>
                   <p className="text-sm text-gray-600 mb-2">
                     View your tour and edit hotspots/overlays directly in the viewer. Use Edit Mode to add or modify interactive elements.
                   </p>
@@ -247,42 +415,19 @@ export default function TourDetailsPage() {
                     <strong>Controls:</strong> Drag to rotate • Scroll to zoom • Shift+Click to add hotspot (in edit mode)
                   </div>
                 </div>
-                <div className="relative overflow-hidden" style={{ 
+                <div className="relative overflow-hidden" style={{
                   height: 'min(900px, calc(100vh - 250px))',
                   minHeight: '700px'
                 }}>
-                <VirtualTourViewer
-                  tour={tour}
-                  scenes={scenes}
-                  currentScene={selectedScene || scenes[0]}
-                  onSceneChange={(sceneId) => {
-                    const scene = scenes.find(s => s.id === sceneId);
-                    if (scene) setSelectedScene(scene);
-                  }}
-                  onHotspotClick={(hotspot) => {
-                    console.log('Hotspot clicked:', hotspot);
-                    // Handle hotspot navigation
-                    if (hotspot.kind === 'navigation') {
-                      let targetSceneId = hotspot.target_scene_id;
-                      if (!targetSceneId && hotspot.payload) {
-                        try {
-                          const payload = typeof hotspot.payload === 'string' 
-                            ? JSON.parse(hotspot.payload) 
-                            : hotspot.payload;
-                          targetSceneId = payload.targetSceneId || payload.targetSceneID;
-                        } catch (err) {
-                          console.error('Failed to parse hotspot payload:', err);
-                        }
-                      }
-                      if (targetSceneId) {
-                        const targetScene = scenes.find(s => s.id === targetSceneId);
-                        if (targetScene) {
-                          setSelectedScene(targetScene);
-                        }
-                      }
-                    }
-                  }}
-                />
+                  <TourEditor
+                    tour={tour}
+                    scenes={scenes}
+                    onTourUpdate={handleTourUpdate}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={(page) => fetchScenes(page, true)}
+                    loadingMore={loadingMore}
+                  />
                 </div>
               </div>
             </div>
@@ -291,12 +436,18 @@ export default function TourDetailsPage() {
           {activeTab === 'viewer' && (!tour || scenes.length === 0) && (
             <div className="max-w-7xl mx-auto w-full p-6">
               <div className="bg-white rounded-lg shadow p-12 text-center">
-                <p className="text-gray-500">No scenes available for preview.</p>
+                <div className="text-gray-400 mb-4">
+                  <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No 360° photos yet</h3>
+                <p className="text-gray-600 mb-6">Upload a 360° photo first, then come back here to add hotspots and preview the tour.</p>
                 <button
-                  onClick={() => setActiveTab('scenes')}
-                  className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                  onClick={() => router.push(`/admin/tours/${tourId}?tab=scenes`)}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
                 >
-                  Add Scenes
+                  Upload 360° photos
                 </button>
               </div>
             </div>
@@ -304,7 +455,7 @@ export default function TourDetailsPage() {
         </div>
 
         {/* Help Section */}
-        {activeTab !== 'preview' && (
+        {/* {activeTab !== 'preview' && (
           <div className="mt-8 bg-blue-50 rounded-lg p-6">
             <h3 className="font-semibold text-blue-900 mb-2">Quick Tips:</h3>
             <ul className="text-sm text-blue-800 space-y-1">
@@ -331,6 +482,30 @@ export default function TourDetailsPage() {
                   <li>• Set animations to make overlays more engaging</li>
                 </>
               )}
+            </ul>
+          </div>
+        )} */}
+
+        {activeTab === 'scenes' && (
+          <div className="mt-8 bg-blue-50 rounded-lg p-6">
+            <h3 className="font-semibold text-blue-900 mb-2">Quick Tips:</h3>
+            <ul className="text-sm text-blue-800 space-y-1">
+              <li>• Use photos from a 360° camera or a phone panorama app (2:1 equirectangular images work best)</li>
+              <li>• Add one photo per room or spot, then drag them into the order visitors should see</li>
+              <li>• Next, open <strong>Hotspots &amp; Preview</strong> to link rooms together with hotspots</li>
+            </ul>
+          </div>
+        )}
+
+        {activeTab === 'viewer' && scenes.length > 0 && (
+          <div className="mt-8 bg-green-50 rounded-lg p-6">
+            <h3 className="font-semibold text-green-900 mb-2">Viewer Controls:</h3>
+            <ul className="text-sm text-green-800 space-y-1">
+              <li>• <strong>Drag</strong> to rotate and look around the 360° scene</li>
+              <li>• <strong>Scroll</strong> or pinch to zoom in and out</li>
+              <li>• <strong>Click hotspots</strong> to navigate between scenes or view information</li>
+              <li>• Use <strong>Edit Mode</strong> to add or modify hotspots and overlays</li>
+              <li>• Switch between scenes using the scene selector or navigation hotspots</li>
             </ul>
           </div>
         )}
