@@ -19,6 +19,10 @@ const nextConfig: NextConfig = {
       },
       {
         protocol: 'https',
+        hostname: 'tour.thenimto.com',
+      },
+      {
+        protocol: 'https',
         hostname: 'images.unsplash.com',
       },
     ],
