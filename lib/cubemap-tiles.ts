@@ -109,61 +109,86 @@ export async function generateCubeMapFromPanoramaRaw(
 
   const channels = info.channels as 1 | 2 | 3 | 4;
 
-  // Generate each cube face
+  // Precompute normalized screen coordinates s and t
+  const sArr = new Float32Array(cubeSize);
+  const tArr = new Float32Array(cubeSize);
+  for (let i = 0; i < cubeSize; i++) {
+    sArr[i] = (2.0 * (i + 0.5) / cubeSize) - 1.0;
+    tArr[i] = (2.0 * (i + 0.5) / cubeSize) - 1.0;
+  }
+
+  const invTwoPi = 1.0 / (2.0 * Math.PI);
+  const invPi = 1.0 / Math.PI;
+  const halfPi = Math.PI * 0.5;
+  const heightMinus1 = height - 1;
+
+  // Generate each cube face with high-performance inlined vector math
   for (const face of Object.values(CubeFace)) {
-    // Create buffer for cube face
     const facePixels = Buffer.alloc(cubeSize * cubeSize * channels);
 
-    // Sample pixels from panorama using proper spherical projection
     for (let y = 0; y < cubeSize; y++) {
+      const t = tArr[y];
+      const negT = -t;
+      const outRowOffset = y * cubeSize * channels;
+
       for (let x = 0; x < cubeSize; x++) {
-        // Get equirectangular coordinates for this cube face pixel
-        const { u, v } = cubeFaceToEquirect(face, x, y, cubeSize);
+        const s = sArr[x];
 
-        // Sample from panorama with bilinear interpolation
-        // Clamp v to valid range to prevent out of bounds
-        const clampedV = Math.max(0, Math.min(1, v));
+        let vx = 0, vy = 0, vz = 0;
+        switch (face) {
+          case CubeFace.FRONT:  vx = s;    vy = negT; vz = 1.0;  break;
+          case CubeFace.BACK:   vx = -s;   vy = negT; vz = -1.0; break;
+          case CubeFace.RIGHT:  vx = 1.0;  vy = negT; vz = -s;   break;
+          case CubeFace.LEFT:   vx = -1.0; vy = negT; vz = s;    break;
+          case CubeFace.TOP:    vx = s;    vy = 1.0;  vz = t;    break;
+          case CubeFace.BOTTOM: vx = s;    vy = -1.0; vz = negT; break;
+        }
 
-        // Calculate pixel coordinates in panorama
+        const len = Math.sqrt(vx * vx + vy * vy + vz * vz);
+        const theta = Math.atan2(vz, vx);
+        const normY = vy / len;
+        const phi = Math.asin(normY < -1.0 ? -1.0 : normY > 1.0 ? 1.0 : normY);
+
+        const u = (theta + Math.PI) * invTwoPi;
+        const v = (phi + halfPi) * invPi;
+
+        const clampedV = v < 0 ? 0 : v > 1 ? 1 : v;
         const px = u * width;
         const py = clampedV * height;
 
-        // Get integer pixel coordinates with wrapping for x
-        const x0 = Math.floor(px) % width;
-        const y0 = Math.floor(py);
-        const x1 = (x0 + 1) % width; // Wrap horizontally
-        const y1 = Math.min(y0 + 1, height - 1);
+        const x0 = (px | 0) % width;
+        const y0 = py | 0;
+        const x1 = (x0 + 1) % width;
+        const y1 = y0 < heightMinus1 ? y0 + 1 : heightMinus1;
 
-        // Calculate fractional parts for interpolation
-        const fx = px - Math.floor(px);
+        const fx = px - (px | 0);
         const fy = py - y0;
 
-        // Clamp y coordinates
-        const cy0 = Math.max(0, Math.min(height - 1, y0));
-        const cy1 = Math.max(0, Math.min(height - 1, y1));
+        const cy0 = y0 < heightMinus1 ? y0 : heightMinus1;
+        const cy1 = y1;
 
-        // Bilinear interpolation for each channel
+        const row0 = cy0 * width;
+        const row1 = cy1 * width;
+        const idx00 = (row0 + x0) * channels;
+        const idx10 = (row0 + x1) * channels;
+        const idx01 = (row1 + x0) * channels;
+        const idx11 = (row1 + x1) * channels;
+
+        const outIdx = outRowOffset + x * channels;
         for (let c = 0; c < channels; c++) {
-          const idx00 = (cy0 * width + x0) * channels + c;
-          const idx10 = (cy0 * width + x1) * channels + c;
-          const idx01 = (cy1 * width + x0) * channels + c;
-          const idx11 = (cy1 * width + x1) * channels + c;
-
-          const v00 = panoramaPixels[idx00] || 0;
-          const v10 = panoramaPixels[idx10] || 0;
-          const v01 = panoramaPixels[idx01] || 0;
-          const v11 = panoramaPixels[idx11] || 0;
+          const v00 = panoramaPixels[idx00 + c];
+          const v10 = panoramaPixels[idx10 + c];
+          const v01 = panoramaPixels[idx01 + c];
+          const v11 = panoramaPixels[idx11 + c];
 
           const v0 = v00 * (1 - fx) + v10 * fx;
           const v1 = v01 * (1 - fx) + v11 * fx;
-          const value = Math.round(v0 * (1 - fy) + v1 * fy);
-
-          facePixels[(y * cubeSize + x) * channels + c] = value;
+          facePixels[outIdx + c] = (v0 * (1 - fy) + v1 * fy + 0.5) | 0;
         }
       }
     }
 
-    // Store raw pixel data (no JPEG compression yet)
+    // Store raw pixel data
     faces.set(face, {
       pixels: facePixels,
       width: cubeSize,
@@ -268,9 +293,9 @@ export async function generateCubeMapTiles(
 
     console.log(`Level ${level}: ${levelSize}x${levelSize} per face, ${tilesPerSide}x${tilesPerSide} tiles of ${levelTileSize}x${levelTileSize}`);
 
-    // Generate tiles for each face at this level
+    // Generate tiles for each face at this level concurrently
     for (const [face, rawFaceData] of cubeFacesRaw) {
-      // Resize raw face data for this level (still raw, no JPEG compression)
+      // Resize raw face data for this level
       const resizedRaw = await sharp(rawFaceData.pixels, {
         raw: {
           width: rawFaceData.width,
@@ -278,42 +303,46 @@ export async function generateCubeMapTiles(
           channels: rawFaceData.channels
         }
       })
-        .resize(levelSize, levelSize, {
-          kernel: sharp.kernel.lanczos3
-        })
+        .resize(levelSize, levelSize)
         .raw()
         .toBuffer();
 
-      // Generate tiles
+      // Extract all tiles for this face concurrently using SIMD-accelerated JPEG
+      const tilePromises: Promise<CubeTile & { buffer: Buffer }>[] = [];
       for (let y = 0; y < tilesPerSide; y++) {
         for (let x = 0; x < tilesPerSide; x++) {
           const left = x * levelTileSize;
           const top = y * levelTileSize;
           const width = Math.min(levelTileSize, levelSize - left);
           const height = Math.min(levelTileSize, levelSize - top);
+          const tileX = x;
+          const tileY = y;
 
-          // Extract tile from raw data and compress with MozJPEG (perceptually lossless, 65% smaller)
-          const tileBuffer = await sharp(resizedRaw, {
-            raw: {
-              width: levelSize,
-              height: levelSize,
-              channels: rawFaceData.channels
-            }
-          })
-            .extract({ left, top, width, height })
-            .jpeg({ quality: 84, mozjpeg: true, chromaSubsampling: '4:2:0' })
-            .toBuffer();
-
-          tiles.push({
-            face,
-            level,
-            x,
-            y,
-            buffer: tileBuffer,
-            key: `${face}_l${level}_${x}_${y}.jpg`
-          });
+          tilePromises.push(
+            sharp(resizedRaw, {
+              raw: {
+                width: levelSize,
+                height: levelSize,
+                channels: rawFaceData.channels
+              }
+            })
+              .extract({ left, top, width, height })
+              .jpeg({ quality: 84 })
+              .toBuffer()
+              .then(tileBuffer => ({
+                face,
+                level,
+                x: tileX,
+                y: tileY,
+                buffer: tileBuffer,
+                key: `${face}_l${level}_${tileX}_${tileY}.jpg`
+              }))
+          );
         }
       }
+
+      const faceTiles = await Promise.all(tilePromises);
+      tiles.push(...faceTiles);
     }
   }
   

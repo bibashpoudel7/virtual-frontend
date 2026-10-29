@@ -207,10 +207,9 @@ export async function POST(request: NextRequest) {
       .resize(targetWidth, targetHeight, {
         fit: 'fill',
         position: 'center',
-        kernel: sharp.kernel.lanczos3,
         withoutEnlargement: true
       })
-      .jpeg({ quality: 85, progressive: true, mozjpeg: true, chromaSubsampling: '4:2:0' })
+      .jpeg({ quality: 85, progressive: true })
       .toBuffer();
 
     // 2. Generate multi-resolution cubemap tiles
@@ -261,8 +260,8 @@ export async function POST(request: NextRequest) {
       CacheControl: 'public, max-age=31536000'
     }));
 
-    // Upload all tiles in concurrent batches
-    const batchSize = 10;
+    // Upload all tiles in concurrent batches (30 parallel uploads per batch)
+    const batchSize = 30;
     for (let i = 0; i < tiles.length; i += batchSize) {
       const batch = tiles.slice(i, i + batchSize);
       await Promise.all(batch.map(tile => {
