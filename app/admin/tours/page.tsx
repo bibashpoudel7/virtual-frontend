@@ -96,7 +96,7 @@ export default function ToursPage() {
                   aria-current={view === key ? 'page' : undefined}
                   className={`flex flex-1 sm:flex-none items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-md text-sm font-medium cursor-pointer whitespace-nowrap transition-colors ${
                     view === key
-                      ? 'bg-blue-600 text-white shadow-sm'
+                      ? 'bg-amber-600 text-white shadow-sm'
                       : 'text-gray-700 hover:bg-white'
                   }`}
                 >

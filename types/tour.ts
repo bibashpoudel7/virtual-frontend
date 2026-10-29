@@ -51,6 +51,9 @@ export interface BuildingScan {
 export interface Tour extends BaseModel {
   id: string;
   name: string;
+  slug?: string;
+  description?: string;
+  location?: string;
   user_id?: string;
   property_id?: string;
   property_name?: string;

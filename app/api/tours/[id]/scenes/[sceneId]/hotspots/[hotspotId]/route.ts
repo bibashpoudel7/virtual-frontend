@@ -4,10 +4,10 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:55
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; sceneId: string; hotspotId: string } }
+  { params }: { params: Promise<{ id: string; sceneId: string; hotspotId: string }> }
 ) {
   try {
-    const { sceneId, hotspotId } = params;
+    const { sceneId, hotspotId } = await params;
     const token = request.headers.get('Authorization')?.split('Bearer ')[1];
     
     // Call the backend API to delete the hotspot
@@ -37,11 +37,11 @@ export async function DELETE(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string; sceneId: string; hotspotId: string } }
+  { params }: { params: Promise<{ id: string; sceneId: string; hotspotId: string }> }
 ) {
   try {
     const body = await request.json();
-    const { sceneId, hotspotId } = params;
+    const { sceneId, hotspotId } = await params;
     const token = request.headers.get('Authorization')?.split('Bearer ')[1];
     
     // Call the backend API to update the hotspot

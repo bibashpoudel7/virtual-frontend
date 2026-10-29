@@ -100,13 +100,13 @@ const ContactPage: React.FC = () => {
               <div className="space-y-6">
                 <div className="flex items-start space-x-4">
                   <div className="flex-shrink-0">
-                    <Mail className="w-6 h-6 text-indigo-600 mt-1" />
+                    <Mail className="w-6 h-6 text-amber-600 mt-1" />
                   </div>
                   <div>
                     <h3 className="text-lg font-medium text-gray-900">Email</h3>
                     <a
                       href="mailto:info@thenimto.com"
-                      className="text-indigo-600 hover:text-indigo-800 transition-colors"
+                      className="text-amber-600 hover:text-amber-800 transition-colors"
                     >
                       info@thenimto.com
                     </a>
@@ -115,13 +115,13 @@ const ContactPage: React.FC = () => {
 
                 <div className="flex items-start space-x-4">
                   <div className="flex-shrink-0">
-                    <Phone className="w-6 h-6 text-indigo-600 mt-1" />
+                    <Phone className="w-6 h-6 text-amber-600 mt-1" />
                   </div>
                   <div>
                     <h3 className="text-lg font-medium text-gray-900">Phone</h3>
                     <a
                       href="tel:+9779802364691"
-                      className="text-indigo-600 hover:text-indigo-800 transition-colors"
+                      className="text-amber-600 hover:text-amber-800 transition-colors"
                     >
                       +977-9802364691
                     </a>
@@ -130,7 +130,7 @@ const ContactPage: React.FC = () => {
 
                 <div className="flex items-start space-x-4">
                   <div className="flex-shrink-0">
-                    <MapPin className="w-6 h-6 text-indigo-600 mt-1" />
+                    <MapPin className="w-6 h-6 text-amber-600 mt-1" />
                   </div>
                   <div>
                     <h3 className="text-lg font-medium text-gray-900">Office</h3>
@@ -146,19 +146,19 @@ const ContactPage: React.FC = () => {
                 <h3 className="text-lg font-medium text-gray-900 mb-4">Why Choose Virtual Tours?</h3>
                 <ul className="space-y-2 text-gray-600">
                   <li className="flex items-center">
-                    <div className="w-2 h-2 bg-indigo-600 rounded-full mr-3"></div>
+                    <div className="w-2 h-2 bg-amber-600 rounded-full mr-3"></div>
                     360° immersive experiences
                   </li>
                   <li className="flex items-center">
-                    <div className="w-2 h-2 bg-indigo-600 rounded-full mr-3"></div>
+                    <div className="w-2 h-2 bg-amber-600 rounded-full mr-3"></div>
                     Easy-to-use tour creation tools
                   </li>
                   <li className="flex items-center">
-                    <div className="w-2 h-2 bg-indigo-600 rounded-full mr-3"></div>
+                    <div className="w-2 h-2 bg-amber-600 rounded-full mr-3"></div>
                     Professional quality output
                   </li>
                   <li className="flex items-center">
-                    <div className="w-2 h-2 bg-indigo-600 rounded-full mr-3"></div>
+                    <div className="w-2 h-2 bg-amber-600 rounded-full mr-3"></div>
                     24/7 customer support
                   </li>
                 </ul>
@@ -179,7 +179,7 @@ const ContactPage: React.FC = () => {
                     type="text"
                     id="fullName"
                     {...register('fullName', { required: 'Full name is required' })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors bg-white text-gray-900 placeholder-gray-500"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-colors bg-white text-gray-900 placeholder-gray-500"
                     placeholder="Enter your full name"
                   />
                   {errors.fullName && (
@@ -202,7 +202,7 @@ const ContactPage: React.FC = () => {
                         message: 'Invalid email address'
                       }
                     })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors bg-white text-gray-900 placeholder-gray-500"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-colors bg-white text-gray-900 placeholder-gray-500"
                     placeholder="Enter your email address"
                   />
                   {errors.email && (
@@ -244,7 +244,7 @@ const ContactPage: React.FC = () => {
                     id="message"
                     rows={6}
                     {...register('message', { required: 'Message is required' })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors resize-none bg-white text-gray-900 placeholder-gray-500"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-colors resize-none bg-white text-gray-900 placeholder-gray-500"
                     placeholder="Tell us about your project or ask us a question..."
                   />
                   {errors.message && (
@@ -256,7 +256,7 @@ const ContactPage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full bg-indigo-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center space-x-2"
+                  className="w-full bg-amber-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-amber-700 focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center space-x-2 shadow-md"
                 >
                   {isLoading ? (
                     <>

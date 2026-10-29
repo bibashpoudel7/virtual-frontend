@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { Tour } from '@/types/tour';
 import { tourService } from '@/services/tourService';
 import { useRouter } from 'next/navigation';
@@ -455,60 +456,84 @@ export default function TourList() {
               {displayedTours?.map((tour) => (
                 <div
                   key={tour.id}
-                  className="bg-white border border-gray-200 rounded-xl hover:shadow-lg transition-all duration-200 cursor-pointer hover:border-blue-300 flex flex-col h-full relative"
+                  className="group bg-white border border-gray-200 rounded-xl hover:shadow-xl transition-all duration-200 cursor-pointer hover:border-amber-400 flex flex-col h-full relative overflow-hidden"
                   onClick={() => router.push(`/admin/tours/${tour.id}`)}
                 >
                   {/* Loading overlay for updating tours */}
                   {updatingTours.has(tour.id) && (
-                    <div className="absolute inset-0 bg-white/80 backdrop-blur-sm rounded-xl flex items-center justify-center z-10">
-                      <Icon icon="eos-icons:loading" className="w-8 h-8 text-blue-600" />
+                    <div className="absolute inset-0 bg-white/80 backdrop-blur-sm rounded-xl flex items-center justify-center z-20">
+                      <Icon icon="eos-icons:loading" className="w-8 h-8 text-amber-600" />
                     </div>
                   )}
 
-                  {/* Header Section - Fixed Height */}
-                  <div className="p-5 pb-4">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1 min-w-0 pr-4">
-                        <div className="relative group">
-                          <h3 className="text-xl font-bold text-gray-900 truncate hover:text-blue-600 transition-colors">{tour.name}</h3>
+                  {/* Tour Thumbnail Banner */}
+                  <div className="relative h-44 w-full bg-gray-100 overflow-hidden border-b border-gray-100 flex-shrink-0">
+                    {(tour.cover_image_url || tour.thumbnail_url) ? (
+                      <Image
+                        src={tour.cover_image_url || tour.thumbnail_url || ''}
+                        alt={tour.name}
+                        fill
+                        className="object-cover group-hover:scale-105 transition-transform duration-300"
+                        unoptimized
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-amber-500/20 via-yellow-500/10 to-amber-700/20 flex flex-col items-center justify-center text-amber-700/60">
+                        <Icon icon="material-symbols:360" className="w-10 h-10 mb-1" />
+                        <span className="text-xs font-semibold">360° Virtual Tour</span>
+                      </div>
+                    )}
+                    {/* Status Badge overlay */}
+                    <div className="absolute top-3 left-3 z-10">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-xs font-semibold backdrop-blur-md shadow-sm ${tour.is_published
+                          ? 'bg-emerald-600/90 text-white'
+                          : 'bg-amber-600/90 text-white'
+                          }`}
+                      >
+                        {tour.is_published ? 'Published' : 'Draft'}
+                      </span>
+                    </div>
+
+                    {/* Location Badge overlay if set */}
+                    {tour.location && (
+                      <div className="absolute bottom-2 left-3 right-3 z-10">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-black/60 backdrop-blur-md text-white text-xs font-medium truncate max-w-full">
+                          <Icon icon="material-symbols:location-on" className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                          <span className="truncate">{tour.location}</span>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Header Section */}
+                  <div className="p-5 pb-3">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1 min-w-0 pr-3">
+                        <div className="relative group/title">
+                          <h3 className="text-xl font-bold text-gray-900 truncate group-hover:text-amber-600 transition-colors">
+                            {tour.name}
+                          </h3>
                           
                           {/* Tooltip for full tour name when truncated */}
-                          <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 whitespace-nowrap">
+                          <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 group-hover/title:opacity-100 transition-opacity duration-200 pointer-events-none z-50 whitespace-nowrap">
                             {tour.name}
-                            {/* Arrow pointing down */}
                             <div className="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
                           </div>
                         </div>
-                        {tour?.property_name && (
-                          <p className="text-sm text-blue-600 font-medium mt-1 flex items-center">
-                            <Icon icon="material-symbols:location-on" className="w-4 h-4 mr-1 flex-shrink-0" />
-                            <span className="truncate">{tour?.property_name}</span>
-                          </p>
-                        )}
                       </div>
 
                       {/* Right side - Status and Actions */}
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        {/* Status Badge */}
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${tour.is_published
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-yellow-100 text-yellow-800'
-                            }`}
-                        >
-                          {tour.is_published ? 'Published' : 'Draft'}
-                        </span>
-
                         {/* Category Badge - Show first category if any exist */}
                         {tour?.categories && tour?.categories?.length > 0 && tour?.categories[0] !== 'other' && (
                           <div className="relative">
-                            <span className="group px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 capitalize cursor-default">
+                            <span className="group px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900 capitalize cursor-default border border-amber-200/60">
                               {tour?.categories[0]}
                               {tour?.categories?.length > 1 && (
-                                <span className="ml-1 text-blue-600">+{tour?.categories?.length - 1}</span>
+                                <span className="ml-1 text-amber-700">+{tour?.categories?.length - 1}</span>
                               )}
                               
-                              {/* Tooltip showing all categories on hover - only when hovering on the badge */}
+                              {/* Tooltip showing all categories on hover */}
                               {tour?.categories?.length > 1 && (
                                 <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 min-w-max">
                                   <div className="text-center">
@@ -518,7 +543,6 @@ export default function TourList() {
                                       </span>
                                     ))}
                                   </div>
-                                  {/* Arrow pointing down */}
                                   <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
                                 </div>
                               )}
@@ -535,7 +559,7 @@ export default function TourList() {
                                 <button
                                   onClick={(e) => toggleVisibilityDropdown(tour.id, e)}
                                   disabled={updatingTours.has(tour.id)}
-                                  className="p-1.5 rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100 hover:scale-105 transition-all disabled:opacity-50 cursor-pointer"
+                                  className="p-1.5 rounded-md bg-amber-50 text-amber-700 hover:bg-amber-100 hover:scale-105 transition-all disabled:opacity-50 cursor-pointer"
                                   title="Change visibility"
                                 >
                                   <Icon icon="material-symbols:visibility-outline" className="w-4 h-4" />
@@ -578,8 +602,8 @@ export default function TourList() {
                               onClick={(e) => handleToggleFeatured(tour.id, tour.is_featured_on_homepage, e)}
                               disabled={updatingTours.has(tour.id)}
                               className={`p-1.5 rounded-md transition-all cursor-pointer hover:scale-110 ${tour.is_featured_on_homepage
-                                ? 'bg-yellow-100 text-yellow-600 shadow-sm'
-                                : 'bg-gray-50 text-gray-400 hover:bg-yellow-50 hover:text-yellow-500'
+                                ? 'bg-amber-100 text-amber-700 shadow-sm'
+                                : 'bg-gray-50 text-gray-400 hover:bg-amber-50 hover:text-amber-600'
                                 }`}
                               title={tour.is_featured_on_homepage ? "Unfeature from homepage" : "Feature on homepage"}
                             >
@@ -589,7 +613,7 @@ export default function TourList() {
                               />
                             </button>
 
-                            {/* Delete Button - For both Superadmins and Tour Owners */}
+                            {/* Delete Button */}
                             <button
                               onClick={(e) => openDeleteModal(tour.id, tour.name, e)}
                               className="p-1.5 rounded-md bg-red-50 text-red-600 hover:bg-red-100 hover:scale-105 transition-all cursor-pointer"
@@ -602,78 +626,58 @@ export default function TourList() {
                         )}
                       </div>
                     </div>
+
+                    {/* SEO Description snippet */}
+                    {tour.description && (
+                      <p className="text-xs text-gray-500 line-clamp-2 mt-1">
+                        {tour.description}
+                      </p>
+                    )}
                   </div>
 
                   {/* Content Section*/}
                   <div className="px-5 pb-4 flex-1">
-                    <div className="space-y-3">
-                      {/* Always show scenes count */}
-                      <div className="flex items-center text-gray-700">
-                        <Icon icon="material-symbols:image" className="w-5 h-5 mr-2 text-gray-400 flex-shrink-0" />
-                        <span className="font-medium">Scenes:</span>
-                        <span className="ml-1 text-gray-900">{tour.sceneCount}</span>
-                      </div>
-
-                      {/* Always show tour type */}
-                      <div className="flex items-center text-gray-600">
-                        {tour.property_name ? (
-                          <>
-                            <Icon icon="material-symbols:business" className="w-5 h-5 mr-2 text-blue-500 flex-shrink-0" />
-                            <span className="text-sm font-medium text-blue-600">Property Tour</span>
-                          </>
-                        ) : (
-                          <>
-                            <Icon icon="material-symbols:explore" className="w-5 h-5 mr-2 text-gray-500 flex-shrink-0" />
-                            <span className="text-sm font-medium text-gray-600">Standalone Tour</span>
-                          </>
-                        )}
+                    <div className="space-y-2.5">
+                      {/* Scenes count */}
+                      <div className="flex items-center text-gray-700 text-sm">
+                        <Icon icon="material-symbols:image" className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" />
+                        <span className="font-medium text-gray-600">Scenes:</span>
+                        <span className="ml-1 text-gray-900 font-semibold">{tour.sceneCount}</span>
                       </div>
 
                       {/* Features Section */}
-                      <div className="space-y-2 min-h-[4rem]">
+                      <div className="space-y-1.5">
                         {tour.background_audio_url ? (
-                          <div className="flex items-center text-green-600">
-                            <Icon icon="material-symbols:volume-up" className="w-5 h-5 mr-2 flex-shrink-0" />
-                            <span className="text-sm font-medium">Background audio</span>
+                          <div className="flex items-center text-emerald-600 text-xs">
+                            <Icon icon="material-symbols:volume-up" className="w-4 h-4 mr-2 flex-shrink-0" />
+                            <span className="font-medium">Background audio enabled</span>
                           </div>
                         ) : (
-                          <div className="flex items-center text-gray-400">
-                            <Icon icon="material-symbols:volume-off" className="w-5 h-5 mr-2 flex-shrink-0" />
-                            <span className="text-sm">No background audio</span>
+                          <div className="flex items-center text-gray-400 text-xs">
+                            <Icon icon="material-symbols:volume-off" className="w-4 h-4 mr-2 flex-shrink-0" />
+                            <span>No background audio</span>
                           </div>
                         )}
-
-                        {/* {tour.autoplay_enabled ? (
-                          <div className="flex items-center text-blue-600">
-                            <Icon icon="material-symbols:play-circle" className="w-5 h-5 mr-2 flex-shrink-0" />
-                            <span className="text-sm font-medium">Autoplay enabled</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center text-gray-400">
-                            <Icon icon="material-symbols:pause-circle" className="w-5 h-5 mr-2 flex-shrink-0" />
-                            <span className="text-sm">Manual playback</span>
-                          </div>
-                        )} */}
                       </div>
                     </div>
                   </div>
 
                   {/* Footer Section */}
-                  <div className="px-5 pb-5 pt-3 border-t border-gray-100 mt-auto">
-                    <div className="flex items-center justify-between text-sm text-gray-500">
+                  <div className="px-5 pb-4 pt-3 border-t border-gray-100 mt-auto">
+                    <div className="flex items-center justify-between text-xs text-gray-500">
                       <span className="flex items-center">
-                        <Icon icon="material-symbols:calendar-today" className="w-4 h-4 mr-1" />
-                        Created: {new Date(tour.created_at).toLocaleDateString()}
+                        <Icon icon="material-symbols:calendar-today" className="w-3.5 h-3.5 mr-1" />
+                        {new Date(tour.created_at).toLocaleDateString()}
                       </span>
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
                           router.push(`/admin/tours/${tour.id}?tab=edit`);
                         }}
-                        className="text-blue-600 hover:text-blue-800 font-medium cursor-pointer flex items-center"
+                        className="text-amber-700 hover:text-amber-900 font-semibold cursor-pointer flex items-center gap-1 group/btn"
                       >
-                        Edit
-                        <Icon icon="material-symbols:arrow-forward" className="w-4 h-4 ml-1" />
+                        Edit Details &amp; SEO
+                        <Icon icon="material-symbols:arrow-forward" className="w-3.5 h-3.5 group-hover/btn:translate-x-0.5 transition-transform" />
                       </button>
                     </div>
                   </div>

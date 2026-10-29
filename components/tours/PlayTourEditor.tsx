@@ -9,7 +9,7 @@ import { tourService } from '@/services/tourService';
 import { getSceneThumbnail } from '@/lib/scene-thumbnail';
 import { buildCameraPath, parseWaypoints, CameraPoint, createCameraPathPlayer, hasPointTiming, DEFAULT_POINT_MOVE_MS } from '@/lib/camera-path';
 
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://tour.thenimto.com';
 
 // Seconds field you can clear and retype freely: shows your typing as-is, saves each valid
 // value (in ms) as you type, and snaps back to the saved value when you leave the field
@@ -755,13 +755,13 @@ export default function PlayTourEditor({
                                                             const points = parseWaypoints(ps.waypoints);
                                                             const isDrawing = drawingPathFor === ps.id;
                                                             return (
-                                                                <div className={`rounded-lg border p-2 space-y-2 ${isDrawing ? 'border-indigo-400 bg-indigo-50' : 'border-indigo-200 bg-indigo-50/40'}`}>
+                                                                <div className={`rounded-lg border p-2 space-y-2 ${isDrawing ? 'border-amber-400 bg-amber-50' : 'border-amber-200 bg-amber-50/40'}`}>
                                                                     <div className="flex items-center justify-between">
-                                                                        <span className="text-[10px] font-bold uppercase text-indigo-700">Path points ({points.length})</span>
+                                                                        <span className="text-[10px] font-bold uppercase text-amber-700">Path points ({points.length})</span>
                                                                         {!isDrawing && (
                                                                             <button
                                                                                 onClick={() => { setFocusedPathId(ps.id); onPreviewScene?.(ps.scene_id, ps.start_yaw, ps.start_pitch, ps.start_fov); }}
-                                                                                className="text-[10px] font-bold text-indigo-700 hover:underline cursor-pointer"
+                                                                                className="text-[10px] font-bold text-amber-700 hover:underline cursor-pointer"
                                                                             >
                                                                                 Show on photo
                                                                             </button>
@@ -773,13 +773,13 @@ export default function PlayTourEditor({
 
                                                                     {isDrawing ? (
                                                                         <>
-                                                                            <p className="text-[10px] font-semibold text-indigo-800">
+                                                                            <p className="text-[10px] font-semibold text-amber-800">
                                                                                 Click on the photo where the camera should look next. Add as many points as you like.
                                                                             </p>
                                                                             <div className="grid grid-cols-3 gap-1">
                                                                                 <button
                                                                                     onClick={() => updateWaypoints(ps.id, p => [...p, { yaw: currentYaw, pitch: currentPitch, fov: currentFov }])}
-                                                                                    className="text-[10px] font-bold text-indigo-700 bg-white border border-indigo-300 hover:bg-indigo-50 px-1 py-1.5 rounded cursor-pointer"
+                                                                                    className="text-[10px] font-bold text-amber-700 bg-white border border-amber-300 hover:bg-amber-50 px-1 py-1.5 rounded cursor-pointer"
                                                                                     title="Add a point where the view is aimed now"
                                                                                 >
                                                                                     + At centre
@@ -793,7 +793,7 @@ export default function PlayTourEditor({
                                                                                 </button>
                                                                                 <button
                                                                                     onClick={() => { setDrawingPathFor(null); previewStep(ps); }}
-                                                                                    className="text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-1 py-1.5 rounded cursor-pointer"
+                                                                                    className="text-[10px] font-bold text-white bg-amber-600 hover:bg-amber-700 px-1 py-1.5 rounded cursor-pointer"
                                                                                 >
                                                                                     Done ▶
                                                                                 </button>
@@ -802,7 +802,7 @@ export default function PlayTourEditor({
                                                                     ) : (
                                                                         <button
                                                                             onClick={() => startDrawingPath(ps)}
-                                                                            className="w-full text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-2 py-1.5 rounded cursor-pointer"
+                                                                            className="w-full text-[10px] font-bold text-white bg-amber-600 hover:bg-amber-700 px-2 py-1.5 rounded cursor-pointer"
                                                                         >
                                                                             ✏️ {points.length ? 'Add more points' : 'Draw path on photo'}
                                                                         </button>
@@ -824,7 +824,7 @@ export default function PlayTourEditor({
                                                                                 </label>
                                                                                 <button
                                                                                     onClick={() => onPreviewScene?.(ps.scene_id, ps.start_yaw, ps.start_pitch, ps.start_fov)}
-                                                                                    className="text-gray-600 hover:text-indigo-700 cursor-pointer"
+                                                                                    className="text-gray-600 hover:text-amber-700 cursor-pointer"
                                                                                     title="Move the viewer to the start view"
                                                                                 >
                                                                                     Go
@@ -851,7 +851,7 @@ export default function PlayTourEditor({
                                                                             </li>
                                                                             {points.map((point, pointIndex) => (
                                                                                 <li key={pointIndex} className="flex flex-wrap items-center gap-1.5 text-[10px] bg-white border border-gray-200 rounded px-2 py-1" title={`Y ${fmt(point.yaw)}° · P ${fmt(point.pitch)}°`}>
-                                                                                    <span className="w-4 h-4 flex-shrink-0 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold">{pointIndex + 1}</span>
+                                                                                    <span className="w-4 h-4 flex-shrink-0 rounded-full bg-amber-600 text-white flex items-center justify-center font-bold">{pointIndex + 1}</span>
                                                                                     <label className="flex items-center gap-1 text-gray-500">
                                                                                         reach in
                                                                                         <SecondsInput
@@ -877,7 +877,7 @@ export default function PlayTourEditor({
                                                                                     </label>
                                                                                     <button
                                                                                         onClick={() => onPreviewScene?.(ps.scene_id, point.yaw, point.pitch, point.fov)}
-                                                                                        className="text-gray-600 hover:text-indigo-700 cursor-pointer"
+                                                                                        className="text-gray-600 hover:text-amber-700 cursor-pointer"
                                                                                         title="Move the viewer to this point"
                                                                                     >
                                                                                         Go
@@ -903,7 +903,7 @@ export default function PlayTourEditor({
                                                                                                 updateWaypoints(ps.id, p => p.map((pt, i) => i === pointIndex ? { ...pt, fov } : pt));
                                                                                                 onPreviewScene?.(ps.scene_id, point.yaw, point.pitch, fov);
                                                                                             }}
-                                                                                            className="flex-1 accent-indigo-600 cursor-pointer"
+                                                                                            className="flex-1 accent-amber-600 cursor-pointer"
                                                                                             title="Drag right to move the camera closer at this point"
                                                                                         />
                                                                                         <span className="w-9 text-right font-mono tabular-nums text-gray-700">F {Math.round(point.fov)}</span>
@@ -926,7 +926,7 @@ export default function PlayTourEditor({
                                                                                 </label>
                                                                                 <button
                                                                                     onClick={() => onPreviewScene?.(ps.scene_id, ps.end_yaw, ps.end_pitch, ps.end_fov)}
-                                                                                    className="text-gray-600 hover:text-indigo-700 cursor-pointer"
+                                                                                    className="text-gray-600 hover:text-amber-700 cursor-pointer"
                                                                                     title="Move the viewer to the end view"
                                                                                 >
                                                                                     Go

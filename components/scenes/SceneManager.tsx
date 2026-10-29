@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Scene, Tour } from '@/types/tour';
+import { Scene, Tour, PlayTour, PlayTourScene } from '@/types/tour';
 import { HotspotsAPI } from '@/lib/api/hotspots';
 import AdvancedSceneUploader from '../upload/AdvancedSceneUploader';
 import SimplePanoramaPreview from './SimplePanoramaPreview';
 import DeleteModal from '@/components/modals/DeleteModal';
 import { toast } from 'react-toastify';
 import { tourService } from '@/services/tourService';
+import { storageUploader } from '@/lib/storage-upload';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface SceneManagerProps {
@@ -77,11 +78,13 @@ export default function SceneManager({
     sceneId: string | null;
     sceneName: string;
     isLoading: boolean;
+    associatedTours?: string[];
   }>({
     open: false,
     sceneId: null,
     sceneName: '',
-    isLoading: false
+    isLoading: false,
+    associatedTours: []
   });
 
 
@@ -232,15 +235,29 @@ export default function SceneManager({
   };
 
   // Function to open delete modal
-  const openDeleteModal = (sceneId: string, sceneName: string, event: React.MouseEvent) => {
+  const openDeleteModal = async (sceneId: string, sceneName: string, event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent scene selection
     event.preventDefault();
+
+    // Check if this scene is part of any Play Tours ("tours list")
+    let associatedTours: string[] = [];
+    try {
+      const tours = await tourService.listPlayTours(tourId);
+      if (Array.isArray(tours)) {
+        associatedTours = tours
+          .filter((t: PlayTour) => t.play_tour_scenes?.some((ps: PlayTourScene) => ps.scene_id === sceneId))
+          .map((t: PlayTour) => t.name || 'Untitled Tour');
+      }
+    } catch (e) {
+      console.warn('Could not check play tours for scene:', e);
+    }
 
     setDeleteModal({
       open: true,
       sceneId,
       sceneName,
-      isLoading: false
+      isLoading: false,
+      associatedTours
     });
   };
 
@@ -263,6 +280,13 @@ export default function SceneManager({
       });
       const allScenesData = await allScenesResponse.json();
       const allScenes = allScenesData.datas || [];
+
+      // Delete tiles and assets from Cloudflare R2
+      try {
+        await storageUploader.deletePrefix(`scenes/${deleteModal.sceneId}/`);
+      } catch (r2Err) {
+        console.warn('Failed to delete scene tiles from R2:', r2Err);
+      }
 
       // Delete the scene
       await tourService.deleteScene(deleteModal.sceneId);
@@ -332,7 +356,8 @@ export default function SceneManager({
         open: false,
         sceneId: null,
         sceneName: '',
-        isLoading: false
+        isLoading: false,
+        associatedTours: []
       });
 
     } catch (error) {
@@ -350,7 +375,8 @@ export default function SceneManager({
       open: false,
       sceneId: null,
       sceneName: '',
-      isLoading: false
+      isLoading: false,
+      associatedTours: []
     });
   };
 
@@ -1259,12 +1285,28 @@ export default function SceneManager({
       </div >
 
       {/* Delete Modal */}
-      < DeleteModal
+      <DeleteModal
         open={deleteModal.open}
         isLoading={deleteModal.isLoading}
         title="Delete Scene"
-        message={`Are you sure you want to delete "${deleteModal.sceneName}"? This action cannot be undone and will permanently remove the scene and all its associated hotspots and overlays.`
+        message={`Are you sure you want to delete "${deleteModal.sceneName}"? This action cannot be undone and will permanently remove the scene, its 360° tiles from cloud storage, and all associated hotspots and overlays.`}
+        warningNotice={
+          deleteModal.associatedTours && deleteModal.associatedTours.length > 0 ? (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-amber-900 text-sm">
+                <span>⚠️</span> This scene is on the tours list as well!
+              </div>
+              <p className="text-xs text-amber-800">
+                It is currently included in: <strong>{deleteModal.associatedTours.join(', ')}</strong>.
+              </p>
+              <p className="text-xs text-amber-700">
+                Deleting this scene will automatically remove it from the tour sequence.
+              </p>
+            </div>
+          ) : undefined
         }
+        requireConfirmation={!!(deleteModal.associatedTours && deleteModal.associatedTours.length > 0)}
+        confirmationCheckboxLabel="I confirm this scene is on the tours list and I still want to permanently delete it."
         onConfirm={confirmDeleteScene}
         onCancel={closeDeleteModal}
       />

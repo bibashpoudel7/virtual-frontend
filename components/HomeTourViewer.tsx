@@ -6,7 +6,7 @@ import { Tour, Scene, Hotspot, Overlay, PlayTour } from '@/types/tour';
 import { createCameraPathPlayer } from '@/lib/camera-path';
 import { useAuth } from '@/contexts/AuthContext';
 
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://tour.thenimto.com';
 import { tourService } from '@/services/tourService';
 import CubeMapViewer from './viewer/CubeMapViewer';
 import PlayTourOverlay from './tours/PlayTourOverlay';
@@ -430,6 +430,10 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
   const playTourProgressRef = useRef<number>(0);
   const playTourLastSceneIndexRef = useRef<number>(0);
   const playTourRestartTriggerRef = useRef<number>(0);
+  const currentCameraRef = useRef<{ yaw: number; pitch: number; fov: number } | null>(null);
+  currentCameraRef.current = currentCamera;
+  const currentSceneIndexRef = useRef<number>(currentSceneIndex);
+  currentSceneIndexRef.current = currentSceneIndex;
   const fetchInProgressRef = useRef<boolean>(false);
 
   // Memoize the fetch function to prevent unnecessary re-creations
@@ -807,7 +811,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
 
     // Change to the scene
     const sceneIndex = scenes.findIndex(s => s.id === sceneId);
-    if (sceneIndex !== -1 && sceneIndex !== currentSceneIndex) {
+    if (sceneIndex !== -1 && sceneIndex !== currentSceneIndexRef.current) {
       setCurrentSceneIndex(sceneIndex);
     }
 
@@ -818,14 +822,13 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       playTourRestartTriggerRef.current = restartTrigger;
     }
 
-    // Wait for scene to load, then animate camera
-    timeoutId = setTimeout(() => {
-      if (isCleanedUp) return;
+    const pathPlayer = createCameraPathPlayer(pScene, pScene.transition_direction || 'forward');
+    const targetStart = pathPlayer.at(0);
+    const fromCamera = currentCameraRef.current;
 
-      // Start pause + path (with per-point times when set); "pause after" is separate
-      const pathPlayer = createCameraPathPlayer(pScene, pScene.transition_direction || 'forward');
+    const startScenePath = () => {
+      if (isCleanedUp) return;
       const moveDuration = pathPlayer.duration;
-      // Calculate start time based on saved progress to allow resuming
       const startTime = Date.now() - (playTourProgressRef.current * moveDuration);
       const waitDuration = pScene.wait_duration || 1000;
 
@@ -834,22 +837,13 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
 
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / moveDuration, 1);
-
-        // Save progress for resume functionality
         playTourProgressRef.current = progress;
 
-
-        // Calculate curve offset based on transition direction
-        // This creates a smooth arc that peaks at 50% progress and returns to 0 at 100%
         const direction = pScene.transition_direction || 'forward';
-
-        // Use centralized offset calculation for enhanced intensities
-        // Steps with path points follow the drawn path only; the direction arc is for simple start→end moves
         const { yawOffset, pitchOffset, fovOffset } = pathPlayer.hasPoints
           ? { yawOffset: 0, pitchOffset: 0, fovOffset: 0 }
           : calculateTransitionOffsets(direction, progress);
 
-        // Follow the drawn path: start pause, then start → points → end with their own timing
         const pathPoint = pathPlayer.at(progress * moveDuration);
         const currentYaw = pathPoint.yaw + yawOffset;
         const currentPitch = Math.max(-85, Math.min(85, pathPoint.pitch + pitchOffset));
@@ -875,14 +869,58 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       };
 
       animateCamera();
-    }, 500);
+    };
+
+    // Smooth inter-scene camera transition if coming from another scene/angle:
+    if (fromCamera && playTourProgressRef.current === 0) {
+      let deltaYaw = (targetStart.yaw - fromCamera.yaw) % 360;
+      while (deltaYaw > 180) deltaYaw -= 360;
+      while (deltaYaw < -180) deltaYaw += 360;
+
+      const deltaPitch = targetStart.pitch - fromCamera.pitch;
+      const deltaFov = targetStart.fov - fromCamera.fov;
+      const angularDist = Math.hypot(deltaYaw, deltaPitch);
+
+      if (angularDist > 1 || Math.abs(deltaFov) > 1) {
+        // Smoothly rotate & dolly camera into targetStart orientation while the scene cross-fades
+        const turnDuration = Math.round(Math.min(900, Math.max(550, 500 + angularDist * 1.5)));
+        const turnStart = Date.now();
+        const easeInOutCubic = (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+        const animateInterSceneTurn = () => {
+          if (isCleanedUp) return;
+          const elapsed = Date.now() - turnStart;
+          const p = Math.min(elapsed / turnDuration, 1);
+          const eased = easeInOutCubic(p);
+
+          setCurrentCamera({
+            yaw: fromCamera.yaw + deltaYaw * eased,
+            pitch: fromCamera.pitch + deltaPitch * eased,
+            fov: fromCamera.fov + deltaFov * eased
+          });
+
+          if (p < 1) {
+            animationFrameId = requestAnimationFrame(animateInterSceneTurn);
+          } else {
+            startScenePath();
+          }
+        };
+
+        animationFrameId = requestAnimationFrame(animateInterSceneTurn);
+      } else {
+        startScenePath();
+      }
+    } else {
+      setCurrentCamera(targetStart);
+      startScenePath();
+    }
 
     return () => {
       isCleanedUp = true;
       if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, restartTrigger, isSingleStep]);
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, restartTrigger, isSingleStep]);
 
   const handlePrevScene = useCallback(() => {
     if (isTransitioning) return;
@@ -892,34 +930,14 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       if (currentPlayTourSceneIndex > 0) {
         const newIndex = currentPlayTourSceneIndex - 1;
         setCurrentPlayTourSceneIndex(newIndex);
-
-        // Mark this as a manual scene change to prevent sync issues
-        setIsManualSceneChange(true);
-
-        // Interrupt active autoplay
+        setIsManualSceneChange(false);
         setIsAutoplay(false);
-        setCurrentCamera(null);
         playTourProgressRef.current = 0;
 
-        // Find the corresponding scene and change directly
-        const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
-        const pScene = selectedTour?.play_tour_scenes?.[newIndex];
-        if (pScene) {
-          const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
-          if (sceneIdx !== -1) {
-            if (!isPlayingTour) {
-              setIsSingleStep(true);
-              setIsPlayingTour(true);
-              setHasPlayTourStarted(true);
-            }
-            setIsTransitioning(true);
-            setTimeout(() => {
-              setCurrentSceneIndex(sceneIdx);
-            }, 100);
-            setTimeout(() => {
-              setIsTransitioning(false);
-            }, 300);
-          }
+        if (!isPlayingTour) {
+          setIsSingleStep(true);
+          setIsPlayingTour(true);
+          setHasPlayTourStarted(true);
         }
       }
     } else {
@@ -927,7 +945,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       const newIndex = (currentSceneIndex - 1 + scenes.length) % scenes.length;
       handleSceneChange(newIndex);
     }
-  }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange, selectedPlayTourId, playTourDisplayScenes, currentPlayTourSceneIndex, playTours, isPlayingTour]);
+  }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange, selectedPlayTourId, playTourDisplayScenes, currentPlayTourSceneIndex, isPlayingTour]);
 
   const handleNextScene = useCallback(() => {
     if (isTransitioning) return;
@@ -937,34 +955,14 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       if (currentPlayTourSceneIndex < playTourDisplayScenes.length - 1) {
         const newIndex = currentPlayTourSceneIndex + 1;
         setCurrentPlayTourSceneIndex(newIndex);
-
-        // Mark this as a manual scene change to prevent sync issues
-        setIsManualSceneChange(true);
-
-        // Interrupt active autoplay
+        setIsManualSceneChange(false);
         setIsAutoplay(false);
-        setCurrentCamera(null);
         playTourProgressRef.current = 0;
 
-        // Find the corresponding scene and change directly
-        const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
-        const pScene = selectedTour?.play_tour_scenes?.[newIndex];
-        if (pScene) {
-          const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
-          if (sceneIdx !== -1) {
-            if (!isPlayingTour) {
-              setIsSingleStep(true);
-              setIsPlayingTour(true);
-              setHasPlayTourStarted(true);
-            }
-            setIsTransitioning(true);
-            setTimeout(() => {
-              setCurrentSceneIndex(sceneIdx);
-            }, 100);
-            setTimeout(() => {
-              setIsTransitioning(false);
-            }, 300);
-          }
+        if (!isPlayingTour) {
+          setIsSingleStep(true);
+          setIsPlayingTour(true);
+          setHasPlayTourStarted(true);
         }
       }
     } else {
@@ -972,7 +970,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       const newIndex = (currentSceneIndex + 1) % scenes.length;
       handleSceneChange(newIndex);
     }
-  }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange, selectedPlayTourId, playTours, currentPlayTourSceneIndex, isPlayingTour, playTourDisplayScenes]);
+  }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange, selectedPlayTourId, currentPlayTourSceneIndex, isPlayingTour, playTourDisplayScenes]);
 
   const triggerPauseAnimation = useCallback(() => {
     if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
@@ -1057,7 +1055,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
           // Reset Play Tour progress when navigating via hotspots
           playTourProgressRef.current = 0;
           setRestartTrigger(prev => prev + 1);
-          handleSceneChange(targetSceneIndex, true);
+          handleViewerSceneChange(targetSceneId);
         } else {
           console.error('Target scene not found:', targetSceneId);
         }
@@ -1508,7 +1506,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
       className={`relative bg-gray-900 rounded-2xl overflow-hidden shadow-2xl ${className} ${isFullscreen ? 'fixed inset-0 z-50 rounded-none' : ''}`}
     >
       {/* Tour Viewer */}
-      <div className={`${isFullscreen ? 'h-screen' : 'aspect-video'} relative`}>
+      <div className={`${isFullscreen ? 'h-screen' : 'aspect-video'} relative touch-none select-none`}>
         {currentTour && currentScene && (
           <CubeMapViewer
             tour={currentTour}
@@ -1753,7 +1751,7 @@ const HomeTourViewer: React.FC<HomeTourViewerProps> = ({ className = '' }) => {
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
         tourName={currentTour?.name || 'Virtual Tour'}
-        tourUrl={currentTour ? `${window.location.origin}/tours/${currentTour.id}` : window.location.href}
+        tourUrl={currentTour ? `${window.location.origin}/tours/${currentTour.slug || currentTour.id}` : window.location.href}
       />
     </div>
   );

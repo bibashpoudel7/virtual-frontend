@@ -30,7 +30,7 @@ export default function TourSteps({ current, className = '' }: TourStepsProps) {
           >
             <span
               className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                isCurrent ? 'bg-blue-600 text-white' : isDone ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                isCurrent ? 'bg-amber-600 text-white' : isDone ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
               }`}
             >
               <StepIcon className="w-4 h-4" />

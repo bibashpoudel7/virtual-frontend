@@ -5,7 +5,7 @@ import { Tour } from '@/types/tour';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import Image from 'next/image';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MapPin } from 'lucide-react';
 import TourSkeleton from '@/components/tours/TourSkeleton';
 
 export default function ShowcasePage() {
@@ -94,19 +94,19 @@ export default function ShowcasePage() {
       ];
       return propertyGradients[index % propertyGradients.length];
     } else {
-      // Standalone tours - use cooler colors
+      // Standalone tours - use warmer golden colors
       const standaloneGradients = [
-        'from-purple-400 to-purple-600',
-        'from-indigo-400 to-indigo-600',
-        'from-violet-400 to-violet-600',
-        'from-pink-400 to-pink-600'
+        'from-amber-400 to-amber-600',
+        'from-yellow-500 to-amber-600',
+        'from-amber-500 to-orange-500',
+        'from-yellow-400 to-yellow-600'
       ];
       return standaloneGradients[index % standaloneGradients.length];
     }
   };
 
-  const handleViewTour = (tourId: string) => {
-    router.push(`/tours/${tourId}`);
+  const handleViewTour = (tourIdentifier: string) => {
+    router.push(`/tours/${tourIdentifier}`);
   };
 
   // Filter tours based on search and category
@@ -165,14 +165,14 @@ return (
               placeholder="Search tours by name, property, or category..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white text-gray-900 placeholder-gray-500"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none bg-white text-gray-900 placeholder-gray-500 shadow-sm"
             />
           </div>
           <div className="w-full md:w-64">
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white text-gray-900 cursor-pointer"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none bg-white text-gray-900 cursor-pointer shadow-sm"
             >
               {categories.map((category) => (
                 <option key={category.id} value={category.id}>
@@ -207,13 +207,13 @@ return (
               <div
                 key={tour.id}
                 className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-2xl transition-shadow duration-300 cursor-pointer group"
-                onClick={() => handleViewTour(tour.id)}
+                onClick={() => handleViewTour(tour.slug || tour.id)}
               >
                 <div className="relative h-48 overflow-hidden bg-gray-200">
-                  {tour.thumbnail_url ? (
+                  {(tour.cover_image_url || tour.thumbnail_url) ? (
                     <>
                       <Image
-                        src={tour.thumbnail_url}
+                        src={tour.cover_image_url || tour.thumbnail_url || ''}
                         alt={tour.name}
                         fill
                         className="object-cover"
@@ -266,17 +266,26 @@ return (
                 </div>
                 <div className="p-6">
                   <div className="flex items-start justify-between mb-3">
-                    <h3 className="text-xl font-bold text-gray-900 group-hover:text-indigo-600 transition-colors flex-1">
+                    <h3 className="text-xl font-bold text-gray-900 group-hover:text-amber-600 transition-colors flex-1">
                       {tour.name}
                     </h3>
                     {tour.source === 'standalone' && (
-                      <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full font-medium">
+                      <span className="ml-2 px-2 py-1 bg-amber-100 text-amber-800 text-xs rounded-full font-medium">
                         Independent
                       </span>
                     )}
                   </div>
 
-                  {tour.property_name && (
+                  {tour.location && (
+                    <div className="mb-2">
+                      <p className="text-amber-800 text-xs flex items-center font-medium bg-amber-50 border border-amber-200/60 px-2 py-1 rounded w-fit">
+                        <MapPin className="w-3.5 h-3.5 mr-1 text-amber-600" />
+                        {tour.location}
+                      </p>
+                    </div>
+                  )}
+
+                  {tour.property_name && !tour.location && (
                     <div className="mb-3">
                       <p className="text-gray-600 text-sm flex items-center">
                         <svg className="w-4 h-4 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -288,10 +297,16 @@ return (
                     </div>
                   )}
 
+                  {tour.description && (
+                    <p className="text-gray-600 text-xs line-clamp-2 mb-3">
+                      {tour.description}
+                    </p>
+                  )}
+
                   {tour.categories && tour.categories.length > 0 && (
                     <div className="mb-3 flex flex-wrap gap-1">
                       {tour.categories.slice(0, 3).map(cat => (
-                        <span key={cat} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800 capitalize">
+                        <span key={cat} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800 capitalize">
                           {cat}
                         </span>
                       ))}
@@ -311,10 +326,10 @@ return (
                       <span>360° Virtual Tour</span>
                     </div>
                     <button
-                      className="text-indigo-600 hover:text-indigo-700 font-semibold text-sm flex items-center group-hover:gap-2 transition-all cursor-pointer"
+                      className="text-amber-600 hover:text-amber-700 font-semibold text-sm flex items-center group-hover:gap-2 transition-all cursor-pointer"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleViewTour(tour.id);
+                        handleViewTour(tour.slug || tour.id);
                       }}
                     >
                       Explore
@@ -349,7 +364,7 @@ return (
                     onClick={() => setCurrentPage(i + 1)}
                     disabled={loading || isPageLoading}
                     className={`w-10 h-10 rounded-lg text-sm font-medium transition-colors cursor-pointer ${currentPage === i + 1
-                      ? 'bg-indigo-600 text-white'
+                      ? 'bg-amber-600 text-white shadow-sm'
                       : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
                       } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >

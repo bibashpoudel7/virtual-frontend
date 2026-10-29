@@ -1,37 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  PutObjectCommand,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+  type ListObjectsV2CommandOutput,
+  type _Object,
+} from '@aws-sdk/client-s3';
+import {
+  getR2Client,
+  R2_BUCKET_NAME,
+  R2_PUBLIC_URL,
+  R2_ENDPOINT,
+  R2_ACCESS_KEY_ID,
+  R2_SECRET_ACCESS_KEY
+} from '@/lib/r2-client';
 
-// R2 configuration
-// This route runs on the server, so it reads server-only variables (same names as virtual-backend/.env).
-// NEXT_PUBLIC_* names are kept as a fallback, but anything NEXT_PUBLIC_ is bundled into browser JS,
-// so the secret key should not be stored under that prefix.
-const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID || process.env.NEXT_PUBLIC_R2_ACCOUNT_ID;
-const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY || process.env.NEXT_PUBLIC_R2_ACCESS_KEY_ID;
-const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_KEY || process.env.NEXT_PUBLIC_R2_SECRET_ACCESS_KEY;
-const R2_BUCKET_NAME = process.env.R2_BUCKET || process.env.NEXT_PUBLIC_R2_BUCKET_NAME || 'test';
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
-const R2_ENDPOINT = process.env.R2_ENDPOINT || (R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : '');
-
-// Log configuration for debugging
-console.log('R2 Configuration:', {
-  accountId: R2_ACCOUNT_ID ? 'Set' : 'Not set',
-  accessKeyId: R2_ACCESS_KEY_ID ? 'Set' : 'Not set',
-  secretKey: R2_SECRET_ACCESS_KEY ? 'Set' : 'Not set',
-  endpoint: R2_ENDPOINT || 'Not set',
-  bucket: R2_BUCKET_NAME,
-  publicUrl: R2_PUBLIC_URL
-});
-
-// Create S3 client for R2
-const s3Client = R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_ENDPOINT ? new S3Client({
-  region: 'auto',
-  endpoint: R2_ENDPOINT,
-  credentials: {
-    accessKeyId: R2_ACCESS_KEY_ID,
-    secretAccessKey: R2_SECRET_ACCESS_KEY,
-  },
-  forcePathStyle: true, // Use path-style URLs for R2
-}) : null;
+const s3Client = getR2Client();
 
 export async function PUT(request: NextRequest) {
   try {
@@ -128,6 +113,87 @@ export async function PUT(request: NextRequest) {
     console.error('Upload error:', error);
     return NextResponse.json(
       { error: 'Failed to process upload' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const url = new URL(request.url);
+    const key = url.searchParams.get('key');
+    const prefix = url.searchParams.get('prefix');
+
+    if (!key && !prefix) {
+      return NextResponse.json(
+        { error: 'key or prefix parameter is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!s3Client) {
+      return NextResponse.json(
+        { error: 'R2 storage not configured' },
+        { status: 500 }
+      );
+    }
+
+    // 1. Delete single object by key
+    if (key) {
+      await s3Client.send(new DeleteObjectCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: key,
+      }));
+      return NextResponse.json({ success: true, deletedKey: key });
+    }
+
+    // 2. Delete all objects matching prefix (e.g., scenes/{sceneId}/)
+    if (prefix) {
+      let continuationToken: string | undefined = undefined;
+      let totalDeleted = 0;
+
+      do {
+        const listResp: ListObjectsV2CommandOutput = await s3Client.send(
+          new ListObjectsV2Command({
+            Bucket: R2_BUCKET_NAME,
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+          })
+        );
+
+        if (listResp.Contents && listResp.Contents.length > 0) {
+          const objectsToDelete = listResp.Contents
+            .filter((item: _Object) => !!item.Key)
+            .map((item: _Object) => ({ Key: item.Key! }));
+
+          if (objectsToDelete.length > 0) {
+            await s3Client.send(new DeleteObjectsCommand({
+              Bucket: R2_BUCKET_NAME,
+              Delete: {
+                Objects: objectsToDelete,
+                Quiet: true,
+              },
+            }));
+            totalDeleted += objectsToDelete.length;
+          }
+        }
+
+        continuationToken = listResp.IsTruncated ? listResp.NextContinuationToken : undefined;
+      } while (continuationToken);
+
+      console.log(`Deleted ${totalDeleted} objects from R2 bucket "${R2_BUCKET_NAME}" with prefix "${prefix}"`);
+      return NextResponse.json({
+        success: true,
+        prefix,
+        deletedCount: totalDeleted,
+      });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    console.error('R2 delete error:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete from R2', details: error.message },
       { status: 500 }
     );
   }

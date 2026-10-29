@@ -2,11 +2,11 @@
 
 import { Icon } from '@iconify/react';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { createCameraPathPlayer } from '@/lib/camera-path';
 
-const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://test.thenimto.com';
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || 'https://tour.thenimto.com';
 import CubeMapViewer from '@/components/viewer/CubeMapViewer';
 import PlayTourOverlay from '@/components/tours/PlayTourOverlay';
 import IntroModelScreen from '@/components/viewer/IntroModelScreen';
@@ -379,6 +379,7 @@ ProgressBar.displayName = 'ProgressBar';
 
 export default function PublicTourViewer() {
   const params = useParams();
+  const router = useRouter();
   const [tour, setTour] = useState<Tour | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [allHotspots, setAllHotspots] = useState<Hotspot[]>([]);
@@ -388,9 +389,25 @@ export default function PublicTourViewer() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isEmbedded, setIsEmbedded] = useState(true);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [showControls, setShowControls] = useState(false);
-  const [showRoomStrip, setShowRoomStrip] = useState(true);
+  const [showControls, setShowControls] = useState(true);
+  const [showRoomStrip, setShowRoomStrip] = useState(false);
+
+  // Detect whether viewer is embedded in an iframe or accessed via /embed/<key>
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      let inIframe = false;
+      try {
+        inIframe = window.self !== window.top;
+      } catch {
+        inIframe = true; // Cross-origin access error confirms we are in an iframe
+      }
+      const searchParams = new URLSearchParams(window.location.search);
+      const hasEmbedParam = searchParams.get('embed') === '1' || window.location.pathname.startsWith('/embed');
+      setIsEmbedded(inIframe || hasEmbedParam);
+    }
+  }, []);
   // The tour's 3D intro model (if any) is shown once, before the 360° view
   const [introDone, setIntroDone] = useState(false);
   const [showDollhouseModal, setShowDollhouseModal] = useState(false);
@@ -428,6 +445,10 @@ export default function PublicTourViewer() {
   const playTourProgressRef = useRef<number>(0);
   const playTourLastSceneIndexRef = useRef<number>(0);
   const playTourRestartTriggerRef = useRef<number>(0);
+  const currentCameraRef = useRef<{ yaw: number; pitch: number; fov: number } | null>(null);
+  currentCameraRef.current = currentCamera;
+  const currentSceneIndexRef = useRef<number>(currentSceneIndex);
+  currentSceneIndexRef.current = currentSceneIndex;
 
   const tourId = params.id as string;
 
@@ -546,6 +567,24 @@ export default function PublicTourViewer() {
       setTour(data.tour);
       setScenes(data.scenes || []);
 
+      // Replace URL with tour slug if available (only on direct browser visits, never inside an iframe or /embed)
+      if (typeof window !== 'undefined' && data.tour?.slug) {
+        let inIframe = false;
+        try {
+          inIframe = window.self !== window.top;
+        } catch {
+          inIframe = true;
+        }
+        const searchParams = new URLSearchParams(window.location.search);
+        const hasEmbedParam = searchParams.get('embed') === '1' || window.location.pathname.startsWith('/embed');
+        if (!inIframe && !hasEmbedParam) {
+          const targetPath = `/tours/${data.tour.slug}`;
+          if (window.location.pathname !== targetPath) {
+            window.history.replaceState(null, '', `${targetPath}${window.location.search}${window.location.hash}`);
+          }
+        }
+      }
+
       // Fetch hotspots and overlays for all scenes
       if (data.scenes && data.scenes.length > 0) {
         const allHotspots: Hotspot[] = [];
@@ -596,6 +635,17 @@ export default function PublicTourViewer() {
       setLoading(false);
     }
   };
+
+  const handleExit = useCallback(() => {
+    if (isEmbedded) return;
+    if (typeof window !== 'undefined') {
+      if (window.history.length > 1 && document.referrer && document.referrer.includes(window.location.host)) {
+        router.back();
+      } else {
+        router.push('/showcase');
+      }
+    }
+  }, [router, isEmbedded]);
 
   const triggerPauseAnimation = useCallback(() => {
     if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
@@ -701,7 +751,7 @@ export default function PublicTourViewer() {
 
     // Change to the scene
     const sceneIndex = scenes.findIndex(s => s.id === sceneId);
-    if (sceneIndex !== -1 && sceneIndex !== currentSceneIndex) {
+    if (sceneIndex !== -1 && sceneIndex !== currentSceneIndexRef.current) {
       setCurrentSceneIndex(sceneIndex);
     }
 
@@ -712,14 +762,13 @@ export default function PublicTourViewer() {
       playTourRestartTriggerRef.current = restartTrigger;
     }
 
-    // Wait for scene to load, then animate camera
-    timeoutId = setTimeout(() => {
-      if (isCleanedUp) return;
+    const pathPlayer = createCameraPathPlayer(pScene, pScene.transition_direction || 'forward');
+    const targetStart = pathPlayer.at(0);
+    const fromCamera = currentCameraRef.current;
 
-      // Start pause + path (with per-point times when set); "pause after" is separate
-      const pathPlayer = createCameraPathPlayer(pScene, pScene.transition_direction || 'forward');
+    const startScenePath = () => {
+      if (isCleanedUp) return;
       const moveDuration = pathPlayer.duration;
-      // Calculate start time based on saved progress to allow resuming
       const startTime = Date.now() - (playTourProgressRef.current * moveDuration);
       const waitDuration = pScene.wait_duration || 1000;
 
@@ -728,22 +777,13 @@ export default function PublicTourViewer() {
 
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / moveDuration, 1);
-
-        // Save progress for resume functionality
         playTourProgressRef.current = progress;
 
-
-        // Calculate curve offset based on transition direction
-        // This creates a smooth arc that peaks at 50% progress and returns to 0 at 100%
         const direction = pScene.transition_direction || 'forward';
-
-        // Use centralized offset calculation for enhanced intensities
-        // Steps with path points follow the drawn path only; the direction arc is for simple start→end moves
         const { yawOffset, pitchOffset, fovOffset } = pathPlayer.hasPoints
           ? { yawOffset: 0, pitchOffset: 0, fovOffset: 0 }
           : calculateTransitionOffsets(direction, progress);
 
-        // Follow the drawn path: start pause, then start → points → end with their own timing
         const pathPoint = pathPlayer.at(progress * moveDuration);
         const currentYaw = pathPoint.yaw + yawOffset;
         const currentPitch = Math.max(-85, Math.min(85, pathPoint.pitch + pitchOffset));
@@ -769,14 +809,58 @@ export default function PublicTourViewer() {
       };
 
       animateCamera();
-    }, 500);
+    };
+
+    // Smooth inter-scene camera transition if coming from another scene/angle:
+    if (fromCamera && playTourProgressRef.current === 0) {
+      let deltaYaw = (targetStart.yaw - fromCamera.yaw) % 360;
+      while (deltaYaw > 180) deltaYaw -= 360;
+      while (deltaYaw < -180) deltaYaw += 360;
+
+      const deltaPitch = targetStart.pitch - fromCamera.pitch;
+      const deltaFov = targetStart.fov - fromCamera.fov;
+      const angularDist = Math.hypot(deltaYaw, deltaPitch);
+
+      if (angularDist > 1 || Math.abs(deltaFov) > 1) {
+        // Smoothly rotate & dolly camera into targetStart orientation while the scene cross-fades
+        const turnDuration = Math.round(Math.min(900, Math.max(550, 500 + angularDist * 1.5)));
+        const turnStart = Date.now();
+        const easeInOutCubic = (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+        const animateInterSceneTurn = () => {
+          if (isCleanedUp) return;
+          const elapsed = Date.now() - turnStart;
+          const p = Math.min(elapsed / turnDuration, 1);
+          const eased = easeInOutCubic(p);
+
+          setCurrentCamera({
+            yaw: fromCamera.yaw + deltaYaw * eased,
+            pitch: fromCamera.pitch + deltaPitch * eased,
+            fov: fromCamera.fov + deltaFov * eased
+          });
+
+          if (p < 1) {
+            animationFrameId = requestAnimationFrame(animateInterSceneTurn);
+          } else {
+            startScenePath();
+          }
+        };
+
+        animationFrameId = requestAnimationFrame(animateInterSceneTurn);
+      } else {
+        startScenePath();
+      }
+    } else {
+      setCurrentCamera(targetStart);
+      startScenePath();
+    }
 
     return () => {
       isCleanedUp = true;
       if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, restartTrigger, isSingleStep]);
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, restartTrigger, isSingleStep]);
 
   // Modified Autoplay Toggle to prioritize Play Tour
   const toggleAutoplay = useCallback(() => {
@@ -869,34 +953,14 @@ export default function PublicTourViewer() {
       if (currentPlayTourSceneIndex > 0) {
         const newIndex = currentPlayTourSceneIndex - 1;
         setCurrentPlayTourSceneIndex(newIndex);
-
-        // Mark this as a manual scene change to prevent sync issues
-        setIsManualSceneChange(true);
-
-        // Interrupt active autoplay
+        setIsManualSceneChange(false);
         setIsAutoplay(false);
-        setCurrentCamera(null);
         playTourProgressRef.current = 0;
 
-        // Find the corresponding scene and change directly
-        const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
-        const pScene = selectedTour?.play_tour_scenes?.[newIndex];
-        if (pScene) {
-          const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
-          if (sceneIdx !== -1) {
-            if (!isPlayingTour) {
-              setIsSingleStep(true);
-              setIsPlayingTour(true);
-              setHasPlayTourStarted(true);
-            }
-            setIsTransitioning(true);
-            setTimeout(() => {
-              setCurrentSceneIndex(sceneIdx);
-            }, 100);
-            setTimeout(() => {
-              setIsTransitioning(false);
-            }, 600);
-          }
+        if (!isPlayingTour) {
+          setIsSingleStep(true);
+          setIsPlayingTour(true);
+          setHasPlayTourStarted(true);
         }
       }
     } else {
@@ -904,7 +968,7 @@ export default function PublicTourViewer() {
       const newIndex = (currentSceneIndex - 1 + scenes.length) % scenes.length;
       handleSceneChange(newIndex);
     }
-  }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange, selectedPlayTourId, playTourDisplayScenes, currentPlayTourSceneIndex, playTours, isPlayingTour]);
+  }, [currentSceneIndex, scenes.length, isTransitioning, handleSceneChange, selectedPlayTourId, playTourDisplayScenes, currentPlayTourSceneIndex, isPlayingTour]);
 
   const handleNextScene = useCallback(() => {
     if (isTransitioning) return;
@@ -914,34 +978,14 @@ export default function PublicTourViewer() {
       if (currentPlayTourSceneIndex < playTourDisplayScenes.length - 1) {
         const newIndex = currentPlayTourSceneIndex + 1;
         setCurrentPlayTourSceneIndex(newIndex);
-
-        // Mark this as a manual scene change to prevent sync issues
-        setIsManualSceneChange(true);
-
-        // Interrupt any active autoplay (but keep Play Tour state if handled)
+        setIsManualSceneChange(false);
         setIsAutoplay(false);
-        setCurrentCamera(null);
         playTourProgressRef.current = 0;
 
-        // Find the corresponding scene and change directly
-        const selectedTour = playTours.find(t => t.id === selectedPlayTourId);
-        const pScene = selectedTour?.play_tour_scenes?.[newIndex];
-        if (pScene) {
-          const sceneIdx = scenes.findIndex(s => s.id === pScene.scene_id);
-          if (sceneIdx !== -1) {
-            if (!isPlayingTour) {
-              setIsSingleStep(true);
-              setIsPlayingTour(true);
-              setHasPlayTourStarted(true);
-            }
-            setIsTransitioning(true);
-            setTimeout(() => {
-              setCurrentSceneIndex(sceneIdx);
-            }, 100);
-            setTimeout(() => {
-              setIsTransitioning(false);
-            }, 600);
-          }
+        if (!isPlayingTour) {
+          setIsSingleStep(true);
+          setIsPlayingTour(true);
+          setHasPlayTourStarted(true);
         }
       }
     } else {
@@ -994,7 +1038,7 @@ export default function PublicTourViewer() {
           // Reset Play Tour progress when navigating via hotspots
           playTourProgressRef.current = 0;
           setRestartTrigger(prev => prev + 1);
-          handleSceneChange(targetSceneIndex);
+          handleViewerSceneChange(targetSceneId);
         }
       }
     } else if (hotspot.kind === 'info') {
@@ -1293,11 +1337,11 @@ export default function PublicTourViewer() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-600 to-blue-600">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-600 via-amber-700 to-amber-900">
         <div className="text-center">
           <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-white mx-auto mb-4"></div>
           <h2 className="text-2xl font-semibold text-white mb-2">Loading Virtual Tour...</h2>
-          <p className="text-purple-100">Preparing your immersive experience</p>
+          <p className="text-amber-100">Preparing your immersive experience</p>
         </div>
       </div>
     );
@@ -1305,12 +1349,12 @@ export default function PublicTourViewer() {
 
   if (error || !tour || scenes.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-600 to-blue-600">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-600 via-amber-700 to-amber-900">
         <div className="text-center max-w-md mx-auto px-6">
           <div className="bg-white/10 backdrop-blur-lg rounded-lg p-8">
             <div className="text-6xl mb-4">🏠</div>
             <h2 className="text-2xl font-semibold text-white mb-4">Virtual Tour Not Available</h2>
-            <p className="text-purple-100 mb-6">
+            <p className="text-amber-100 mb-6">
               {error || 'This tour is not available for public viewing or requires authentication.'}
             </p>
             <button
@@ -1332,10 +1376,10 @@ export default function PublicTourViewer() {
   return (
     <div
       ref={containerRef}
-      className={`min-h-screen bg-black ${isFullscreen ? 'fixed inset-0 z-50' : ''}`}
+      className={`min-h-screen bg-black overflow-hidden select-none ${isFullscreen ? 'fixed inset-0 z-50' : ''}`}
     >
       {/* Tour Viewer */}
-      <div className={`${isFullscreen ? 'h-screen' : 'h-screen'} relative`}>
+      <div className={`${isFullscreen ? 'h-screen' : 'h-screen'} relative touch-none select-none`}>
         {tour.intro_model_url && (!introDone || showDollhouseModal) && (
           <IntroModelScreen
             modelUrl={tour.intro_model_url}
@@ -1412,32 +1456,38 @@ export default function PublicTourViewer() {
           isVisible={!!(hasPlayTourStarted && playTourDisplayScenes && playTourDisplayScenes[currentPlayTourSceneIndex])}
         />
 
-        {/* Tour Title - Only show when controls are not active */}
-        {!showControls && (
-          <div className="absolute top-4 left-4 z-30">
-            <h3 className="text-white text-2xl font-bold mb-2 drop-shadow-lg">
+        {/* Top Left Header: Exit Button & Tour Info */}
+        <div className="absolute top-4 left-4 z-30 max-w-md flex flex-col items-start gap-2">
+          {/* Exit Button - hidden when embedded inside an iframe */}
+          {!isEmbedded && (
+            <button
+              onClick={handleExit}
+              className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/85 backdrop-blur-md text-white text-xs font-semibold border border-white/20 shadow-lg transition-all duration-200 cursor-pointer hover:border-white/40"
+              title="Exit Tour"
+            >
+              <ChevronLeft className="w-4 h-4 text-white group-hover:-translate-x-0.5 transition-transform" />
+              <span>Exit</span>
+            </button>
+          )}
+
+          {/* Tour Title & Info Card */}
+          <div className="bg-black/40 backdrop-blur-md px-3.5 py-2 rounded-xl border border-white/15 shadow-xl max-w-xs sm:max-w-sm">
+            <h3 className="text-white text-base sm:text-lg font-bold leading-snug drop-shadow">
               {tour.name || 'Virtual Tour'}
             </h3>
-            {/* <p className="text-white/90 text-sm drop-shadow-lg">
-              {scenes.length} scene{scenes.length !== 1 ? 's' : ''} • Public Tour
-            </p> */}
-            <p className="text-white/90 text-sm drop-shadow-lg">
-              Public Tour
-            </p>
+            {tour.location && (
+              <p className="text-amber-300 text-xs font-medium flex items-center gap-1 mt-0.5 drop-shadow">
+                <Icon icon="material-symbols:location-on" className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                <span className="truncate">{tour.location}</span>
+              </p>
+            )}
+            {tour.description && (
+              <p className="text-white/80 text-[11px] mt-1 line-clamp-2 leading-relaxed">
+                {tour.description}
+              </p>
+            )}
           </div>
-        )}
-
-        {/* Close Button - Always visible
-        <div className="absolute top-4 right-4 z-30">
-          <button
-            onClick={() => window.close()}
-            className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-full transition-colors duration-200 shadow-lg"
-            title="Close Tour"
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
-        */}
 
         {/* Top Right Controls - Only show when controls are active */}
         {showControls && (
@@ -1449,7 +1499,7 @@ export default function PublicTourViewer() {
                 className="bg-black/50 backdrop-blur-sm text-white p-2 rounded-full hover:bg-black/70 transition-colors cursor-pointer group relative"
                 title="View 3D Dollhouse & Floor Plan"
               >
-                <Box className="w-5 h-5 text-blue-400 group-hover:scale-110 transition-transform" />
+                <Box className="w-5 h-5 text-amber-400 group-hover:scale-110 transition-transform" />
               </button>
             )}
 
@@ -1485,26 +1535,7 @@ export default function PublicTourViewer() {
           </div>
         )}
 
-        {/* Center Play Button - Only show before controls are activated */}
-        {!showControls && (
-          <div className="absolute inset-0 flex items-center justify-center z-20">
-            <button
-              onClick={handleCenterPlayClick}
-              className="bg-white/95 backdrop-blur-sm rounded-full p-6 hover:bg-white transition-all duration-300 shadow-2xl hover:scale-105 group cursor-pointer"
-            >
-              <Play className="w-12 h-12 text-gray-800 ml-1 group-hover:text-black transition-colors" />
-            </button>
-          </div>
-        )}
-
-        {/* 360° Experience Badge - Show when controls are not active */}
-        {!showControls && (
-          <div className="absolute bottom-4 right-4 bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg font-bold shadow-lg z-20">
-            <span className="text-xl">360°</span> Experience
-          </div>
-        )}
-
-        {/* Controls - Only show after center play is clicked */}
+        {/* Controls - Always active */}
         {showControls && (
           <>
             <div className="absolute bottom-6 left-6 z-30">
@@ -1669,7 +1700,7 @@ export default function PublicTourViewer() {
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
         tourName={tour?.name || 'Virtual Tour'}
-        tourUrl={window.location.href}
+        tourUrl={typeof window !== 'undefined' ? (tour?.slug ? `${window.location.origin}/tours/${tour.slug}` : window.location.href) : ''}
       />
     </div>
   );
