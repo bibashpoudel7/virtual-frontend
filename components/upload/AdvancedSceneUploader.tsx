@@ -219,20 +219,55 @@ export default function AdvancedSceneUploader({
       if (token) formData.append('token', token);
       formData.append('operation', 'pipeline');
 
-      const response = await fetch('/api/process-image', {
-        method: 'POST',
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: formData,
+      // Use XMLHttpRequest to track real-time upload progress to the server
+      const result = await new Promise<any>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/process-image');
+        if (token) {
+          xhr.setRequestHeader('Authorization', token.startsWith('Bearer ') ? token : `Bearer ${token}`);
+        }
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = Math.round((event.loaded / event.total) * 100);
+            const uploadedMB = (event.loaded / (1024 * 1024)).toFixed(1);
+            const totalMB = (event.total / (1024 * 1024)).toFixed(1);
+            const progress = Math.min(30, Math.round((percentComplete / 100) * 30));
+            setOverallProgress(progress);
+            if (percentComplete < 100) {
+              setServerMessage(`Uploading 360° photo (${uploadedMB} MB / ${totalMB} MB - ${percentComplete}%)...`);
+            } else {
+              setServerMessage('Upload complete. Optimizing panorama and generating tiles on server...');
+              setOverallProgress(35);
+            }
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const res = JSON.parse(xhr.responseText);
+              resolve(res);
+            } catch (e) {
+              reject(new Error('Invalid response from server'));
+            }
+          } else {
+            try {
+              const errJson = JSON.parse(xhr.responseText);
+              reject(new Error(errJson.error || `Upload failed with status ${xhr.status}`));
+            } catch {
+              reject(new Error(`Upload failed with status ${xhr.status}`));
+            }
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error('Network error during upload'));
+        };
+
+        xhr.send(formData);
       });
 
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({ error: 'Upload failed' }));
-        throw new Error(errJson.error || `Upload failed with status ${response.status}`);
-      }
-
-      const result = await response.json();
       if (result.success) {
         if (activePollRef.current) clearInterval(activePollRef.current);
         setIsPipelineRunning(false);
