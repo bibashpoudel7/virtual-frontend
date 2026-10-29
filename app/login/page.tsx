@@ -17,7 +17,7 @@ const TITLES: Record<Mode, { title: string; subtitle: string }> = {
 };
 
 const inputClass =
-  'block w-full px-3 py-2.5 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm';
+  'block w-full px-3 py-2.5 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 sm:text-sm';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -156,7 +156,7 @@ export default function LoginPage() {
           {needsCode && <span className="font-medium text-gray-900"> {email}</span>}
         </p>
 
-        {notice && <p className="mt-4 rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">{notice}</p>}
+        {notice && <p className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">{notice}</p>}
         {error && (
           <p role="alert" className="mt-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-800">
             {error}
@@ -200,7 +200,7 @@ export default function LoginPage() {
                   type="button"
                   onClick={resend}
                   disabled={resendIn > 0 || loading}
-                  className="font-medium text-blue-600 hover:text-blue-700 disabled:text-gray-400 cursor-pointer disabled:cursor-not-allowed"
+                  className="font-medium text-amber-600 hover:text-amber-700 disabled:text-gray-400 cursor-pointer disabled:cursor-not-allowed"
                 >
                   {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
                 </button>
@@ -215,7 +215,7 @@ export default function LoginPage() {
                   {mode === 'reset' ? 'New password' : 'Password'}
                 </label>
                 {mode === 'signin' && (
-                  <button type="button" onClick={() => go('forgot')} className="text-sm font-medium text-blue-600 hover:text-blue-700 cursor-pointer">
+                  <button type="button" onClick={() => go('forgot')} className="text-sm font-medium text-amber-600 hover:text-amber-700 cursor-pointer">
                     Forgot password?
                   </button>
                 )}
@@ -249,7 +249,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading || (needsCode && code.length !== 6)}
-            className="w-full flex justify-center py-2.5 px-4 text-sm font-semibold rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+            className="w-full flex justify-center py-2.5 px-4 text-sm font-semibold rounded-lg text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer shadow-sm"
           >
             {submitLabel}
           </button>

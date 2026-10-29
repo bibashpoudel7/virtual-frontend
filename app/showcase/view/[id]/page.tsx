@@ -34,11 +34,11 @@ export default function DeprecatedShowcaseViewer() {
 
   // Show a brief loading message while redirecting
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-600">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-600 to-yellow-600">
       <div className="text-center text-white">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
         <h2 className="text-xl font-semibold mb-2">Redirecting to Enhanced Tour Player...</h2>
-        <p className="text-indigo-100">You'll be redirected to the premium tour experience</p>
+        <p className="text-amber-100">You'll be redirected to the premium tour experience</p>
       </div>
     </div>
   );

@@ -70,6 +70,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setGlobalLogoutFunction(logout);
     setTourServiceLogoutFunction(logout);
 
+    // Skip auth session check when rendered inside a public embed iframe (/embed/... or ?embed=1)
+    if (typeof window !== 'undefined') {
+      const isEmbedRoute =
+        window.location.pathname.startsWith('/embed') ||
+        new URLSearchParams(window.location.search).get('embed') === '1';
+      if (isEmbedRoute) {
+        setIsLoading(false);
+        return;
+      }
+    }
+
     const storedToken = localStorage.getItem('accessToken') || localStorage.getItem('auth_token');
     if (!storedToken) {
       setIsLoading(false);

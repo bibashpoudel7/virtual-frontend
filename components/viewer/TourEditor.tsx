@@ -302,6 +302,12 @@ export default function TourEditor({
   const playTourProgressRef = useRef<number>(0);
   const playTourLastSceneIndexRef = useRef<number>(0);
   const playTourRestartTriggerRef = useRef<number>(0);
+  const currentCameraRef = useRef<{ yaw: number; pitch: number; fov: number } | null>(null);
+  currentCameraRef.current = currentCamera;
+  const currentSceneIndexRef = useRef<number>(currentSceneIndex);
+  currentSceneIndexRef.current = currentSceneIndex;
+  const currentSceneIdRef = useRef<string>(currentSceneId);
+  currentSceneIdRef.current = currentSceneId;
   const [restartTrigger, setRestartTrigger] = useState(0);
   const [isManualSceneChange, setIsManualSceneChange] = useState(false);
 
@@ -442,7 +448,7 @@ export default function TourEditor({
 
     // Change to the scene
     const sceneIndex = scenes.findIndex(s => s.id === sceneId);
-    if (sceneIndex !== -1 && (sceneIndex !== currentSceneIndex || currentSceneId !== sceneId)) {
+    if (sceneIndex !== -1 && (sceneIndex !== currentSceneIndexRef.current || currentSceneIdRef.current !== sceneId)) {
       setCurrentSceneId(sceneId);
       setCurrentSceneIndex(sceneIndex);
     }
@@ -454,12 +460,12 @@ export default function TourEditor({
       playTourRestartTriggerRef.current = restartTrigger;
     }
 
-    // Wait for scene to load, then animate camera
-    timeoutId = setTimeout(() => {
-      if (isCleanedUp) return;
+    const pathPlayer = createCameraPathPlayer(pScene, pScene.transition_direction || 'forward');
+    const targetStart = pathPlayer.at(0);
+    const fromCamera = currentCameraRef.current;
 
-      // Start pause + path (with per-point times when set); "pause after" is separate
-      const pathPlayer = createCameraPathPlayer(pScene, pScene.transition_direction || 'forward');
+    const startScenePath = () => {
+      if (isCleanedUp) return;
       const moveDuration = pathPlayer.duration;
       // Calculate start time based on saved progress to allow resuming
       const startTime = Date.now() - (playTourProgressRef.current * moveDuration);
@@ -510,14 +516,58 @@ export default function TourEditor({
       };
 
       animateCamera();
-    }, 500);
+    };
+
+    // Smooth inter-scene camera transition if coming from another scene/angle:
+    if (fromCamera && playTourProgressRef.current === 0) {
+      let deltaYaw = (targetStart.yaw - fromCamera.yaw) % 360;
+      while (deltaYaw > 180) deltaYaw -= 360;
+      while (deltaYaw < -180) deltaYaw += 360;
+
+      const deltaPitch = targetStart.pitch - fromCamera.pitch;
+      const deltaFov = targetStart.fov - fromCamera.fov;
+      const angularDist = Math.hypot(deltaYaw, deltaPitch);
+
+      if (angularDist > 1 || Math.abs(deltaFov) > 1) {
+        // Smoothly rotate & dolly camera into targetStart orientation while the scene cross-fades
+        const turnDuration = Math.round(Math.min(900, Math.max(550, 500 + angularDist * 1.5)));
+        const turnStart = Date.now();
+        const easeInOutCubic = (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+        const animateInterSceneTurn = () => {
+          if (isCleanedUp) return;
+          const elapsed = Date.now() - turnStart;
+          const p = Math.min(elapsed / turnDuration, 1);
+          const eased = easeInOutCubic(p);
+
+          setCurrentCamera({
+            yaw: fromCamera.yaw + deltaYaw * eased,
+            pitch: fromCamera.pitch + deltaPitch * eased,
+            fov: fromCamera.fov + deltaFov * eased
+          });
+
+          if (p < 1) {
+            animationFrameId = requestAnimationFrame(animateInterSceneTurn);
+          } else {
+            startScenePath();
+          }
+        };
+
+        animationFrameId = requestAnimationFrame(animateInterSceneTurn);
+      } else {
+        startScenePath();
+      }
+    } else {
+      setCurrentCamera(targetStart);
+      startScenePath();
+    }
 
     return () => {
       isCleanedUp = true;
       if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
       if (timeoutId !== null) clearTimeout(timeoutId);
     };
-  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, currentSceneIndex, currentSceneId, restartTrigger, isSingleStep]);
+  }, [isPlayingTour, selectedPlayTourId, currentPlayTourSceneIndex, playTours, scenes, restartTrigger, isSingleStep]);
 
   const handleSceneChange = useCallback((sceneId: string) => {
     if (sceneId === currentSceneId) return; // Don't transition to the same scene
@@ -738,24 +788,17 @@ export default function TourEditor({
         const newIndex = currentPlayTourSceneIndex - 1;
         setCurrentPlayTourSceneIndex(newIndex);
 
-        // Mark this as a manual scene change to prevent sync issues
-        setIsManualSceneChange(true);
+        // Mark this as a non-manual scene change to allow play tour effect to manage transition
+        setIsManualSceneChange(false);
 
         // Interrupt active autoplay
         setIsAutoplay(false);
         playTourProgressRef.current = 0;
 
-        // Find the corresponding scene and change directly
-        const pScene = selectedTour.play_tour_scenes[newIndex];
-        if (pScene) {
-          if (!isPlayingTour) {
-            setIsSingleStep(true);
-            setIsPlayingTour(true);
-            setHasPlayTourStarted(true);
-          }
-          if (pScene.scene_id !== currentSceneId) {
-            handleSceneChange(pScene.scene_id);
-          }
+        if (!isPlayingTour) {
+          setIsSingleStep(true);
+          setIsPlayingTour(true);
+          setHasPlayTourStarted(true);
         }
       }
     } else {
@@ -763,7 +806,7 @@ export default function TourEditor({
       const newIndex = (currentSceneIndex - 1 + scenes.length) % scenes.length;
       handleSceneChangeByIndex(newIndex);
     }
-  }, [currentSceneIndex, scenes, handleSceneChangeByIndex, selectedPlayTourId, playTours, currentPlayTourSceneIndex, handleSceneChange, currentSceneId, isPlayingTour]);
+  }, [currentSceneIndex, scenes.length, handleSceneChangeByIndex, selectedPlayTourId, playTours, currentPlayTourSceneIndex, isPlayingTour]);
 
   const handleNextScene = useCallback(() => {
     if (isTransitioning) return;
@@ -774,24 +817,17 @@ export default function TourEditor({
         const newIndex = currentPlayTourSceneIndex + 1;
         setCurrentPlayTourSceneIndex(newIndex);
 
-        // Mark this as a manual scene change to prevent sync issues
-        setIsManualSceneChange(true);
+        // Mark this as a non-manual scene change to allow play tour effect to manage transition
+        setIsManualSceneChange(false);
 
         // Interrupt active autoplay
         setIsAutoplay(false);
         playTourProgressRef.current = 0;
 
-        // Find the corresponding scene and change directly
-        const pScene = selectedTour.play_tour_scenes[newIndex];
-        if (pScene) {
-          if (!isPlayingTour) {
-            setIsSingleStep(true);
-            setIsPlayingTour(true);
-            setHasPlayTourStarted(true);
-          }
-          if (pScene.scene_id !== currentSceneId) {
-            handleSceneChange(pScene.scene_id);
-          }
+        if (!isPlayingTour) {
+          setIsSingleStep(true);
+          setIsPlayingTour(true);
+          setHasPlayTourStarted(true);
         }
       }
     } else {
@@ -799,7 +835,7 @@ export default function TourEditor({
       const newIndex = (currentSceneIndex + 1) % scenes.length;
       handleSceneChangeByIndex(newIndex);
     }
-  }, [currentSceneIndex, scenes, handleSceneChangeByIndex, selectedPlayTourId, playTours, currentPlayTourSceneIndex, handleSceneChange, currentSceneId, isPlayingTour]);
+  }, [currentSceneIndex, scenes.length, handleSceneChangeByIndex, selectedPlayTourId, playTours, currentPlayTourSceneIndex, isPlayingTour]);
 
   const handleHotspotClick = useCallback((hotspot: Hotspot) => {
     // Pause any active autoplay when user manually interacts with hotspots
@@ -810,14 +846,18 @@ export default function TourEditor({
       setIsPlayingTour(false);
     }
 
-    if (hotspot.kind === 'navigation' && hotspot.payload) {
-      try {
-        const payload = JSON.parse(hotspot.payload);
-        if (payload.targetSceneId) {
-          handleSceneChange(payload.targetSceneId);
+    if (hotspot.kind === 'navigation') {
+      let targetSceneId = hotspot.target_scene_id;
+      if (!targetSceneId && hotspot.payload) {
+        try {
+          const payload = typeof hotspot.payload === 'string' ? JSON.parse(hotspot.payload) : hotspot.payload;
+          targetSceneId = payload.targetSceneId;
+        } catch (err) {
+          console.error('Invalid hotspot payload:', err);
         }
-      } catch (err) {
-        console.error('Invalid hotspot payload:', err);
+      }
+      if (targetSceneId) {
+        handleSceneChange(targetSceneId);
       }
     } else if (hotspot.kind === 'info') {
       // Handle info hotspots - show information modal/popup
@@ -1693,7 +1733,7 @@ export default function TourEditor({
   return (
     <div className={`absolute inset-0 ${isViewerFullscreen ? 'fixed z-50 bg-black' : ''}`} ref={containerRef}>
       {/* Shared Viewer Instance - Persists across state changes */}
-      <div className="w-full h-full relative">
+      <div className="w-full h-full relative touch-none select-none">
         <CubeMapViewer
           tour={tour}
           currentScene={currentScene}

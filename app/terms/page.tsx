@@ -73,7 +73,7 @@ const TermsOfServicePage: React.FC = () => {
               <h2 className="text-2xl font-semibold text-gray-900 mb-4">Contact Information</h2>
               <p className="text-gray-700">
                 If you have any questions about these Terms of Service, please contact us at{' '}
-                <a href="mailto:info@thenimto.com" className="text-indigo-600 hover:text-indigo-800">
+                <a href="mailto:info@thenimto.com" className="text-amber-600 hover:text-amber-800">
                   info@thenimto.com
                 </a>
               </p>

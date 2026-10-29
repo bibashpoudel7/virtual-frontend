@@ -21,6 +21,7 @@ export interface LoginResponse {
 export interface Tour {
   id: string;
   name: string;
+  slug?: string;
   description?: string;
   createdAt: string;
   updatedAt: string;

@@ -65,7 +65,7 @@
 //         { name: 'Live chat support', included: false },
 //       ],
 //       buttonText: 'Start Free Trial',
-//       buttonStyle: 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer',
+//       buttonStyle: 'bg-amber-600 hover:bg-amber-700 cursor-pointer',
 //       popular: true,
 //     },
 //     {
@@ -134,7 +134,7 @@
 //             <button
 //               onClick={() => setBillingPeriod('monthly')}
 //               className={`px-6 py-2 rounded-md text-sm font-medium transition-all duration-200 cursor-pointer ${billingPeriod === 'monthly'
-//                   ? 'bg-indigo-600 text-white'
+//                   ? 'bg-amber-600 text-white'
 //                   : 'text-gray-700 hover:text-gray-900'
 //                 }`}
 //             >
@@ -143,7 +143,7 @@
 //             <button
 //               onClick={() => setBillingPeriod('yearly')}
 //               className={`px-6 py-2 rounded-md text-sm font-medium transition-all duration-200 cursor-pointer ${billingPeriod === 'yearly'
-//                   ? 'bg-indigo-600 text-white'
+//                   ? 'bg-amber-600 text-white'
 //                   : 'text-gray-700 hover:text-gray-900'
 //                 }`}
 //             >
@@ -159,18 +159,18 @@
 //           {plans.map((plan) => (
 //             <div
 //               key={plan.name}
-//               className={`relative bg-white rounded-2xl shadow-lg overflow-hidden transform transition-all duration-200 hover:scale-105 ${plan.popular ? 'ring-2 ring-indigo-600' : ''
+//               className={`relative bg-white rounded-2xl shadow-lg overflow-hidden transform transition-all duration-200 hover:scale-105 ${plan.popular ? 'ring-2 ring-amber-600' : ''
 //                 }`}
 //             >
 //               {plan.popular && (
-//                 <div className="absolute top-0 right-0 bg-indigo-600 text-white px-3 py-1 text-sm font-medium rounded-bl-lg">
+//                 <div className="absolute top-0 right-0 bg-amber-600 text-white px-3 py-1 text-sm font-medium rounded-bl-lg">
 //                   Most Popular
 //                 </div>
 //               )}
 
 //               <div className="p-8">
 //                 <div className="flex items-center justify-between mb-4">
-//                   <plan.icon className="w-8 h-8 text-indigo-600" />
+//                   <plan.icon className="w-8 h-8 text-amber-600" />
 //                   {billingPeriod === 'yearly' && plan.yearlyPrice && (
 //                     <span className="bg-green-100 text-green-800 text-xs font-medium px-2 py-1 rounded">
 //                       Save {savingsPercentage(plan)}%
@@ -230,8 +230,8 @@
 //           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
 //             {teamFeatures.map((feature) => (
 //               <div key={feature.title} className="text-center">
-//                 <div className="inline-flex items-center justify-center w-12 h-12 bg-indigo-100 rounded-lg mb-4">
-//                   <feature.icon className="w-6 h-6 text-indigo-600" />
+//                 <div className="inline-flex items-center justify-center w-12 h-12 bg-amber-100 rounded-lg mb-4">
+//                   <feature.icon className="w-6 h-6 text-amber-600" />
 //                 </div>
 //                 <h4 className="text-lg font-semibold text-gray-900 mb-2">
 //                   {feature.title}
@@ -248,7 +248,7 @@
 //           </p>
 //           <p className="text-sm text-gray-500">
 //             Need a custom solution?{' '}
-//             <a href="/contact" className="text-indigo-600 hover:text-indigo-700 font-medium">
+//             <a href="/contact" className="text-amber-600 hover:text-amber-700 font-medium">
 //               Contact our sales team
 //             </a>
 //           </p>

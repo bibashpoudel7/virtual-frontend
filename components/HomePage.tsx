@@ -135,7 +135,7 @@ const HomePage: React.FC = () => {
     <div className="min-h-screen bg-white">
       <Header />
 
-      <section className="relative bg-indigo-600 text-white">
+      <section className="relative bg-gradient-to-br from-amber-600 via-amber-700 to-amber-800 text-white">
         <div className="absolute inset-0 bg-black opacity-20"></div>
         <div className="relative container mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
@@ -144,19 +144,19 @@ const HomePage: React.FC = () => {
                 Explore the World Through
                 <span className="text-yellow-300"> Virtual Tours</span>
               </h1>
-              <p className="text-xl mb-8 text-gray-100">
-                Experience immersive 360° tours from anywhere. Perfect for real estate,
-                tourism, education, and events. Start your journey today!
+              <p className="text-xl mb-8 text-amber-50">
+                Experience immersive 360° tours for dining, restaurants, venues, resorts, and events.
+                Start your journey today!
               </p>
               <div className="flex flex-col sm:flex-row gap-4 mb-8">
                 <button
                   onClick={() => window.location.href = '/showcase'}
-                  className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer"
+                  className="bg-white text-amber-700 px-8 py-4 rounded-lg font-semibold hover:bg-amber-50 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-lg hover:shadow-xl"
                 >
-                  <Play className="w-5 h-5" />
+                  <Play className="w-5 h-5 fill-amber-700 text-amber-700" />
                   Browse Virtual Tours
                 </button>
-                {/* <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-200 flex items-center justify-center gap-2">
+                {/* <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-amber-600 transition-all duration-200 flex items-center justify-center gap-2">
                   Start Free Trial
                   <ArrowRight className="w-5 h-5" />
                 </button> */}
@@ -178,7 +178,7 @@ const HomePage: React.FC = () => {
                       <Star key={i} className="w-4 h-6 fill-current" />
                     ))}
                   </div>
-                  <p className="text-sm text-gray-100">Trusted by 50,000+ users</p>
+                  <p className="text-sm text-amber-100">Trusted by 50,000+ users</p>
                 </div>
               </div>
             </div>
@@ -189,12 +189,12 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      <section className="py-16 bg-gray-50">
+      <section className="py-16 bg-amber-50/50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
             {stats.map((stat) => (
               <div key={stat.label} className="text-center">
-                <div className="text-4xl font-bold text-indigo-600 mb-2">{stat.number}</div>
+                <div className="text-4xl font-bold text-amber-600 mb-2">{stat.number}</div>
                 <div className="text-gray-600">{stat.label}</div>
               </div>
             ))}
@@ -202,7 +202,7 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      <section className="py-20 bg-indigo-50">
+      <section className="py-20 bg-amber-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
             <h2 className="text-4xl font-bold text-gray-900 mb-4">
@@ -215,7 +215,7 @@ const HomePage: React.FC = () => {
           <div className="text-center mb-8">
             <button
               onClick={() => window.location.href = '/showcase'}
-              className="bg-indigo-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors duration-200 inline-flex items-center gap-2 cursor-pointer"
+              className="bg-amber-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-amber-700 transition-colors duration-200 inline-flex items-center gap-2 cursor-pointer shadow-md"
             >
               <Globe className="w-5 h-5" />
               View All Tours
@@ -224,18 +224,18 @@ const HomePage: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300">
-              <div className="h-48 bg-indigo-500 flex items-center justify-center">
+              <div className="h-48 bg-gradient-to-r from-amber-500 to-amber-600 flex items-center justify-center">
                 <div className="text-white text-center">
                   <Camera className="w-12 h-12 mx-auto mb-2" />
                   <p className="text-sm">360° Experience</p>
                 </div>
               </div>
               <div className="p-6">
-                <h3 className="text-xl font-bold text-gray-900 mb-2">Luxury Properties</h3>
-                <p className="text-gray-600 mb-4">Explore stunning real estate with immersive virtual tours</p>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Dining & Restaurants</h3>
+                <p className="text-gray-600 mb-4">Explore fine dining venues with immersive 360° culinary tours</p>
                 <button
                   onClick={() => window.location.href = '/showcase'}
-                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1 cursor-pointer"
+                  className="text-amber-600 hover:text-amber-700 font-semibold flex items-center gap-1 cursor-pointer"
                 >
                   Explore <ArrowRight className="w-4 h-4" />
                 </button>
@@ -249,11 +249,11 @@ const HomePage: React.FC = () => {
                 </div>
               </div>
               <div className="p-6">
-                <h3 className="text-xl font-bold text-gray-900 mb-2">Travel & Tourism</h3>
-                <p className="text-gray-600 mb-4">Visit amazing destinations from the comfort of your home</p>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Travel & Hospitality</h3>
+                <p className="text-gray-600 mb-4">Visit resorts and destinations from the comfort of your home</p>
                 <button
                   onClick={() => window.location.href = '/showcase'}
-                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1 cursor-pointer"
+                  className="text-amber-600 hover:text-amber-700 font-semibold flex items-center gap-1 cursor-pointer"
                 >
                   Discover <ArrowRight className="w-4 h-4" />
                 </button>
@@ -267,11 +267,11 @@ const HomePage: React.FC = () => {
                 </div>
               </div>
               <div className="p-6">
-                <h3 className="text-xl font-bold text-gray-900 mb-2">Event Spaces</h3>
-                <p className="text-gray-600 mb-4">Preview venues for your special events and celebrations</p>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Event & Banquet Spaces</h3>
+                <p className="text-gray-600 mb-4">Preview venues for weddings, catering, and special celebrations</p>
                 <button
                   onClick={() => window.location.href = '/showcase'}
-                  className="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1 cursor-pointer"
+                  className="text-amber-600 hover:text-amber-700 font-semibold flex items-center gap-1 cursor-pointer"
                 >
                   Preview <ArrowRight className="w-4 h-4" />
                 </button>
@@ -297,8 +297,8 @@ const HomePage: React.FC = () => {
                 key={feature.title}
                 className="bg-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-shadow duration-200 border border-gray-100"
               >
-                <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center mb-4">
-                  <feature.icon className="w-6 h-6 text-indigo-600" />
+                <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center mb-4">
+                  <feature.icon className="w-6 h-6 text-amber-600" />
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">{feature.title}</h3>
                 <p className="text-gray-600">{feature.description}</p>
@@ -335,66 +335,27 @@ const HomePage: React.FC = () => {
 
       {/* <Pricing /> */}
 
-      {/* <section className="py-20 bg-white">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-12">
-            <h2 className="text-4xl font-bold text-gray-900 mb-4">
-              What Our Customers Say
-            </h2>
-            <p className="text-xl text-gray-600">
-              Join thousands of satisfied users worldwide
-            </p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {testimonials.map((testimonial) => (
-              <div
-                key={testimonial.name}
-                className="bg-gray-50 p-6 rounded-xl shadow-md hover:shadow-lg transition-shadow duration-200"
-              >
-                <div className="flex text-yellow-400 mb-4">
-                  {[...Array(testimonial.rating)].map((_, i) => (
-                    <Star key={i} className="w-5 h-5 fill-current" />
-                  ))}
-                </div>
-                <p className="text-gray-700 mb-6 italic">"{testimonial.content}"</p>
-                <div className="flex items-center">
-                  <img
-                    src={testimonial.image}
-                    alt={testimonial.name}
-                    className="w-12 h-12 rounded-full mr-4"
-                  />
-                  <div>
-                    <div className="font-semibold text-gray-900">{testimonial.name}</div>
-                    <div className="text-sm text-gray-600">{testimonial.role}</div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section> */}
-
-      <section className="py-20 bg-indigo-600 text-white">
+      <section className="py-20 bg-gradient-to-r from-amber-600 via-amber-700 to-amber-800 text-white">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="text-4xl font-bold mb-4">
             Ready to Get Started?
           </h2>
-          <p className="text-xl mb-8 text-indigo-100">
+          <p className="text-xl mb-8 text-amber-100">
             Join thousands of users creating amazing virtual experiences
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button
               onClick={() => window.location.href = '/showcase'}
-              className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer"
+              className="bg-white text-amber-700 px-8 py-4 rounded-lg font-semibold hover:bg-amber-50 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-lg"
             >
               Browse Virtual Tours
               <ArrowRight className="w-5 h-5" />
             </button>
-            {/* <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-indigo-600 transition-all duration-200">
+            {/* <button className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-amber-600 transition-all duration-200">
               Start Your Free Trial
             </button> */}
           </div>
-          {/* <p className="mt-6 text-indigo-200">
+          {/* <p className="mt-6 text-amber-200">
             No credit card required • 14-day free trial • Cancel anytime
           </p> */}
         </div>

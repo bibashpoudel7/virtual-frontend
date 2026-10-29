@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { usePathname } from 'next/navigation';
 import { Menu, X, Home, MapPin, Calendar, Phone, User, LogOut } from 'lucide-react';
@@ -53,8 +54,15 @@ const Header: React.FC = () => {
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <Link href="/" className="text-2xl font-bold text-indigo-600 hover:text-indigo-700 transition-colors">
-                VirtualTours
+              <Link href="/" className="flex items-center gap-2">
+                <Image
+                  src="/TheNimto.png"
+                  alt="TheNimto"
+                  width={140}
+                  height={42}
+                  priority
+                  className="h-9 w-auto object-contain"
+                />
               </Link>
             </div>
           </div>
@@ -69,8 +77,8 @@ const Header: React.FC = () => {
                     href={item.href}
                     className={`px-3 py-2 rounded-md text-base font-normal transition-colors duration-200 flex items-center gap-2 ${
                       active
-                        ? 'text-indigo-600'
-                        : 'text-gray-700 hover:text-indigo-600'
+                        ? 'text-amber-600 font-semibold'
+                        : 'text-gray-700 hover:text-amber-600'
                     }`}
                   >
                     <item.icon className="w-5 h-5" />
@@ -93,7 +101,7 @@ const Header: React.FC = () => {
                 </div>
               ) : (
                 <Link href="/login">
-                  <button className="bg-indigo-600 text-white px-3 py-2 rounded-md text-base font-normal hover:bg-indigo-700 transition-colors duration-200 flex items-center gap-2 cursor-pointer">
+                  <button className="bg-amber-600 text-white px-4 py-2 rounded-md text-base font-medium hover:bg-amber-700 transition-colors duration-200 flex items-center gap-2 cursor-pointer shadow-sm">
                     <User className="w-5 h-5" />
                     Sign In
                   </button>
@@ -105,7 +113,7 @@ const Header: React.FC = () => {
           <div className="md:hidden">
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="inline-flex items-center justify-center p-2 rounded-md text-gray-700 hover:text-indigo-600 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500 cursor-pointer"
+              className="inline-flex items-center justify-center p-2 rounded-md text-gray-700 hover:text-amber-600 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-amber-500 cursor-pointer"
             >
               {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
@@ -123,8 +131,8 @@ const Header: React.FC = () => {
                     href={item.href}
                     className={`block px-3 py-2 rounded-md text-lg font-normal flex items-center gap-2 ${
                       active
-                        ? 'text-indigo-600'
-                        : 'text-gray-700 hover:text-indigo-600'
+                        ? 'text-amber-600 font-semibold'
+                        : 'text-gray-700 hover:text-amber-600'
                     }`}
                   >
                     <item.icon className="w-5 h-5" />
@@ -147,7 +155,7 @@ const Header: React.FC = () => {
                 </div>
               ) : (
                 <Link href="/login">
-                  <button className="w-full bg-indigo-600 text-white px-4 py-2 rounded-md text-base font-normal hover:bg-indigo-700 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer">
+                  <button className="w-full bg-amber-600 text-white px-4 py-2 rounded-md text-base font-medium hover:bg-amber-700 transition-colors duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-sm">
                     <User className="w-5 h-5" />
                     Sign In
                   </button>

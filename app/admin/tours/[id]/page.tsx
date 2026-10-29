@@ -9,7 +9,7 @@ import EditTour from '@/components/tours/EditTour';
 import { Tour, Scene, Hotspot, Overlay } from '@/types/tour';
 import { tourService } from '@/services/tourService';
 import TourSteps from '@/components/tours/TourSteps';
-import { ArrowLeft, Code, Eye, Globe, Loader2 } from 'lucide-react';
+import { ArrowLeft, Code, Eye, Globe, Loader2, MapPin } from 'lucide-react';
 import EmbedCodeModal from '@/components/tours/EmbedCodeModal';
 import IntroModelSettings from '@/components/tours/IntroModelSettings';
 import { useAuth } from '@/contexts/AuthContext';
@@ -210,7 +210,7 @@ export default function TourDetailsPage() {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading tour...</p>
         </div>
       </div>
@@ -224,7 +224,7 @@ export default function TourDetailsPage() {
           <p className="text-red-600 mb-4">{error}</p>
           <button
             onClick={() => router.push('/admin/tours')}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            className="px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700"
           >
             Back to Tours
           </button>
@@ -287,7 +287,7 @@ export default function TourDetailsPage() {
                   className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     tour.is_published
                       ? 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                      : 'bg-amber-600 text-white hover:bg-amber-700'
                   }`}
                 >
                   {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
@@ -296,6 +296,21 @@ export default function TourDetailsPage() {
               )}
             </div>
           </div>
+          {tour && (tour.location || tour.description) && (
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+              {tour.location && (
+                <span className="inline-flex items-center gap-1 text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded border border-amber-200/70">
+                  <MapPin className="w-3.5 h-3.5 text-amber-600" />
+                  {tour.location}
+                </span>
+              )}
+              {tour.description && (
+                <span className="truncate max-w-xl text-gray-500" title={tour.description}>
+                  {tour.description}
+                </span>
+              )}
+            </div>
+          )}
           <TourSteps current={scenes.length === 0 ? 1 : 2} className="mt-4 max-w-2xl" />
         </div>
       </header>
@@ -316,26 +331,26 @@ export default function TourDetailsPage() {
             <button
               onClick={() => router.push(`/admin/tours/${tourId}?tab=scenes`)}
               className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-sm cursor-pointer whitespace-nowrap ${activeTab === 'scenes'
-                ? 'border-blue-500 text-blue-600'
+                ? 'border-amber-500 text-amber-600'
                 : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
                 }`}
             >
               360° Photos ({totalScenes})
             </button>
-            {/* Only show Edit Tour tab when explicitly navigated to edit */}
-            {activeTab === 'edit' && (
-              <button
-                onClick={() => router.push(`/admin/tours/${tourId}?tab=edit`)}
-                className="py-4 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm cursor-pointer"
-              >
-                Edit Tour
-              </button>
-            )}
+            <button
+              onClick={() => router.push(`/admin/tours/${tourId}?tab=edit`)}
+              className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-sm cursor-pointer whitespace-nowrap ${activeTab === 'edit'
+                ? 'border-amber-500 text-amber-600'
+                : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
+                }`}
+            >
+              Tour Details &amp; SEO
+            </button>
             <button
               onClick={() => router.push(`/admin/tours/${tourId}?tab=viewer`)}
               title={scenes.length === 0 ? 'Add a 360° photo first' : undefined}
               className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-sm cursor-pointer whitespace-nowrap ${activeTab === 'viewer'
-                ? 'border-blue-500 text-blue-600'
+                ? 'border-amber-500 text-amber-600'
                 : 'border-transparent text-gray-700 hover:text-gray-900 hover:border-gray-300'
                 } ${scenes.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
               disabled={scenes.length === 0}
@@ -390,6 +405,7 @@ export default function TourDetailsPage() {
             <div className="max-w-4xl mx-auto w-full p-6">
               <EditTour
                 tour={tour}
+                scenes={scenes}
                 onSuccess={(updatedTour) => {
                   setTour(updatedTour);
                   // Redirect back to scenes tab after successful update

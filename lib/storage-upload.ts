@@ -125,6 +125,38 @@ class StorageUploader {
   getPublicUrl(key: string): string {
     return `${R2_PUBLIC_URL}/${key}`;
   }
+
+  /**
+   * Delete a single file from R2
+   */
+  async deleteFile(key: string): Promise<boolean> {
+    try {
+      const response = await fetch(`/api/upload-to-r2?key=${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+      });
+      const data = await response.json();
+      return !!data.success;
+    } catch (error) {
+      console.error(`Failed to delete ${key} from R2:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete all files and tiles under a prefix (e.g. scenes/{sceneId}/)
+   */
+  async deletePrefix(prefix: string): Promise<boolean> {
+    try {
+      const response = await fetch(`/api/upload-to-r2?prefix=${encodeURIComponent(prefix)}`, {
+        method: 'DELETE',
+      });
+      const data = await response.json();
+      return !!data.success;
+    } catch (error) {
+      console.error(`Failed to delete prefix ${prefix} from R2:`, error);
+      return false;
+    }
+  }
 }
 
 export const storageUploader = new StorageUploader();

@@ -6,8 +6,30 @@ const EMBED_KEY_PATTERN = /^vt_[A-Za-z0-9_-]{20,64}$/;
 // Same shape the backend accepts: optional "*." wildcard, host, optional port
 const DOMAIN_PATTERN = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$/;
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const slugCache = new Map<string, string>();
+
+async function resolveSlugForUuid(tourId: string): Promise<string | null> {
+  const cached = slugCache.get(tourId);
+  if (cached) return cached;
+  try {
+    const response = await fetch(apiUrl(`tours/${tourId}/public`), { next: { revalidate: 300 } });
+    if (response.ok) {
+      const tour = await response.json();
+      if (tour?.slug && /^[A-Za-z0-9-]+$/.test(tour.slug)) {
+        slugCache.set(tourId, tour.slug);
+        return tour.slug;
+      }
+    }
+  } catch {
+    // Ignore lookup error
+  }
+  return null;
+}
+
 interface EmbedLookup {
   tour_id: string;
+  slug?: string;
   allowed_domains: string[];
 }
 
@@ -52,13 +74,30 @@ export async function middleware(request: NextRequest) {
     }
     if (!lookup?.tour_id || !/^[A-Za-z0-9-]+$/.test(lookup.tour_id)) return embedUnavailable();
 
+    let targetTour = lookup.slug && /^[A-Za-z0-9-]+$/.test(lookup.slug) ? lookup.slug : lookup.tour_id;
+    if (UUID_PATTERN.test(targetTour)) {
+      const resolvedSlug = await resolveSlugForUuid(targetTour);
+      if (resolvedSlug) targetTour = resolvedSlug;
+    }
+
     const url = request.nextUrl.clone();
-    url.pathname = `/tours/${lookup.tour_id}`;
+    url.pathname = `/tours/${targetTour}`;
     url.searchParams.set('embed', '1');
     const response = NextResponse.rewrite(url);
     response.headers.set('Content-Security-Policy', `frame-ancestors ${frameAncestors(lookup.allowed_domains || [])}`);
     response.headers.set('Cache-Control', 'no-store');
     return response;
+  }
+
+  // Redirect raw UUID /tours/<uuid> URLs directly to /tours/<slug> so all API calls use the slug
+  const tourSegment = pathname.split('/')[2] || '';
+  if (pathname.startsWith('/tours/') && UUID_PATTERN.test(tourSegment) && request.nextUrl.searchParams.get('embed') !== '1') {
+    const resolvedSlug = await resolveSlugForUuid(tourSegment);
+    if (resolvedSlug) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = `/tours/${resolvedSlug}`;
+      return NextResponse.redirect(redirectUrl, 308);
+    }
   }
 
   // /tours/<id>: viewable directly, but only our own site may put it in a frame

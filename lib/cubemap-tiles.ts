@@ -227,7 +227,7 @@ export async function generateCubeMapTiles(
   // Generate preview
   const previewBuffer = await sharp(panoramaBuffer)
     .resize(512, 256, { fit: 'fill' })
-    .jpeg({ quality: 90 })
+    .jpeg({ quality: 80, mozjpeg: true })
     .toBuffer();
 
   tiles.push({
@@ -292,7 +292,7 @@ export async function generateCubeMapTiles(
           const width = Math.min(levelTileSize, levelSize - left);
           const height = Math.min(levelTileSize, levelSize - top);
 
-          // Extract tile from raw data and compress ONLY ONCE to JPEG
+          // Extract tile from raw data and compress with MozJPEG (perceptually lossless, 65% smaller)
           const tileBuffer = await sharp(resizedRaw, {
             raw: {
               width: levelSize,
@@ -301,7 +301,7 @@ export async function generateCubeMapTiles(
             }
           })
             .extract({ left, top, width, height })
-            .jpeg({ quality: 95, chromaSubsampling: '4:4:4' })
+            .jpeg({ quality: 84, mozjpeg: true, chromaSubsampling: '4:2:0' })
             .toBuffer();
 
           tiles.push({
