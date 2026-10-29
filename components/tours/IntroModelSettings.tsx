@@ -252,11 +252,13 @@ export default function IntroModelSettings({ tour, scenes, onTourUpdate }: Intro
             modelUrl={modelUrl}
             autoRotate={false}
             rooms={viewerRooms}
-            activeSceneId={placingSceneId}
+            activeSceneId={placingSceneId || highlightedSceneId}
             hideOuterLayer={hideOuterLayer}
+            onRoomClick={(sceneId) => setHighlightedSceneId(sceneId)}
             onModelClick={placingSceneId ? (position) => {
               updateRoom(placingSceneId, { position });
               setPlacingSceneId(null);
+              setHighlightedSceneId(placingSceneId);
             } : undefined}
           />
           {/* Outer Layer / Cutaway toggle */}
@@ -329,9 +331,19 @@ export default function IntroModelSettings({ tour, scenes, onTourUpdate }: Intro
               {scenes.map((scene, sceneIdx) => {
                 const room = rooms.find(r => r.sceneId === scene.id);
                 const placing = placingSceneId === scene.id;
+                const isHighlighted = highlightedSceneId === scene.id;
                 const roomNum = room?.number ?? (sceneIdx + 1);
                 return (
-                  <li key={scene.id} className={`flex flex-col gap-2 p-3 ${placing ? 'bg-blue-50/70' : ''}`}>
+                  <li
+                    key={scene.id}
+                    className={`flex flex-col gap-2 p-3 rounded-lg transition-all ${
+                      placing
+                        ? 'bg-blue-100/70 ring-2 ring-blue-500'
+                        : isHighlighted
+                        ? 'bg-blue-50 ring-2 ring-blue-400'
+                        : ''
+                    }`}
+                  >
                     <div className="flex flex-wrap items-center gap-2">
                       <span
                         className={`w-2.5 h-2.5 rounded-full shrink-0 ${room ? 'bg-green-500' : 'bg-gray-300'}`}

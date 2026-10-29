@@ -2502,7 +2502,7 @@ export default function CubeMapViewer({
             <div className="text-gray-400 text-xs text-left bg-gray-900 p-4 rounded overflow-auto max-h-40">
               Possible causes:
               <ul className="list-disc ml-4 mt-1">
-                <li>Image server is unreachable (test.thenimto.com)</li>
+                <li>Image server is unreachable (tour.thenimto.com)</li>
                 <li>CORS policy is blocking access locally</li>
                 <li>Scene ID does not exist on the remote server</li>
               </ul>
